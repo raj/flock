@@ -55,6 +55,9 @@ module Flock
     # --- Composants --------------------------------------------------------
 
     def storage(type : T.class) : SparseSet(T) forall T
+      # Validation compile-time : un composant doit `include Flock::Component`
+      # (fournit `component_id`). Message clair plutôt qu'un obscur "undefined method".
+      {% raise "#{T} n'est pas un composant : ajoute `include Flock::Component`" unless T < Flock::Component %}
       id = T.component_id
       while @storages.size <= id
         @storages << nil

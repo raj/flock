@@ -151,7 +151,8 @@ class World
 
   def spawn : Entity                    # recycle via free_ids, bump generation
   def despawn(entity : Entity)          # remove_untyped sur tous les storages ; id -> free_ids
-  def storage(t : T.class) : SparseSet(T) forall T   # créé à la volée, indexé par T.component_id
+  def storage(t : T.class) : SparseSet(T) forall T   # indexé par T.component_id ; valide au
+                                                     # compile que T inclut Flock::Component
   def add(entity, c : T) forall T
   def get(entity, t : T.class) : T? forall T
   def remove(entity, t : T.class) forall T
