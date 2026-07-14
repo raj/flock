@@ -55,8 +55,9 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       for textures (`texture(path)`), fonts (`font(path, size)`) and sounds (`sound(path)`) +
       `store_texture`; centralized release (`release`, before the device). Verified
       (`examples/assets_test.cr`); Space Invaders title routed via the cache.
-- [ ] **Multi-viewport / per-region clear**: the clear covers the whole attachment → a viewport
-      cannot clear in its own color (true split-screen: scissor or separate passes).
+- [x] **Multi-viewport / per-region clear**: each camera paints its own viewport with its own
+      clear color via a scissored full-region quad (small no-blend clear pipeline). True
+      split-screen. Verified (`examples/split_screen_test.cr` readback; `split_screen.cr` demo).
 - [ ] **Configurable sampler** (linear vs nearest, mipmaps) — currently nearest only.
 - [x] **3D rendering** of meshes consuming `Camera3D`: `Mesh` (vertex/index buffers,
       `Mesh.cube`) + `MeshRenderer`/`Transform3D` components + `Renderer3D` (per-mesh draw via a

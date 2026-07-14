@@ -44,6 +44,7 @@ crystal run examples/custom_shader.cr      # plasma effect (custom WGSL shader)
 crystal run examples/mouse_demo.cr         # a square follows the mouse, red on click
 crystal run examples/events_demo.cr        # wheel + text input (console)
 crystal run examples/cube3d.cr             # a spinning lit 3D cube (Camera3D + depth)
+crystal run examples/split_screen.cr       # two viewports, each its own clear color
 
 # Headless smoke test (quits after N frames):
 WGPU_FRAMES=120 crystal run examples/space_invaders.cr

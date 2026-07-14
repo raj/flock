@@ -335,12 +335,13 @@ end
 The rendering system:
 
 1. Gathers all active cameras (2D and 3D), sorted by `order`.
-2. For each: computes the aspect ratio from its `viewport` (or the framebuffer); calls
-   `render_pass_encoder_set_viewport` + `set_scissor_rect` (present in wgpu-cr); optional
-   clear; pushes the view-projection matrix into the uniform; renders the visible scene.
+2. For each: sets `viewport` + `scissor_rect`; **per-region clear** — each camera paints its
+   own viewport with its own `clear_color` via a scissored full-region quad (a small no-blend
+   clear pipeline), so true split-screen works (the whole attachment is defined once by the
+   first camera's `LoadOp::Clear`); pushes the view-projection uniform; renders the scene.
 
-Use cases covered: split-screen (2 cameras, 2 viewports), minimap (small overlay camera,
-`clear_color = nil`), HUD. **Phase 1: only the 2D pass (Camera2D) is wired**;
+Use cases covered: split-screen (2 cameras, 2 viewports, distinct backgrounds), minimap
+(small overlay camera, `clear_color = nil`), HUD. **Phase 1: only the 2D pass (Camera2D) is wired**;
 Camera3D + perspective math are provided, the 3D mesh pass comes later.
 
 ### 7. Textured 2D rendering (`render/`)

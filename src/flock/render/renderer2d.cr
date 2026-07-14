@@ -69,6 +69,18 @@ module Flock
     }
     SHADER
 
+    # Fills the scissored region with a uniform color (per-viewport clear). No blend.
+    CLEAR_WGSL = <<-SHADER
+    @group(0) @binding(0) var<uniform> u_color : vec4<f32>;
+    const TRI = array<vec2<f32>, 3>(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+    @vertex
+    fn vs_main(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4<f32> {
+      return vec4<f32>(TRI[vi], 0.0, 1.0);
+    }
+    @fragment
+    fn fs_main() -> @location(0) vec4<f32> { return u_color; }
+    SHADER
+
     @instance_capacity : Int32 = 256
     @scratch : Array(Float32) = [] of Float32
     @tex_groups : Hash(UInt64, LibWGPU::BindGroup) = {} of UInt64 => LibWGPU::BindGroup
@@ -84,6 +96,12 @@ module Flock
     @group0 : LibWGPU::BindGroup
     # Custom per-sprite materials built via `build_material`, released on shutdown.
     @materials : Array(SpriteMaterial) = [] of SpriteMaterial
+    # Per-viewport region-clear pipeline (fills the scissor rect with a color).
+    @clear_shader : LibWGPU::ShaderModule
+    @clear_pipeline : LibWGPU::RenderPipeline
+    @clear_layout : LibWGPU::BindGroupLayout
+    @clear_uniform : LibWGPU::Buffer
+    @clear_group : LibWGPU::BindGroup
 
     # Statistics for the last frame (batching).
     getter last_sprites : Int32 = 0
@@ -106,6 +124,13 @@ module Flock
       @instance_buf = make_buffer((@instance_capacity * BYTES_PER_INSTANCE).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       @group0 = build_group0
+
+      # Region-clear pipeline (auto layout, single color uniform).
+      @clear_shader = compile_shader(CLEAR_WGSL)
+      @clear_pipeline = build_clear_pipeline(@clear_shader)
+      @clear_layout = LibWGPU.render_pipeline_get_bind_group_layout(@clear_pipeline, 0_u32)
+      @clear_uniform = make_buffer(16_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
+      @clear_group = build_clear_group
     end
 
     # Builds a sprite material from custom WGSL following the sprite convention
@@ -130,6 +155,61 @@ module Flock
       LibWGPU.device_create_shader_module(@gpu.device, pointerof(sdesc))
     end
 
+    private def build_clear_pipeline(shader : LibWGPU::ShaderModule) : LibWGPU::RenderPipeline
+      vs = WGPU.string_view("vs_main")
+      fs = WGPU.string_view("fs_main")
+      vertex = LibWGPU::VertexState.new
+      vertex.module_ = shader
+      vertex.entry_point = vs
+      target = LibWGPU::ColorTargetState.new
+      target.format = @gpu.format
+      target.write_mask = LibWGPU::ColorWriteMask::All # opaque overwrite (no blend)
+      fragment = LibWGPU::FragmentState.new
+      fragment.module_ = shader
+      fragment.entry_point = fs
+      fragment.target_count = 1_u64
+      fragment.targets = pointerof(target)
+      primitive = LibWGPU::PrimitiveState.new
+      primitive.topology = LibWGPU::PrimitiveTopology::TriangleList
+      primitive.front_face = LibWGPU::FrontFace::CCW
+      primitive.cull_mode = LibWGPU::CullMode::None
+      multisample = LibWGPU::MultisampleState.new
+      multisample.count = 1_u32
+      multisample.mask = 0xFFFFFFFF_u32
+      desc = LibWGPU::RenderPipelineDescriptor.new
+      desc.label = WGPU.empty_string_view
+      desc.layout = WGPU.null(LibWGPU::PipelineLayout)
+      desc.vertex = vertex
+      desc.primitive = primitive
+      desc.multisample = multisample
+      desc.fragment = pointerof(fragment)
+      LibWGPU.device_create_render_pipeline(@gpu.device, pointerof(desc))
+    end
+
+    private def build_clear_group : LibWGPU::BindGroup
+      e = LibWGPU::BindGroupEntry.new
+      e.binding = 0_u32
+      e.buffer = @clear_uniform
+      e.offset = 0_u64
+      e.size = 16_u64
+      d = LibWGPU::BindGroupDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.layout = @clear_layout
+      d.entry_count = 1_u64
+      d.entries = pointerof(e)
+      LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
+    end
+
+    # Fills the current scissor region with `color` (opaque). Scissor/viewport must
+    # be set by the caller beforehand.
+    private def fill_region(pass : LibWGPU::RenderPassEncoder, color : Color) : Nil
+      data = [color.r, color.g, color.b, color.a]
+      LibWGPU.queue_write_buffer(@gpu.queue, @clear_uniform, 0_u64, data.to_unsafe.as(Void*), 16_u64)
+      LibWGPU.render_pass_encoder_set_pipeline(pass, @clear_pipeline)
+      LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @clear_group, 0_u64, Pointer(UInt32).null)
+      LibWGPU.render_pass_encoder_draw(pass, 3_u32, 1_u32, 0_u32, 0_u32)
+    end
+
     # Frees all GPU handles (pipeline, buffers, bind groups, sampler, textures).
     def release : Nil
       @tex_groups.each_value { |bg| LibWGPU.bind_group_release(bg) }
@@ -140,6 +220,11 @@ module Flock
       LibWGPU.sampler_release(@sampler)
       @materials.each &.release
       @materials.clear
+      LibWGPU.bind_group_release(@clear_group)
+      LibWGPU.buffer_release(@clear_uniform)
+      LibWGPU.bind_group_layout_release(@clear_layout)
+      LibWGPU.render_pipeline_release(@clear_pipeline)
+      LibWGPU.shader_module_release(@clear_shader)
       LibWGPU.render_pipeline_release(@pipeline)
       LibWGPU.pipeline_layout_release(@pipeline_layout)
       LibWGPU.bind_group_layout_release(@group0_layout)
@@ -416,11 +501,12 @@ module Flock
         color_att.view = target
         color_att.depth_slice = 0xFFFFFFFF_u32
         color_att.store_op = LibWGPU::StoreOp::Store
-        # The 1st camera clears (background); the following ones overlay on top.
+        # 1st camera defines the whole attachment (LoadOp::Clear): its own color if
+        # fullscreen, else black. Later cameras load and only paint their region.
         if ci == 0
-          cc = cam.clear_color || Color::BLACK
+          base = cam.viewport ? Color::BLACK : (cam.clear_color || Color::BLACK)
           color_att.load_op = LibWGPU::LoadOp::Clear
-          color_att.clear_value = LibWGPU::Color.new(r: cc.r.to_f64, g: cc.g.to_f64, b: cc.b.to_f64, a: cc.a.to_f64)
+          color_att.clear_value = LibWGPU::Color.new(r: base.r.to_f64, g: base.g.to_f64, b: base.b.to_f64, a: base.a.to_f64)
         else
           color_att.load_op = LibWGPU::LoadOp::Load
         end
@@ -438,6 +524,12 @@ module Flock
         if vp_rect = cam.viewport
           LibWGPU.render_pass_encoder_set_viewport(pass, vp_rect.x, vp_rect.y, vp_rect.width, vp_rect.height, 0.0f32, 1.0f32)
           LibWGPU.render_pass_encoder_set_scissor_rect(pass, vp_rect.x.to_u32, vp_rect.y.to_u32, vp_rect.width.to_u32, vp_rect.height.to_u32)
+        end
+
+        # Per-region clear: paint this camera's viewport with its own color (the
+        # fullscreen 1st camera is already handled by LoadOp::Clear above).
+        if (cc = cam.clear_color) && (cam.viewport || ci != 0)
+          fill_region(pass, cc)
         end
 
         unless sprites.empty?
