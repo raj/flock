@@ -1,5 +1,5 @@
-# Shader personnalisé "façon wgpu" : un effet plasma plein écran piloté par un
-# uniform (temps + aspect), via Flock::Shader + Flock::Material.
+# Custom "wgpu-style" shader: a fullscreen plasma effect driven by a
+# uniform (time + aspect), via Flock::Shader + Flock::Material.
 #   crystal run examples/custom_shader.cr
 #   WGPU_FRAMES=5 crystal run examples/custom_shader.cr
 require "../src/flock/gpu"

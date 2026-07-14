@@ -1,4 +1,4 @@
-# Exemple : fenêtre + caméra 2D + quelques sprites colorés, via l'API App/plugins.
+# Example: window + 2D camera + a few colored sprites, via the App/plugins API.
 #   crystal run examples/window_app.cr
 #   WGPU_FRAMES=5 crystal run examples/window_app.cr   # headless smoke
 require "../src/flock/gpu"
@@ -8,7 +8,7 @@ app.add_plugin(Flock::WindowPlugin.new("Flock — window", 800, 600))
 app.add_plugin(Flock::RenderPlugin.new)
 
 app.add_startup do |_world, cmd|
-  # Caméra plein écran centrée sur l'origine (le monde est en pixels, origine = centre).
+  # Fullscreen camera centered on the origin (world is in pixels, origin = center).
   cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.08, 0.09, 0.13)))
 
   cmd.spawn(

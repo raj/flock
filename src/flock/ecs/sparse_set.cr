@@ -1,22 +1,22 @@
 module Flock
-  # Interface type-erased : permet à World de manipuler tous les storages sans
-  # connaître leur type concret (indispensable pour `despawn`, qui doit retirer une
-  # entité de tous les storages).
+  # Type-erased interface: lets World manipulate all storages without knowing
+  # their concrete type (essential for `despawn`, which must remove an entity
+  # from all storages).
   abstract class Storage
     abstract def remove_untyped(entity : Entity)
     abstract def size : Int32
   end
 
-  # Stockage dense d'un composant T, indexé de façon éparse par id d'entité.
+  # Dense storage of a component T, sparsely indexed by entity id.
   #
-  # - `dense`/`entities` : tableaux compacts (itération cache-friendly).
-  # - `sparse` : id d'entité -> index dense, sentinelle -1 = absent (pas d'union
-  #   nilable, plus léger en hot path).
+  # - `dense`/`entities`: compact arrays (cache-friendly iteration).
+  # - `sparse`: entity id -> dense index, sentinel -1 = absent (no nilable
+  #   union, lighter on the hot path).
   #
-  # La mutation en place se fait via `get_ptr`, qui renvoie un pointeur dans le
-  # tableau dense. Ce pointeur reste valide tant qu'aucune insertion/suppression ne
-  # réalloue le tableau : toute mutation structurelle en cours d'itération doit donc
-  # passer par `Commands` (différé).
+  # In-place mutation goes through `get_ptr`, which returns a pointer into the
+  # dense array. This pointer stays valid as long as no insertion/removal
+  # reallocates the array: any structural mutation during iteration must
+  # therefore go through `Commands` (deferred).
   class SparseSet(T) < Storage
     getter dense : Array(T) = [] of T
     getter entities : Array(Entity) = [] of Entity
@@ -26,7 +26,7 @@ module Flock
       @dense.size
     end
 
-    # Index dense de l'entité si présente et de génération concordante.
+    # Dense index of the entity if present and of matching generation.
     def index_of?(entity : Entity) : Int32?
       id = entity.id.to_i
       return nil if id >= @sparse.size
@@ -40,22 +40,22 @@ module Flock
       !index_of?(entity).nil?
     end
 
-    # Copie du composant (lecture seule pratique).
+    # Copy of the component (convenient read-only).
     def get?(entity : Entity) : T?
       if index = index_of?(entity)
         @dense[index]
       end
     end
 
-    # Pointeur vers le composant dans le tableau dense : `ptr.value.x = …` mute
-    # en place. Voir l'avertissement sur la validité du pointeur en tête de classe.
+    # Pointer to the component in the dense array: `ptr.value.x = …` mutates
+    # in place. See the pointer-validity warning at the top of the class.
     def get_ptr(entity : Entity) : Pointer(T)?
       if index = index_of?(entity)
         @dense.to_unsafe + index
       end
     end
 
-    # Insère ou met à jour le composant de l'entité.
+    # Inserts or updates the entity's component.
     def insert(entity : Entity, component : T) : Nil
       id = entity.id.to_i
       while @sparse.size <= id
@@ -73,7 +73,7 @@ module Flock
       end
     end
 
-    # Retrait O(1) par swap-and-pop.
+    # O(1) removal via swap-and-pop.
     def remove(entity : Entity) : Nil
       id = entity.id.to_i
       return if id >= @sparse.size

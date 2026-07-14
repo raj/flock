@@ -1,15 +1,15 @@
 module Flock
-  # Police TrueType (via SDL3_ttf). Rend une chaîne en une `Texture` RGBA que l'on
-  # dessine comme un `Sprite` (taille = dimensions de la texture).
+  # TrueType font (via SDL3_ttf). Renders a string into an RGBA `Texture` that is
+  # drawn as a `Sprite` (size = texture dimensions).
   #
   #   font = Flock::Font.load("/System/Library/Fonts/Supplemental/Arial.ttf", 48)
-  #   tex  = font.render_texture(gpu, "Score : 42")
+  #   tex  = font.render_texture(gpu, "Score: 42")
   #   cmd.spawn(Flock::Transform2D.at(0, 0),
   #             Flock::Sprite.new(Flock::Vec2.new(tex.width, tex.height), Flock::Color::WHITE, tex))
   #
-  # Le texte est rendu en blanc : la teinte du sprite le colore (texture × teinte).
-  # `render_texture` alloue une texture GPU par appel — mettre en cache pour du texte
-  # qui change souvent, et libérer via `Texture#release`.
+  # The text is rendered in white: the sprite's tint colors it (texture × tint).
+  # `render_texture` allocates a GPU texture per call — cache it for text that
+  # changes often, and free it via `Texture#release`.
   class Font
     @@initialized = false
 
@@ -29,7 +29,7 @@ module Flock
       @@initialized = true
     end
 
-    # Rend `text` (blanc par défaut) en une texture RGBA à teinter via le sprite.
+    # Renders `text` (white by default) into an RGBA texture to be tinted via the sprite.
     def render_texture(gpu : GpuContext, text : String, color : Color = Color::WHITE) : Texture
       fg = LibSDL::Color.new(
         r: to_u8(color.r), g: to_u8(color.g), b: to_u8(color.b), a: to_u8(color.a))

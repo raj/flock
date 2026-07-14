@@ -1,13 +1,13 @@
 module Flock
-  # Matériau plein écran "façon wgpu" : un pipeline qui dessine un triangle plein
-  # écran avec le Shader fourni, plus un uniform utilisateur (jusqu'à 16 floats /
-  # 64 octets). Idéal pour un effet procédural ou un post-process.
+  # Full-screen "wgpu-style" material: a pipeline that draws a full-screen triangle
+  # with the given Shader, plus a user uniform (up to 16 floats / 64 bytes). Ideal
+  # for a procedural effect or a post-process.
   #
-  # Le shader doit exposer `vs_main` (générant le triangle depuis @builtin(vertex_index))
-  # et `fs_main`, et — s'il lit l'uniform — `@group(0) @binding(0) var<uniform> u : ...`.
+  # The shader must expose `vs_main` (generating the triangle from @builtin(vertex_index))
+  # and `fs_main`, and — if it reads the uniform — `@group(0) @binding(0) var<uniform> u : ...`.
   #
-  # Les handles bruts (`pipeline`, `bind_group`) sont exposés pour piloter le pass
-  # soi-même si besoin.
+  # The raw handles (`pipeline`, `bind_group`) are exposed to drive the pass
+  # yourself if needed.
   class Material < Resource
     getter pipeline : LibWGPU::RenderPipeline
     getter bind_group : LibWGPU::BindGroup
@@ -48,7 +48,7 @@ module Flock
       LibWGPU.shader_module_release(@shader_module)
     end
 
-    # Écrit les paramètres utilisateur dans l'uniform (complétés à 16 floats).
+    # Writes the user parameters into the uniform (padded to 16 floats).
     def set_uniform(values : Array(Float32)) : Nil
       buf = values.dup
       while buf.size < 16
@@ -57,7 +57,7 @@ module Flock
       LibWGPU.queue_write_buffer(@gpu.queue, @uniform, 0_u64, buf.to_unsafe.as(Void*), 64_u64)
     end
 
-    # Rend un pass plein écran sur la surface (efface, dessine, présente).
+    # Renders a full-screen pass onto the surface (clears, draws, presents).
     def render(gpu : GpuContext = @gpu) : Nil
       st = LibWGPU::SurfaceTexture.new
       LibWGPU.surface_get_current_texture(gpu.surface, pointerof(st))

@@ -1,6 +1,6 @@
 module Flock
-  # Point d'entrée du moteur : détient le World, les systèmes rangés par Schedule,
-  # les plugins et le runner (la boucle principale).
+  # Engine entry point: holds the World, the systems grouped by Schedule, the
+  # plugins and the runner (the main loop).
   #
   #   Flock::App.new
   #     .add_plugin(MyPlugin.new)
@@ -8,12 +8,12 @@ module Flock
   #     .add_system(Flock::Schedule::Update) { |world, cmd| ... }
   #     .run
   #
-  # Un système est un `Proc(World, Commands, Nil)` : il lit/mute le World et met des
-  # mutations structurelles en file via `cmd` (appliquées en fin de schedule).
+  # A system is a `Proc(World, Commands, Nil)`: it reads/mutates the World and
+  # queues structural mutations via `cmd` (applied at the end of the schedule).
   class App
     alias System = Proc(World, Commands, Nil)
 
-    MAX_FIXED_STEPS = 8 # borne anti « spirale de la mort » si une frame est très lente
+    MAX_FIXED_STEPS = 8 # "spiral of death" guard if a frame is very slow
 
     getter world : World
     getter fixed_dt : Float64 = 1.0 / 60.0
@@ -29,13 +29,13 @@ module Flock
       time.fixed_delta = @fixed_dt
     end
 
-    # Pas de temps fixe (secondes) des systèmes FixedUpdate.
+    # Fixed timestep (seconds) of the FixedUpdate systems.
     def fixed_dt=(seconds : Float64) : Nil
       @fixed_dt = seconds
       time.fixed_delta = seconds
     end
 
-    # Sucre : règle le pas fixe par fréquence (ex. `fixed_hz(50)`).
+    # Sugar: sets the fixed step by frequency (e.g. `fixed_hz(50)`).
     def fixed_hz(hz : Number) : self
       self.fixed_dt = 1.0 / hz.to_f
       self
@@ -72,14 +72,14 @@ module Flock
       self
     end
 
-    # Installé par WindowPlugin pour piloter la boucle via les événements SDL.
+    # Installed by WindowPlugin to drive the loop via SDL events.
     def runner(&block : App ->) : Nil
       @runner = block
     end
 
-    # --- Exécution ---------------------------------------------------------
+    # --- Execution ---------------------------------------------------------
 
-    # Lance tous les systèmes d'un schedule puis applique les commandes en file.
+    # Runs all systems of a schedule then applies the queued commands.
     def run_schedule(schedule : Schedule) : Nil
       cmd = Commands.new(@world)
       @systems[schedule].each &.call(@world, cmd)
@@ -90,7 +90,7 @@ module Flock
       run_schedule(Schedule::Startup)
     end
 
-    # Une frame : First -> (FixedUpdate × N) -> Update -> Render -> Last.
+    # One frame: First -> (FixedUpdate × N) -> Update -> Render -> Last.
     def update : Nil
       time.tick
       run_schedule(Schedule::First)
@@ -100,9 +100,9 @@ module Flock
       run_schedule(Schedule::Last)
     end
 
-    # Accumule `dt` et exécute FixedUpdate autant de fois que le pas fixe y tient
-    # (borné par MAX_FIXED_STEPS). Retourne le nombre de pas exécutés. Testable en
-    # isolation avec un `dt` déterministe.
+    # Accumulates `dt` and runs FixedUpdate as many times as the fixed step fits
+    # (bounded by MAX_FIXED_STEPS). Returns the number of steps run. Testable in
+    # isolation with a deterministic `dt`.
     def advance_fixed(dt : Float64) : Int32
       @accumulator += dt
       steps = 0
@@ -111,25 +111,25 @@ module Flock
         @accumulator -= @fixed_dt
         steps += 1
         if steps >= MAX_FIXED_STEPS
-          @accumulator = 0.0 # abandonne le retard accumulé (anti-spirale)
+          @accumulator = 0.0 # drop the accumulated lag (anti-spiral)
           break
         end
       end
       steps
     end
 
-    # Démarre le moteur : startup puis boucle du runner installé.
+    # Starts the engine: startup then the installed runner's loop.
     def run : Nil
       startup
       if runner = @runner
         runner.call(self)
       else
-        raise "Aucun runner installé : ajoute WindowPlugin (boucle SDL) ou utilise run_headless."
+        raise "No runner installed: add WindowPlugin (SDL loop) or use run_headless."
       end
-      @world.shutdown # libère les ressources GPU/SDL à la fermeture
+      @world.shutdown # releases GPU/SDL resources on shutdown
     end
 
-    # Boucle finie et déterministe, sans fenêtre — pour tests et exécution headless.
+    # Finite, deterministic loop, windowless — for tests and headless runs.
     def run_headless(ticks : Int32) : Nil
       startup
       ticks.times { update }

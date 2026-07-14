@@ -5,19 +5,17 @@ authors:
   - Raj Deenoo
 
 description: |
-  Un moteur de jeu orienté données (ECS) en Crystal, inspiré de Bevy, au-dessus de
-  wgpu-cr (rendu) et SDL3 (fenêtre, entrées, manettes, audio). Voir plan.md.
+  A data-oriented (ECS) game engine in Crystal, inspired by Bevy, on top of
+  wgpu-cr (rendering) and SDL3 (window, input, gamepads, audio). See plan.md.
 
 crystal: ">= 1.16.0"
 
 license: MIT
 
-# Dépendances natives ajoutées aux phases plateforme/rendu (voir plan.md §10) :
-#   wgpu: { path: ../wgpu-cr }
-#   sdl-crystal-bindings: { github: Hadeweka/SDL-Crystal-Bindings, version: ~> 0.5.0 }
-# Le cœur ECS + math (phases 1-2) ne dépend d'aucune lib native. La couche
-# plateforme/rendu (src/flock/gpu.cr) requiert wgpu-cr (chemin relatif) et SDL3
-# (binding maison, lié à /opt/homebrew SDL3). Voir README.md.
+# The ECS + math core depends on no native lib (`require "flock"`, headless).
+# The platform/rendering layer (`require "flock/gpu"`) uses the neighboring shards
+# via relative path: ../wgpu-cr (wgpu-native) and ../sdl3-cr (SDL3, linked via
+# pkg-config). No `shards install` needed for the examples. See README.md.
 
 targets:
   space_invaders:

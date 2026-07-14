@@ -1,6 +1,6 @@
-# Smoke test : fenêtre SDL3 -> surface wgpu -> clear coloré.
-# Valide le pont plateforme/rendu (le morceau le plus risqué) avant de construire
-# le renderer par-dessus. `WGPU_FRAMES=N` quitte après N frames (test headless).
+# Smoke test: SDL3 window -> wgpu surface -> colored clear.
+# Validates the platform/rendering bridge (the riskiest part) before building
+# the renderer on top. `WGPU_FRAMES=N` quits after N frames (headless test).
 #
 #   crystal run examples/smoke_window.cr
 #   WGPU_FRAMES=3 crystal run examples/smoke_window.cr
@@ -20,7 +20,7 @@ view = LibSDL.metal_create_view(window)
 layer = LibSDL.metal_get_layer(view)
 abort "SDL_Metal_GetLayer returned null" if layer.null?
 
-# --- wgpu : surface depuis le CAMetalLayer fourni par SDL ---
+# --- wgpu: surface from the CAMetalLayer provided by SDL ---
 instance = WGPU.create_instance
 
 source = LibWGPU::SurfaceSourceMetalLayer.new
@@ -54,12 +54,12 @@ config.present_mode = LibWGPU::PresentMode::Fifo
 config.alpha_mode = LibWGPU::CompositeAlphaMode::Auto
 LibWGPU.surface_configure(surface, pointerof(config))
 
-# --- Boucle ---
+# --- Loop ---
 max_frames = ENV["WGPU_FRAMES"]?.try(&.to_i?)
 frame = 0
 running = true
 event = LibSDL::Event.new
-puts "Rendering — ferme la fenêtre pour quitter."
+puts "Rendering — close the window to quit."
 
 while running
   break if max_frames && frame >= max_frames

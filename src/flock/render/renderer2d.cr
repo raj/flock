@@ -1,8 +1,8 @@
 module Flock
-  # Renderer 2D : quads texturés instanciés. Toute la géométrie (quad unitaire) est
-  # dans le shader (const arrays indexés par vertex_index) ; par frame on ne réécrit
-  # que le storage buffer d'instances + l'uniform view-projection. Un draw appelle
-  # `draw(6, count, 0, first_instance)` par lot de texture.
+  # 2D renderer: instanced textured quads. All geometry (unit quad) lives in the
+  # shader (const arrays indexed by vertex_index); per frame we only rewrite the
+  # instance storage buffer + the view-projection uniform. One draw calls
+  # `draw(6, count, 0, first_instance)` per texture batch.
   class Renderer2D < Resource
     FLOATS_PER_INSTANCE =  24 # mat4(16) + color(4) + uv(4)
     BYTES_PER_INSTANCE  =  96
@@ -62,7 +62,7 @@ module Flock
     @instance_buf : LibWGPU::Buffer
     @group0 : LibWGPU::BindGroup
 
-    # Statistiques de la dernière frame (batching).
+    # Statistics for the last frame (batching).
     getter last_sprites : Int32 = 0
     getter last_draw_calls : Int32 = 0
 
@@ -90,7 +90,7 @@ module Flock
       @group0 = build_group0
     end
 
-    # Libère tous les handles GPU (pipeline, buffers, bind groups, sampler, textures).
+    # Frees all GPU handles (pipeline, buffers, bind groups, sampler, textures).
     def release : Nil
       @tex_groups.each_value { |bg| LibWGPU.bind_group_release(bg) }
       @tex_groups.clear
@@ -239,31 +239,31 @@ module Flock
       @group0 = build_group0
     end
 
-    # Rend la frame sur la surface de la fenêtre, en gérant les statuts d'acquisition.
+    # Renders the frame to the window surface, handling acquisition statuses.
     def render(world : World) : Nil
       st = LibWGPU::SurfaceTexture.new
       LibWGPU.surface_get_current_texture(@gpu.surface, pointerof(st))
 
       case st.status
       when .success_optimal?, .success_suboptimal?
-        # Suboptimal reste affichable ; la surface sera reconfigurée au prochain resize.
+        # Suboptimal is still presentable; the surface will be reconfigured on the next resize.
         target = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
         render_into(target, @gpu.width, @gpu.height, world)
         LibWGPU.surface_present(@gpu.surface)
         LibWGPU.texture_view_release(target)
         LibWGPU.texture_release(st.texture)
       when .outdated?, .lost?
-        # Surface périmée (resize) ou perdue (changement d'affichage) : on reconfigure
-        # à la taille courante et on réessaiera à la frame suivante.
+        # Surface outdated (resize) or lost (display change): reconfigure
+        # to the current size and retry on the next frame.
         @gpu.reconfigure_to_window
       else
-        # Timeout / Error / statut transitoire (ex. 1re frame) : on saute cette frame.
+        # Timeout / Error / transient status (e.g. 1st frame): skip this frame.
       end
     end
 
-    # Rend le monde dans une cible arbitraire (surface OU texture offscreen). Sépare
-    # la logique de rendu de l'acquisition de surface → réutilisable pour les tests
-    # de rendu par readback.
+    # Renders the world into an arbitrary target (surface OR offscreen texture). Separates
+    # the rendering logic from surface acquisition → reusable for readback-based
+    # rendering tests.
     def render_into(target : LibWGPU::TextureView, width : UInt32, height : UInt32, world : World) : Nil
       @last_draw_calls = 0
       cameras = [] of Camera2D
@@ -271,20 +271,20 @@ module Flock
       cameras << Camera2D.new(clear_color: Color.new(0.05, 0.05, 0.08)) if cameras.empty?
       cameras.sort_by!(&.order)
 
-      # Collecte : (z, texture, modèle, couleur, uv_min, uv_size).
+      # Collect: (z, texture, model, color, uv_min, uv_size).
       sprites = [] of {Float32, Texture, Mat4, Color, Vec2, Vec2}
       world.query(Transform2D, Sprite) do |_e, tf, sp|
         texture = sp.value.texture || @white
-        # Le quad du shader est unitaire [-0.5, 0.5] : on applique la taille du sprite.
+        # The shader quad is unit [-0.5, 0.5]: apply the sprite's size.
         model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
         sprites << {sp.value.z, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
       end
-      # Tri par couche (z) puis texture : superposition correcte + groupement des draws.
+      # Sort by layer (z) then texture: correct layering + grouping of draws.
       sprites.sort_by! { |s| {s[0], s[1].view.address} }
       @last_sprites = sprites.size
       ensure_capacity(sprites.size) if sprites.size > 0
 
-      # Remplit le storage buffer d'instances (dans l'ordre trié).
+      # Fill the instance storage buffer (in sorted order).
       unless sprites.empty?
         @scratch.clear
         sprites.each do |(_z, _tex, model, color, uv_min, uv_size)|
@@ -305,7 +305,7 @@ module Flock
         color_att.view = target
         color_att.depth_slice = 0xFFFFFFFF_u32
         color_att.store_op = LibWGPU::StoreOp::Store
-        # La 1re caméra efface (fond) ; les suivantes se superposent (overlays).
+        # The 1st camera clears (background); the following ones overlay on top.
         if ci == 0
           cc = cam.clear_color || Color::BLACK
           color_att.load_op = LibWGPU::LoadOp::Clear
@@ -332,7 +332,7 @@ module Flock
         unless sprites.empty?
           LibWGPU.render_pass_encoder_set_pipeline(pass, @pipeline)
           LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
-          # Un draw par série contiguë de même texture (dans l'ordre de couche trié).
+          # One draw per contiguous run of the same texture (in sorted layer order).
           i = 0
           while i < sprites.size
             tex = sprites[i][1]

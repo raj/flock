@@ -1,28 +1,28 @@
 module Flock
-  # Capture des erreurs wgpu. `WGPU.request_device` (wgpu-cr) crée le device sans
-  # callback d'erreur : une erreur de validation passe alors en silence. Flock crée
-  # donc le device lui-même en branchant deux callbacks qui journalisent sur STDERR :
-  #   - uncaptured error (validation, out-of-memory, interne)
+  # wgpu error capture. `WGPU.request_device` (wgpu-cr) creates the device without
+  # an error callback: a validation error then passes silently. So Flock creates
+  # the device itself, hooking up two callbacks that log to STDERR:
+  #   - uncaptured error (validation, out-of-memory, internal)
   #   - device lost
   #
-  # Les callbacks C doivent être des procs NON capturants (contrainte FFI Crystal) :
-  # ils n'utilisent que leurs arguments + des méthodes/constantes de module.
+  # The C callbacks must be NON-capturing procs (Crystal FFI constraint): they
+  # only use their arguments + module methods/constants.
 
-  # Callback d'erreur non capturée.
+  # Uncaptured error callback.
   UNCAPTURED_ERROR_CALLBACK = ->(_device : Pointer(LibWGPU::Device), type : LibWGPU::ErrorType,
                                  message : LibWGPU::StringView, _u1 : Void*, _u2 : Void*) do
     STDERR.puts "[wgpu][#{type}] #{WGPU.to_s(message)}"
     nil
   end
 
-  # Callback de perte de device.
+  # Device lost callback.
   DEVICE_LOST_CALLBACK = ->(_device : Pointer(LibWGPU::Device), reason : LibWGPU::DeviceLostReason,
                             message : LibWGPU::StringView, _u1 : Void*, _u2 : Void*) do
     STDERR.puts "[wgpu][device lost: #{reason}] #{WGPU.to_s(message)}"
     nil
   end
 
-  # Reçoit le device via userdata pendant la requête asynchrone.
+  # Receives the device via userdata during the asynchronous request.
   struct DeviceRequestResult
     property handle : LibWGPU::Device
     property status : LibWGPU::RequestDeviceStatus
@@ -35,7 +35,7 @@ module Flock
     end
   end
 
-  # Équivalent de `WGPU.request_device` mais avec les callbacks d'erreur branchés.
+  # Equivalent of `WGPU.request_device` but with the error callbacks hooked up.
   def self.request_device(instance : LibWGPU::Instance, adapter : LibWGPU::Adapter) : LibWGPU::Device
     result = DeviceRequestResult.new
 
@@ -72,7 +72,7 @@ module Flock
       sleep(1.milliseconds)
     end
 
-    raise "Flock.request_device a échoué : #{result.status}" unless result.status.success?
+    raise "Flock.request_device failed: #{result.status}" unless result.status.success?
     result.handle
   end
 end

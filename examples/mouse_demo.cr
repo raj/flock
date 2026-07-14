@@ -1,5 +1,5 @@
-# Démo souris : un carré suit le curseur (coordonnées monde) et devient rouge au
-# clic gauche.
+# Mouse demo: a square follows the cursor (world coordinates) and turns red on
+# left click.
 #   crystal run examples/mouse_demo.cr
 require "../src/flock/gpu"
 
@@ -8,7 +8,7 @@ struct Cursor
 end
 
 app = Flock::App.new
-app.add_plugin(Flock::DefaultPlugins.new("Flock — souris", 800, 600))
+app.add_plugin(Flock::DefaultPlugins.new("Flock — mouse", 800, 600))
 
 app.add_startup do |_world, cmd|
   cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.1, 0.1, 0.15)))

@@ -1,6 +1,6 @@
 module Flock
-  # Regroupe les plugins standard : fenêtre + rendu + entrées + audio. Démarrage en
-  # une ligne : `app.add_plugin(Flock::DefaultPlugins.new)`.
+  # Bundles the standard plugins: window + rendering + input + audio. One-line
+  # startup: `app.add_plugin(Flock::DefaultPlugins.new)`.
   class DefaultPlugins < Plugin
     def initialize(@title : String = "Flock", @width : Int32 = 800, @height : Int32 = 600)
     end

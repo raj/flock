@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 describe "World#query" do
-  it "n'itère que les entités possédant tous les composants" do
+  it "only iterates entities that have all the components" do
     w = Flock::World.new
     both = w.spawn
     w.add(both, Position.new(0.0, 0.0))
@@ -18,14 +18,14 @@ describe "World#query" do
     visited.should eq([both.id])
   end
 
-  it "mute les composants en place via les pointeurs yieldés" do
+  it "mutates components in place via the yielded pointers" do
     w = Flock::World.new
     e = w.spawn
     w.add(e, Position.new(0.0, 0.0))
     w.add(e, Velocity.new(2.0, 3.0))
 
-    # Idiome de mutation DOD : lire -> modifier -> réécrire le struct (le sucre
-    # `ptr.value.x += …` ne persiste pas en Crystal ; l'affectation directe si).
+    # DOD mutation idiom: read -> modify -> write the struct back (the sugar
+    # `ptr.value.x += …` does not persist in Crystal; direct assignment does).
     w.query(Position, Velocity) do |_entity, pos, vel|
       p = pos.value
       p.x += vel.value.dx
@@ -37,9 +37,9 @@ describe "World#query" do
     w.get(e, Position).not_nil!.y.should eq(3.0)
   end
 
-  it "reste correct quel que soit le composant driver (choix du plus petit set)" do
+  it "stays correct whatever the driver component is (smallest set is chosen)" do
     w = Flock::World.new
-    # Beaucoup de Position, peu de Velocity : le driver doit être Velocity.
+    # Many Position, few Velocity: the driver must be Velocity.
     100.times do
       e = w.spawn
       w.add(e, Position.new(0.0, 0.0))
@@ -55,7 +55,7 @@ describe "World#query" do
     count.should eq(1)
   end
 
-  it "supporte un despawn depuis le bloc (itération sur une copie)" do
+  it "supports a despawn from within the block (iteration over a copy)" do
     w = Flock::World.new
     ids = [] of Flock::Entity
     5.times do

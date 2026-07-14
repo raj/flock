@@ -1,9 +1,9 @@
-# Flock — moteur de jeu orienté données en Crystal.
-# Voir plan.md pour la conception d'ensemble.
+# Flock — data-oriented game engine in Crystal.
+# See plan.md for the overall design.
 #
-# Phase 1-2 (ECS + math) : autoportantes, testables sans SDL ni GPU.
-# Les couches plateforme (SDL3) et rendu (wgpu) sont requises séparément une fois
-# implémentées (elles tirent des dépendances natives).
+# Phases 1-2 (ECS + math): self-contained, testable without SDL or GPU.
+# The platform (SDL3) and rendering (wgpu) layers are required separately once
+# implemented (they pull in native dependencies).
 
 require "./flock/math/math3d"
 require "./flock/ecs/entity"
@@ -12,7 +12,7 @@ require "./flock/ecs/sparse_set"
 require "./flock/ecs/world"
 require "./flock/ecs/commands"
 
-# App / boucle / plugins (headless : aucune dépendance native).
+# App / loop / plugins (headless: no native dependency).
 require "./flock/app/schedule"
 require "./flock/app/plugin"
 require "./flock/time"

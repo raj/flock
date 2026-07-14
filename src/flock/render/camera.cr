@@ -1,5 +1,5 @@
 module Flock
-  # Sous-région d'écran où rend une caméra, en pixels (nil = plein framebuffer).
+  # Screen sub-region a camera renders into, in pixels (nil = full framebuffer).
   struct Viewport
     property x : Float32
     property y : Float32
@@ -10,9 +10,9 @@ module Flock
     end
   end
 
-  # Caméra 2D orthographique. `position` est le point du monde au centre de la vue,
-  # `zoom` > 1 rapproche, `rotation` en radians. Espace monde en pixels par défaut
-  # (1 unité = 1 pixel à zoom 1).
+  # Orthographic 2D camera. `position` is the world point at the center of the view,
+  # `zoom` > 1 zooms in, `rotation` in radians. World space in pixels by default
+  # (1 unit = 1 pixel at zoom 1).
   struct Camera2D
     include Component
     property position : Vec2
@@ -29,13 +29,13 @@ module Flock
                    @active : Bool = true)
     end
 
-    # Convertit une position écran (pixels framebuffer, origine haut-gauche) en
-    # coordonnées monde. Inverse analytique de `view_projection` (pan/zoom/rotation).
+    # Converts a screen position (framebuffer pixels, top-left origin) into
+    # world coordinates. Analytic inverse of `view_projection` (pan/zoom/rotation).
     def screen_to_world(screen : Vec2, fb_w : Float32, fb_h : Float32) : Vec2
       dx = screen.x - fb_w * 0.5f32
       dy = screen.y - fb_h * 0.5f32
       vx = dx / @zoom
-      vy = -dy / @zoom # écran y vers le bas -> monde y vers le haut
+      vy = -dy / @zoom # screen y downward -> world y upward
       c = Math.cos(@rotation)
       s = Math.sin(@rotation)
       wx = (c * vx - s * vy).to_f32
@@ -43,7 +43,7 @@ module Flock
       Vec2.new(@position.x + wx, @position.y + wy)
     end
 
-    # Matrice view-projection pour une cible de dimensions (w, h) en pixels.
+    # View-projection matrix for a target of dimensions (w, h) in pixels.
     def view_projection(w : Float32, h : Float32) : Mat4
       hw = (w * 0.5f32) / @zoom
       hh = (h * 0.5f32) / @zoom
@@ -53,8 +53,8 @@ module Flock
     end
   end
 
-  # Caméra 3D perspective. Fournie pour l'abstraction ; le rendu de meshes 3D qui
-  # la consomme arrive dans une phase ultérieure.
+  # Perspective 3D camera. Provided for the abstraction; rendering of 3D meshes that
+  # consume it comes in a later phase.
   struct Camera3D
     include Component
     property position : Vec3

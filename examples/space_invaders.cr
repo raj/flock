@@ -1,13 +1,13 @@
-# Space Invaders — démo assemblant ECS + caméra + entrées (clavier ET manette) +
-# audio (bips procéduraux) + sprites (quads colorés).
+# Space Invaders — demo combining ECS + camera + input (keyboard AND gamepad) +
+# audio (procedural beeps) + sprites (colored quads).
 #
 #   crystal run examples/space_invaders.cr
-#   WGPU_FRAMES=120 crystal run examples/space_invaders.cr   # smoke headless
+#   WGPU_FRAMES=120 crystal run examples/space_invaders.cr   # headless smoke
 #
-# Contrôles : flèches / A-D ou stick gauche pour bouger, Espace / bouton A pour tirer.
+# Controls: arrows / A-D or left stick to move, Space / A button to shoot.
 require "../src/flock/gpu"
 
-# --- Composants de jeu ---
+# --- Game components ---
 struct Player
   include Flock::Component
   property speed : Float32
@@ -33,7 +33,7 @@ struct Velocity
   end
 end
 
-# --- Ressources ---
+# --- Resources ---
 class InvaderState < Flock::Resource
   property dir : Float32 = 1.0f32
   property speed : Float32 = 45.0f32
@@ -52,14 +52,14 @@ end
 app = Flock::App.new
 app.add_plugin(Flock::DefaultPlugins.new("Flock — Space Invaders", 800, 600))
 
-# --- Startup : caméra, joueur, grille d'invaders ---
+# --- Startup: camera, player, invader grid ---
 app.add_startup do |world, cmd|
   world.insert_resource(InvaderState.new)
   world.insert_resource(Sfx.new)
 
   cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.03, 0.03, 0.07)))
 
-  # Titre (rendu de texte via SDL_ttf) ; police et texture gérées par l'asset manager.
+  # Title (text rendering via SDL_ttf); font and texture managed by the asset manager.
   begin
     gpu = world.resource(Flock::GpuContext)
     assets = world.resource(Flock::Assets)
@@ -69,7 +69,7 @@ app.add_startup do |world, cmd|
       Flock::Transform2D.at(0, 260),
       Flock::Sprite.new(Flock::Vec2.new(title.width, title.height), Flock::Color.new(0.6, 0.9, 1.0), title, z: 10.0f32))
   rescue ex
-    puts "titre ignoré (police indisponible) : #{ex.message}"
+    puts "title skipped (font unavailable): #{ex.message}"
   end
 
   cmd.spawn(
@@ -89,7 +89,7 @@ app.add_startup do |world, cmd|
   end
 end
 
-# --- Déplacement + tir du joueur ---
+# --- Player movement + shooting ---
 app.add_system(Flock::Schedule::Update) do |world, cmd|
   input = world.resource(Flock::Input)
   time = world.resource(Flock::Time)
@@ -122,7 +122,7 @@ app.add_system(Flock::Schedule::Update) do |world, cmd|
   end
 end
 
-# --- Intégration du mouvement (pas de temps FIXE : vitesse stable, indépendante du fps) ---
+# --- Movement integration (FIXED timestep: stable speed, independent of fps) ---
 app.add_fixed_system do |world, _cmd|
   dt = world.resource(Flock::Time).fixed_delta.to_f32
   world.query(Flock::Transform2D, Velocity) do |_e, tf, vel|
@@ -130,7 +130,7 @@ app.add_fixed_system do |world, _cmd|
   end
 end
 
-# --- Marche des invaders (groupe : rebond sur les bords + descente) ---
+# --- Invader march (group: bounce off edges + drop down) ---
 app.add_system(Flock::Schedule::Update) do |world, _cmd|
   state = world.resource(InvaderState)
   dt = world.resource(Flock::Time).delta.to_f32
@@ -157,14 +157,14 @@ app.add_system(Flock::Schedule::Update) do |world, _cmd|
   end
 end
 
-# --- Nettoyage des bullets sorties de l'écran ---
+# --- Cleanup of bullets that left the screen ---
 app.add_system(Flock::Schedule::Update) do |world, cmd|
   world.query(Bullet, Flock::Transform2D) do |e, _b, tf|
     cmd.despawn(e) if tf.value.position.y > 320.0f32
   end
 end
 
-# --- Collisions bullet x invader (AABB) ---
+# --- Bullet x invader collisions (AABB) ---
 app.add_system(Flock::Schedule::Update) do |world, cmd|
   bullets = [] of {Flock::Entity, Flock::Vec2, Flock::Vec2}
   world.query(Bullet, Flock::Transform2D, Flock::Sprite) do |e, _b, tf, sp|

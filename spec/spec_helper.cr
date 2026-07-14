@@ -1,7 +1,7 @@
 require "spec"
 require "../src/flock"
 
-# Composants de test partagés.
+# Shared test components.
 struct Position
   include Flock::Component
   property x : Float64

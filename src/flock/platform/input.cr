@@ -1,5 +1,5 @@
 module Flock
-  # Touches clavier (valeur = scancode SDL). Étendre au besoin.
+  # Keyboard keys (value = SDL scancode). Extend as needed.
   enum Key : Int32
     A      =  4
     D      =  7
@@ -13,11 +13,11 @@ module Flock
     Up     = 82
   end
 
-  # Boutons de manette (valeurs = SDL_GamepadButton).
+  # Gamepad buttons (values = SDL_GamepadButton).
   enum Button : Int32
-    South     =  0 # A / croix
-    East      =  1 # B / rond
-    West      =  2 # X / carré
+    South     =  0 # A / cross
+    East      =  1 # B / circle
+    West      =  2 # X / square
     North     =  3 # Y / triangle
     Back      =  4
     Guide     =  5
@@ -28,7 +28,7 @@ module Flock
     DpadRight = 10
   end
 
-  # Boutons de souris (index SDL). `mask` = bit dans le masque de SDL_GetMouseState.
+  # Mouse buttons (SDL index). `mask` = bit in the SDL_GetMouseState mask.
   enum MouseButton : Int32
     Left   = 1
     Middle = 2
@@ -39,7 +39,7 @@ module Flock
     end
   end
 
-  # Axes analogiques (valeurs = SDL_GamepadAxis).
+  # Analog axes (values = SDL_GamepadAxis).
   enum Axis : Int32
     LeftX        = 0
     LeftY        = 1
@@ -49,7 +49,7 @@ module Flock
     RightTrigger = 5
   end
 
-  # Une manette ouverte. Axes normalisés dans [-1, 1] avec zone morte.
+  # An open gamepad. Axes normalized to [-1, 1] with a dead zone.
   struct Gamepad
     getter id : LibSDL::JoystickID
 
@@ -68,8 +68,8 @@ module Flock
     end
   end
 
-  # Ressource d'entrées : état clavier (avec just_pressed/just_released) + manettes.
-  # Rafraîchie chaque frame par InputPlugin (schedule First), en polling.
+  # Input resource: keyboard state (with just_pressed/just_released) + gamepads.
+  # Refreshed each frame by InputPlugin (schedule First), by polling.
   class Input < Resource
     KEY_COUNT = 512
 
@@ -78,15 +78,15 @@ module Flock
     @gamepads : Array(Gamepad) = [] of Gamepad
     @open : Hash(LibSDL::JoystickID, LibSDL::Gamepad) = {} of LibSDL::JoystickID => LibSDL::Gamepad
 
-    # Souris : position en pixels framebuffer (repère du rendu, origine haut-gauche),
-    # + masques de boutons (frame courante / précédente pour just_pressed/released).
+    # Mouse: position in framebuffer pixels (render space, top-left origin),
+    # + button masks (current / previous frame for just_pressed/released).
     @mouse_position : Vec2 = Vec2.new
     @mouse_current : UInt32 = 0_u32
     @mouse_previous : UInt32 = 0_u32
     @window : LibSDL::Window = Pointer(Void).null.as(LibSDL::Window)
 
-    # Événementiels (alimentés par le runner à partir des events SDL, remis à zéro
-    # au début de chaque frame) : molette + texte saisi.
+    # Event-driven (fed by the runner from SDL events, reset to zero at the start
+    # of each frame): wheel + typed text.
     @wheel : Vec2 = Vec2.new
     @text : String = ""
 
@@ -110,10 +110,10 @@ module Flock
       @gamepads.size
     end
 
-    # --- Souris ---
+    # --- Mouse ---
 
-    # Position en pixels framebuffer (même repère que le rendu). Pour les coordonnées
-    # monde, passer à `Camera2D#screen_to_world(mouse_position, gpu.width, gpu.height)`.
+    # Position in framebuffer pixels (same space as rendering). For world coordinates,
+    # pass to `Camera2D#screen_to_world(mouse_position, gpu.width, gpu.height)`.
     def mouse_position : Vec2
       @mouse_position
     end
@@ -130,17 +130,17 @@ module Flock
       (@mouse_current & button.mask) == 0 && (@mouse_previous & button.mask) != 0
     end
 
-    # Défilement de la molette accumulé sur la frame (x = horizontal, y = vertical).
+    # Wheel scroll accumulated over the frame (x = horizontal, y = vertical).
     def mouse_wheel : Vec2
       @wheel
     end
 
-    # Texte saisi pendant la frame (UTF-8). Nécessite `start_text_input`.
+    # Text typed during the frame (UTF-8). Requires `start_text_input`.
     def text_input : String
       @text
     end
 
-    # Active/désactive la réception des événements de texte pour la fenêtre.
+    # Enables/disables reception of text events for the window.
     def start_text_input : Nil
       LibSDL.start_text_input(@window) unless @window.null?
     end
@@ -149,7 +149,7 @@ module Flock
       LibSDL.stop_text_input(@window) unless @window.null?
     end
 
-    # --- Appelés par le runner (WindowPlugin) ---
+    # --- Called by the runner (WindowPlugin) ---
 
     def clear_frame_events : Nil
       @wheel = Vec2.new
@@ -164,15 +164,15 @@ module Flock
       @text += str
     end
 
-    # Renseigné par InputPlugin : permet de convertir les points fenêtre en pixels
-    # framebuffer (HiDPI).
+    # Set by InputPlugin: allows converting window points to framebuffer pixels
+    # (HiDPI).
     def attach_window(window : LibSDL::Window) : Nil
       @window = window
     end
 
-    # Appelé une fois par frame (avant la logique de jeu).
+    # Called once per frame (before the game logic).
     def refresh : Nil
-      # Clavier : previous <- current, current <- état SDL.
+      # Keyboard: previous <- current, current <- SDL state.
       numkeys = 0
       ptr = LibSDL.get_keyboard_state(pointerof(numkeys))
       n = Math.min(numkeys, KEY_COUNT)
@@ -189,7 +189,7 @@ module Flock
       if @window.null?
         @mouse_position = Vec2.new(mx, my)
       else
-        # SDL renvoie des points fenêtre ; on convertit en pixels framebuffer (HiDPI).
+        # SDL returns window points; we convert to framebuffer pixels (HiDPI).
         LibSDL.get_window_size(@window, out pw, out ph)
         LibSDL.get_window_size_in_pixels(@window, out fw, out fh)
         sx = pw > 0 ? fw.to_f32 / pw.to_f32 : 1.0f32
@@ -210,7 +210,7 @@ module Flock
           @open[id] = handle unless handle.null?
         end
       end
-      # Ferme les manettes déconnectées.
+      # Closes disconnected gamepads.
       @open.reject! do |id, handle|
         if present[id]?
           false
@@ -225,14 +225,14 @@ module Flock
     end
   end
 
-  # Insère la ressource Input et la rafraîchit chaque frame (schedule First).
+  # Inserts the Input resource and refreshes it each frame (schedule First).
   class InputPlugin < Plugin
     def build(app : App) : Nil
       input = Input.new
-      # Attache la fenêtre (publiée par WindowPlugin) pour la conversion HiDPI.
+      # Attaches the window (published by WindowPlugin) for HiDPI conversion.
       if gpu = app.world.resource?(GpuContext)
         input.attach_window(gpu.window)
-        input.start_text_input # active la réception des events de texte
+        input.start_text_input # enable reception of text events
       end
       app.world.insert_resource(input)
       app.add_system(Schedule::First) do |world, _cmd|

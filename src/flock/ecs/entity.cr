@@ -1,6 +1,6 @@
 module Flock
-  # Entité légère : un ID unique + une génération pour distinguer un ID recyclé
-  # d'un ancien handle. Type valeur (struct) : pas d'allocation.
+  # Lightweight entity: a unique ID + a generation to distinguish a recycled ID
+  # from an old handle. Value type (struct): no allocation.
   struct Entity
     getter id : UInt32
     getter generation : UInt32

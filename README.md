@@ -1,79 +1,79 @@
 # Flock
 
-Un moteur de jeu **orienté données (ECS)** en Crystal, inspiré de Bevy, au-dessus de
-[`wgpu-cr`](../wgpu-cr) (rendu WebGPU) et **SDL3** (fenêtre, entrées, manettes, audio).
+A **data-oriented (ECS)** game engine in Crystal, inspired by Bevy, built on top of
+[`wgpu-cr`](../wgpu-cr) (WebGPU rendering) and **SDL3** (window, input, gamepads, audio).
 
-- **ECS** : sparse sets, composants `struct` cache-friendly, mutation par pointeur,
-  `query` multi-composants (pilote sur le plus petit set), ressources, commandes différées.
-- **App / plugins / schedules** : `Startup / First / Update / Render / Last`.
-- **Rendu 2D** : sprites texturés instanciés, caméras 2D/3D, viewports, blending alpha.
-- **Shaders façon wgpu** : `Shader` (WGSL) + `Material` (pipeline + uniform), handles bruts accessibles.
-- **Entrées** : clavier, **souris** (position/boutons + `Camera2D#screen_to_world`),
-  **manettes** (SDL_Gamepad, hotplug, zone morte).
-- **Audio** : WAV + sons procéduraux, mixage natif SDL3.
+- **ECS**: sparse sets, cache-friendly `struct` components, mutation via pointer,
+  multi-component `query` (driven by the smallest set), resources, deferred commands.
+- **App / plugins / schedules**: `Startup / First / Update / Render / Last`.
+- **2D rendering**: instanced textured sprites, 2D/3D cameras, viewports, alpha blending.
+- **wgpu-style shaders**: `Shader` (WGSL) + `Material` (pipeline + uniform), raw handles accessible.
+- **Input**: keyboard, **mouse** (position/buttons + `Camera2D#screen_to_world`),
+  **gamepads** (SDL_Gamepad, hotplug, dead zone).
+- **Audio**: WAV + procedural sounds, native SDL3 mixing.
 
-Voir [`plan.md`](plan.md) pour la conception détaillée.
+See [`plan.md`](plan.md) for the detailed design.
 
-## Prérequis (macOS / Metal)
+## Prerequisites (macOS / Metal)
 
 ```sh
 brew install sdl3 sdl3_image sdl3_ttf
 ```
 
-`wgpu-native` est fourni par le voisin `../wgpu-cr` (téléchargé par son `postinstall`).
-Flock le référence par chemin relatif — aucun `shards install` requis pour les exemples.
+`wgpu-native` is provided by the neighboring `../wgpu-cr` (downloaded by its `postinstall`).
+Flock references it via relative path — no `shards install` required for the examples.
 
-**Portabilité** : le linking SDL passe par pkg-config et la création de surface est dispatchée
-par plateforme (Metal macOS, X11/Wayland Linux, HWND Windows). **macOS** est testé au runtime ;
-**Linux/Windows** sont vérifiés en cross-compilation mais pas encore validés sur machine réelle.
+**Portability**: SDL linking goes through pkg-config and surface creation is dispatched
+per platform (Metal on macOS, X11/Wayland on Linux, HWND on Windows). **macOS** is tested at runtime;
+**Linux/Windows** are verified via cross-compilation but not yet validated on real hardware.
 
-## Tester (cœur ECS + math, headless)
+## Testing (ECS core + math, headless)
 
 ```sh
-crystal spec        # 29 exemples, sans SDL ni GPU
+crystal spec        # 34 examples, no SDL or GPU
 ```
 
-## Lancer les exemples
+## Running the examples
 
 ```sh
-crystal run examples/space_invaders.cr     # le jeu : clavier + manette + son
-crystal run examples/window_app.cr         # caméra 2D + sprites colorés
-crystal run examples/custom_shader.cr      # effet plasma (shader WGSL custom)
-crystal run examples/mouse_demo.cr         # un carré suit la souris, rouge au clic
-crystal run examples/events_demo.cr        # molette + saisie de texte (console)
+crystal run examples/space_invaders.cr     # the game: keyboard + gamepad + sound
+crystal run examples/window_app.cr         # 2D camera + colored sprites
+crystal run examples/custom_shader.cr      # plasma effect (custom WGSL shader)
+crystal run examples/mouse_demo.cr         # a square follows the mouse, red on click
+crystal run examples/events_demo.cr        # wheel + text input (console)
 
-# Smoke test headless (quitte après N frames) :
+# Headless smoke test (quits after N frames):
 WGPU_FRAMES=120 crystal run examples/space_invaders.cr
 
-# Tests headless par readback (rendu offscreen + assertions pixel ; exit 0 si OK) :
-crystal run examples/readback_test.cr    # un sprite coloré
-crystal run examples/text_test.cr        # rendu de texte (SDL_ttf)
-crystal run examples/assets_test.cr      # cache d'assets (même clé -> même instance)
+# Headless readback tests (offscreen render + pixel assertions; exit 0 if OK):
+crystal run examples/readback_test.cr    # a colored sprite
+crystal run examples/text_test.cr        # text rendering (SDL_ttf)
+crystal run examples/assets_test.cr      # asset cache (same key -> same instance)
 ```
 
 ## Assets (cache)
 
 ```crystal
-assets = world.resource(Flock::Assets)          # fourni par DefaultPlugins
-tex = assets.texture("assets/player.png")       # chargé une fois, mis en cache
+assets = world.resource(Flock::Assets)          # provided by DefaultPlugins
+tex = assets.texture("assets/player.png")       # loaded once, cached
 fnt = assets.font("assets/Roboto.ttf", 24)
 snd = assets.sound("assets/shoot.wav")
-# libération centralisée à la fermeture (assets.release, avant le device)
+# centralized release on shutdown (assets.release, before the device)
 ```
 
-## Texte
+## Text
 
 ```crystal
 font = assets.font("/System/Library/Fonts/Supplemental/Arial.ttf", 40)
-tex  = font.render_texture(gpu, "Score : 42")   # texture RGBA (texte blanc)
+tex  = font.render_texture(gpu, "Score: 42")    # RGBA texture (white text)
 cmd.spawn(Flock::Transform2D.at(0, 260),
   Flock::Sprite.new(Flock::Vec2.new(tex.width, tex.height), Flock::Color::WHITE, tex))
-# La teinte du sprite colore le texte. Mettre en cache pour du texte qui change souvent.
+# The sprite tint colors the text. Cache it for text that changes often.
 ```
 
-Space Invaders : **flèches / A-D** ou **stick gauche** pour bouger, **Espace / bouton A** pour tirer.
+Space Invaders: **arrows / A-D** or **left stick** to move, **Space / A button** to shoot.
 
-## Démarrage rapide
+## Quick start
 
 ```crystal
 require "../src/flock/gpu"
@@ -83,7 +83,7 @@ struct Position; include Flock::Component; property v : Flock::Vec2
 end
 
 app = Flock::App.new
-app.add_plugin(Flock::DefaultPlugins.new("Mon jeu", 800, 600))
+app.add_plugin(Flock::DefaultPlugins.new("My game", 800, 600))
 
 app.add_startup do |world, cmd|
   cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.1, 0.1, 0.15)))
@@ -103,33 +103,34 @@ end
 app.run
 ```
 
-## Idiome de mutation (composants `struct`)
+## Mutation idiom (`struct` components)
 
-Les composants sont des `struct` (orienté données). `query` yield des `Pointer(T)`.
-En Crystal, l'**affectation directe** et les **méthodes mutantes** persistent à travers
-un pointeur, mais **pas** l'affectation composée `+=` :
+Components are `struct`s (data-oriented). `query` yields `Pointer(T)`.
+In Crystal, **direct assignment** and **mutating methods** persist through
+a pointer, but **not** compound assignment `+=`:
 
 ```crystal
 world.query(Transform2D, Velocity) do |_e, tf, vel|
-  tf.value.position = tf.value.position + vel.value.linear * dt  # ✅ setter direct
-  # tf.value.position.x += ...                                    # ❌ ne persiste pas
+  tf.value.position = tf.value.position + vel.value.linear * dt  # ✅ direct setter
+  # tf.value.position.x += ...                                    # ❌ does not persist
 end
 ```
 
 ## Architecture
 
 ```
-src/flock.cr              # cœur headless : math + ecs + app + time (aucune dep native)
-src/flock/gpu.cr          # entrée complète : + wgpu (rendu) + SDL3 (plateforme)
+src/flock.cr              # headless core: math + ecs + app + time (no native deps)
+src/flock/gpu.cr          # full entry point: + wgpu (rendering) + SDL3 (platform)
 src/flock/ecs/            # entity, component, sparse_set, world, commands
 src/flock/app/            # schedule, plugin, app
 src/flock/math/math3d.cr  # Vec2, Vec3, Mat4 (ortho/perspective/look_at)
-src/flock/platform/       # lib_sdl (binding SDL3), window, input, audio, gpu_context
-src/flock/render/         # color, texture, camera, components, shader, material, renderer2d
-examples/                 # space_invaders, window_app, custom_shader, smoke_window
-spec/                     # tests headless du cœur
+src/flock/platform/       # window, input, audio, gpu_context, gpu_errors (SDL3 binding: ../sdl3-cr)
+src/flock/render/         # color, texture, font, camera, components, shader, material, renderer2d
+src/flock/assets.cr       # Assets: texture/font/sound cache
+examples/                 # space_invaders, window_app, custom_shader, mouse/events/readback…
+spec/                     # headless core tests
 ```
 
-## Licence
+## License
 
 MIT

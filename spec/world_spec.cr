@@ -5,7 +5,7 @@ class Counter < Flock::Resource
 end
 
 describe Flock::World do
-  it "spawn produit des entités distinctes" do
+  it "spawn produces distinct entities" do
     w = Flock::World.new
     a = w.spawn
     b = w.spawn
@@ -13,20 +13,20 @@ describe Flock::World do
     w.alive?(a).should be_true
   end
 
-  it "despawn recycle l'id en incrémentant la génération" do
+  it "despawn recycles the id by incrementing the generation" do
     w = Flock::World.new
     a = w.spawn
     id = a.id
     w.despawn(a)
 
-    w.alive?(a).should be_false # l'ancien handle est invalide
-    b = w.spawn                 # l'id est recyclé...
+    w.alive?(a).should be_false # the old handle is invalid
+    b = w.spawn                 # the id is recycled...
     b.id.should eq(id)
-    b.generation.should_not eq(a.generation) # ...mais avec une nouvelle génération
+    b.generation.should_not eq(a.generation) # ...but with a new generation
     w.alive?(b).should be_true
   end
 
-  it "despawn retire les composants de tous les storages" do
+  it "despawn removes the components from all storages" do
     w = Flock::World.new
     e = w.spawn
     w.add(e, Position.new(1.0, 2.0))
@@ -38,7 +38,7 @@ describe Flock::World do
     w.storage(Velocity).size.should eq(0)
   end
 
-  it "add/get/remove d'un composant" do
+  it "add/get/remove of a component" do
     w = Flock::World.new
     e = w.spawn
     w.add(e, Position.new(5.0, 6.0))
@@ -50,7 +50,7 @@ describe Flock::World do
     w.get(e, Position).should be_nil
   end
 
-  it "stocke et relit une ressource singleton" do
+  it "stores and reads back a singleton resource" do
     w = Flock::World.new
     c = Counter.new
     c.value = 10
@@ -58,11 +58,11 @@ describe Flock::World do
 
     w.resource(Counter).value.should eq(10)
     w.resource(Counter).value = 11
-    w.resource(Counter).value.should eq(11) # même instance
+    w.resource(Counter).value.should eq(11) # same instance
     w.resource?(Counter).should_not be_nil
   end
 
-  it "resource lève si absente" do
+  it "resource raises if absent" do
     w = Flock::World.new
     expect_raises(Exception, /Counter/) { w.resource(Counter) }
   end

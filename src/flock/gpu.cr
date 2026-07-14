@@ -1,9 +1,9 @@
-# Entrée "complète" de Flock : cœur ECS + couche plateforme (SDL3) + rendu (wgpu).
-# Tire les dépendances natives (SDL3 + wgpu-native). Les tests headless requièrent
-# `flock` (cœur) et non ce fichier.
-require "../flock"                    # cœur (math, ecs, app, time)
-require "../../../wgpu-cr/src/wgpu"   # binding wgpu (shard voisin, chemin relatif)
-require "../../../sdl3-cr/src/sdl3"   # binding SDL3 (shard voisin, chemin relatif)
+# "Full" entry point of Flock: ECS core + platform layer (SDL3) + rendering (wgpu).
+# Pulls in the native dependencies (SDL3 + wgpu-native). Headless tests require
+# `flock` (core) and not this file.
+require "../flock"                    # core (math, ecs, app, time)
+require "../../../wgpu-cr/src/wgpu"   # wgpu binding (neighboring shard, relative path)
+require "../../../sdl3-cr/src/sdl3"   # SDL3 binding (neighboring shard, relative path)
 
 require "./platform/gpu_errors"
 require "./platform/gpu_context"

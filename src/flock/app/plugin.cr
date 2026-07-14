@@ -1,7 +1,7 @@
 module Flock
-  # Un plugin configure l'App : enregistre des systèmes, insère des ressources,
-  # installe un runner… C'est l'unité de composition du moteur (Window, Render,
-  # Input, Audio sont des plugins).
+  # A plugin configures the App: registers systems, inserts resources, installs
+  # a runner… It's the engine's unit of composition (Window, Render, Input,
+  # Audio are plugins).
   abstract class Plugin
     abstract def build(app : App)
   end

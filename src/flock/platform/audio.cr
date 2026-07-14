@@ -1,5 +1,5 @@
 module Flock
-  # Un son chargé/synthétisé en mémoire (PCM déjà décodé + son format).
+  # A sound loaded/synthesized in memory (already-decoded PCM + its format).
   struct Sound
     getter spec : LibSDL::AudioSpec
     getter data : Bytes
@@ -7,7 +7,7 @@ module Flock
     def initialize(@spec : LibSDL::AudioSpec, @data : Bytes)
     end
 
-    # Charge un WAV depuis un fichier (ne nécessite pas de device audio).
+    # Loads a WAV from a file (does not require an audio device).
     def self.load(path : String) : Sound
       spec = LibSDL::AudioSpec.new
       buf = Pointer(UInt8).null
@@ -21,7 +21,7 @@ module Flock
       Sound.new(spec, data)
     end
 
-    # Bip procédural (onde carrée) — utile pour un exemple sans fichier audio.
+    # Procedural beep (square wave) — useful for an example without an audio file.
     def self.beep(frequency : Number = 440.0, seconds : Number = 0.12,
                   volume : Number = 0.25, sample_rate : Int32 = 48_000) : Sound
       n = (seconds * sample_rate).to_i
@@ -36,9 +36,9 @@ module Flock
     end
   end
 
-  # Lecture audio via SDL3. Un device de sortie est ouvert ; chaque `play` crée un
-  # stream lié au device — SDL mixe nativement les streams simultanés. Les streams
-  # terminés sont récupérés chaque frame (schedule Last).
+  # Audio playback via SDL3. An output device is opened; each `play` creates a
+  # stream bound to the device — SDL natively mixes simultaneous streams. Finished
+  # streams are reclaimed each frame (schedule Last).
   class Audio < Resource
     @spec : LibSDL::AudioSpec
     @device : LibSDL::AudioDeviceID
@@ -68,7 +68,7 @@ module Flock
       @playing << stream
     end
 
-    # Récupère les streams dont la lecture est terminée.
+    # Reclaims the streams whose playback has finished.
     def reap : Nil
       @playing.reject! do |s|
         if LibSDL.get_audio_stream_queued(s) <= 0
@@ -81,8 +81,8 @@ module Flock
     end
   end
 
-  # Ouvre le device audio au startup (après l'init SDL par WindowPlugin) et récupère
-  # les streams finis chaque frame.
+  # Opens the audio device at startup (after SDL init by WindowPlugin) and reclaims
+  # finished streams each frame.
   class AudioPlugin < Plugin
     def build(app : App) : Nil
       app.add_startup do |world, _cmd|

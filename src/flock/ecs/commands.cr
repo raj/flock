@@ -1,7 +1,7 @@
 module Flock
-  # File de mutations structurelles différées. Appliquée par l'App après chaque
-  # stage, pour ne pas invalider une query en cours (les pointeurs dense sont
-  # sensibles aux réallocations provoquées par add/spawn/despawn).
+  # Queue of deferred structural mutations. Applied by the App after each
+  # stage, so as not to invalidate an in-progress query (dense pointers are
+  # sensitive to reallocations caused by add/spawn/despawn).
   #
   #   cmd.spawn(Transform2D.new(...), Sprite.new(...))
   #   cmd.despawn(entity)
@@ -11,10 +11,10 @@ module Flock
     def initialize(@world : World)
     end
 
-    # Réserve immédiatement une entité (l'id est valide tout de suite) et met en
-    # file l'ajout de ses composants. Utilisable sans composant : `cmd.spawn`.
-    # (Une surcharge de méthode par arité, 0 à 8 composants — les macros ne sont
-    # pas invocables sur une instance en Crystal.)
+    # Immediately reserves an entity (the id is valid right away) and queues
+    # the addition of its components. Usable without a component: `cmd.spawn`.
+    # (One method overload per arity, 0 to 8 components — macros cannot be
+    # invoked on an instance in Crystal.)
     {% for n in 0..8 %}
       def spawn(
         {% for i in 1..n %}c{{i}} : C{{i}}{% if i < n %},{% end %}{% end %}
@@ -39,7 +39,7 @@ module Flock
       @ops << ->(w : World) { w.despawn(entity); nil }
     end
 
-    # Applique puis vide la file.
+    # Applies then clears the queue.
     def apply(world : World = @world) : Nil
       @ops.each &.call(world)
       @ops.clear

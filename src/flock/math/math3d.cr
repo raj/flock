@@ -50,15 +50,15 @@ module Flock
     end
   end
 
-  # Matrice 4x4 stockée en colonne-major (convention WGSL/WebGPU). L'espace de
-  # profondeur cible est [0, 1] (Metal/D3D/WebGPU), pas [-1, 1] (OpenGL).
+  # 4x4 matrix stored in column-major order (WGSL/WebGPU convention). The target
+  # depth space is [0, 1] (Metal/D3D/WebGPU), not [-1, 1] (OpenGL).
   struct Mat4
     getter m : StaticArray(Float32, 16)
 
     def initialize(@m : StaticArray(Float32, 16))
     end
 
-    # Accès (colonne, ligne).
+    # Access (column, row).
     def [](col : Int32, row : Int32) : Float32
       @m[col * 4 + row]
     end
@@ -73,7 +73,7 @@ module Flock
       Mat4.new(a)
     end
 
-    # Projection orthographique (profondeur [0, 1]).
+    # Orthographic projection (depth [0, 1]).
     def self.orthographic(left : Number, right : Number, bottom : Number, top : Number,
                           near : Number = -1.0, far : Number = 1.0) : Mat4
       l, r, b, t, n, f = left.to_f32, right.to_f32, bottom.to_f32, top.to_f32, near.to_f32, far.to_f32
@@ -88,7 +88,7 @@ module Flock
       Mat4.new(a)
     end
 
-    # Projection perspective right-handed (profondeur [0, 1]). fov_y en radians.
+    # Right-handed perspective projection (depth [0, 1]). fov_y in radians.
     def self.perspective(fov_y : Number, aspect : Number, near : Number, far : Number) : Mat4
       fy = 1.0f32 / Math.tan(fov_y.to_f32 / 2.0f32)
       n, f = near.to_f32, far.to_f32
@@ -101,7 +101,7 @@ module Flock
       Mat4.new(a)
     end
 
-    # Matrice de vue right-handed (regarde de `eye` vers `target`).
+    # Right-handed view matrix (looks from `eye` toward `target`).
     def self.look_at(eye : Vec3, target : Vec3, up : Vec3) : Mat4
       fwd = (target - eye).normalize
       side = fwd.cross(up).normalize
@@ -129,7 +129,7 @@ module Flock
       Mat4.new(a)
     end
 
-    # Rotation autour de l'axe Z (radians) — l'axe du plan 2D.
+    # Rotation about the Z axis (radians) — the axis of the 2D plane.
     def self.rotation_z(rad : Number) : Mat4
       c = Math.cos(rad).to_f32
       s = Math.sin(rad).to_f32
@@ -139,7 +139,7 @@ module Flock
       Mat4.new(a)
     end
 
-    # Produit matriciel (colonne-major) : self * other.
+    # Matrix product (column-major): self * other.
     def *(o : Mat4) : Mat4
       a = StaticArray(Float32, 16).new(0.0f32)
       4.times do |col|
@@ -154,7 +154,7 @@ module Flock
       Mat4.new(a)
     end
 
-    # Vue plate pour l'upload dans un uniform buffer wgpu.
+    # Flat view for uploading into a wgpu uniform buffer.
     def to_slice : Slice(Float32)
       @m.to_slice
     end

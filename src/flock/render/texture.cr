@@ -1,6 +1,6 @@
 module Flock
-  # Texture GPU 2D (RGBA8). Créée depuis un tableau de pixels (procédural) — le
-  # chargement PNG via SDL_image s'ajoute par-dessus (voir `Texture.load`).
+  # 2D GPU texture (RGBA8). Created from a pixel array (procedural) — PNG loading
+  # via SDL_image builds on top (see `Texture.load`).
   class Texture
     getter texture : LibWGPU::Texture
     getter view : LibWGPU::TextureView
@@ -16,7 +16,7 @@ module Flock
       LibWGPU.texture_release(@texture)
     end
 
-    # `pixels` : RGBA8, `width * height * 4` octets, ligne par ligne.
+    # `pixels`: RGBA8, `width * height * 4` bytes, row by row.
     def self.from_pixels(gpu : GpuContext, width : Int, height : Int, pixels : Bytes) : Texture
       w = width.to_u32
       h = height.to_u32
@@ -50,14 +50,14 @@ module Flock
       Texture.new(tex, view, w, h)
     end
 
-    # Texture blanche 1x1 : sprite sans texture = couleur pleine (texture * teinte).
+    # 1x1 white texture: sprite with no texture = solid color (texture * tint).
     def self.white(gpu : GpuContext) : Texture
       from_pixels(gpu, 1, 1, Bytes[255_u8, 255_u8, 255_u8, 255_u8])
     end
 
-    # Crée une texture depuis une SDL_Surface (convertie en RGBA8). Ne libère PAS
-    # `surf` (le caller en garde la propriété). Réutilisé par le chargement d'image
-    # (SDL_image) et le rendu de texte (SDL_ttf).
+    # Creates a texture from an SDL_Surface (converted to RGBA8). Does NOT free
+    # `surf` (the caller retains ownership). Reused by image loading
+    # (SDL_image) and text rendering (SDL_ttf).
     def self.from_surface(gpu : GpuContext, surf : Pointer(LibSDL::Surface)) : Texture
       conv = LibSDL.convert_surface(surf, LibSDL::PIXELFORMAT_RGBA32)
       raise "SDL_ConvertSurface: #{String.new(LibSDL.get_error)}" if conv.null?
@@ -68,7 +68,7 @@ module Flock
       pitch = s.pitch
       src = s.pixels.as(UInt8*)
 
-      # Recopie compacte (les lignes SDL peuvent être paddées : pitch >= w*4).
+      # Compact copy (SDL rows may be padded: pitch >= w*4).
       row_bytes = w * 4
       pixels = Bytes.new(h * row_bytes)
       h.times do |row|
@@ -78,7 +78,7 @@ module Flock
       from_pixels(gpu, w, h, pixels)
     end
 
-    # Charge une image (PNG, JPG…) via SDL_image, convertie en RGBA8.
+    # Loads an image (PNG, JPG…) via SDL_image, converted to RGBA8.
     def self.load(gpu : GpuContext, path : String) : Texture
       raw = LibSDL.img_load(path.to_unsafe)
       raise "IMG_Load #{path}: #{String.new(LibSDL.get_error)}" if raw.null?

@@ -1,6 +1,6 @@
 module Flock
-  # Crée le Renderer2D au startup (à partir du GpuContext publié par WindowPlugin)
-  # et enregistre le système de rendu dans le schedule Render.
+  # Creates the Renderer2D at startup (from the GpuContext published by WindowPlugin)
+  # and registers the render system in the Render schedule.
   class RenderPlugin < Plugin
     def build(app : App) : Nil
       app.add_startup do |world, _cmd|

@@ -1,7 +1,7 @@
 module Flock
-  # Module shader WGSL, façon wgpu. Reprend le pattern de wgpu-cr :
-  # WGSL -> ShaderSourceWGSL -> device_create_shader_module. Le handle brut
-  # (`module`) reste accessible pour un usage avancé.
+  # WGSL shader module, wgpu-style. Follows the wgpu-cr pattern:
+  # WGSL -> ShaderSourceWGSL -> device_create_shader_module. The raw handle
+  # (`module`) remains accessible for advanced use.
   struct Shader
     getter module : LibWGPU::ShaderModule
 
@@ -16,7 +16,7 @@ module Flock
       desc = LibWGPU::ShaderModuleDescriptor.new
       desc.label = WGPU.empty_string_view
       desc.next_in_chain = pointerof(src).as(Pointer(LibWGPU::ChainedStruct))
-      # wgpu-native copie la source à la création : `wgsl` n'a pas à survivre.
+      # wgpu-native copies the source at creation: `wgsl` need not outlive it.
       Shader.new(LibWGPU.device_create_shader_module(gpu.device, pointerof(desc)))
     end
 

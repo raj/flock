@@ -1,9 +1,9 @@
-# Test du rendu de texte (headless, readback).
+# Text rendering test (headless, readback).
 #
-# Rend "HI" via SDL_ttf en une texture, la dessine comme sprite dans une cible
-# offscreen, relit les pixels et vérifie que des pixels de texte (clairs) existent.
+# Renders "HI" via SDL_ttf into a texture, draws it as a sprite into an offscreen
+# target, reads back the pixels and checks that text pixels (bright) exist.
 #
-#   crystal run examples/text_test.cr   # exit 0 si OK
+#   crystal run examples/text_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
 
 SIZE = 128_u32
@@ -20,10 +20,10 @@ gpu = Flock::GpuContext.new(
 
 renderer = Flock::Renderer2D.new(gpu)
 
-# --- Texte -> texture ---
+# --- Text -> texture ---
 font = Flock::Font.load(FONT, 48)
 text_tex = font.render_texture(gpu, "HI")
-puts "texture texte : #{text_tex.width}x#{text_tex.height}"
+puts "text texture: #{text_tex.width}x#{text_tex.height}"
 
 world = Flock::World.new
 world.add(world.spawn, Flock::Camera2D.new(clear_color: Flock::Color::BLACK))
@@ -31,7 +31,7 @@ e = world.spawn
 world.add(e, Flock::Transform2D.at(0, 0))
 world.add(e, Flock::Sprite.new(Flock::Vec2.new(text_tex.width, text_tex.height), Flock::Color::WHITE, text_tex))
 
-# --- Cible offscreen + rendu ---
+# --- Offscreen target + render ---
 tdesc = LibWGPU::TextureDescriptor.new
 tdesc.label = WGPU.empty_string_view
 tdesc.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::CopySrc
@@ -82,7 +82,7 @@ LibWGPU.queue_submit(queue, 1_u64, cmds.to_unsafe)
 WGPU.map_buffer_read(instance, readback, buf_size)
 pixels = LibWGPU.buffer_get_mapped_range(readback, 0_u64, buf_size).as(UInt8*)
 
-# Compte les pixels clairs (glyphes blancs sur fond noir).
+# Count the bright pixels (white glyphs on a black background).
 bright = 0
 (SIZE * SIZE).times do |i|
   o = i.to_i * 4
@@ -90,9 +90,9 @@ bright = 0
 end
 LibWGPU.buffer_unmap(readback)
 
-puts "pixels clairs (texte) = #{bright}"
+puts "bright pixels (text) = #{bright}"
 
-# Nettoyage
+# Cleanup
 LibWGPU.buffer_release(readback)
 LibWGPU.texture_view_release(target_view)
 LibWGPU.texture_release(target_tex)
@@ -102,9 +102,9 @@ renderer.release
 gpu.release
 
 if bright > 20
-  puts "✅ rendu de texte OK"
+  puts "✅ text rendering OK"
   exit 0
 else
-  puts "❌ aucun pixel de texte détecté"
+  puts "❌ no text pixels detected"
   exit 1
 end

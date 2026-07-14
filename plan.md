@@ -1,79 +1,79 @@
-# Flock — plan de conception
+# Flock — design plan
 
-**Flock** est un moteur de jeu en Crystal orienté données (Data-Oriented Design), inspiré de
-Bevy, construit au-dessus de [`wgpu-cr`](../wgpu-cr) pour le rendu et de **SDL3** pour la
-plateforme (fenêtre, entrées, manettes, audio, timing).
+**Flock** is a data-oriented (Data-Oriented Design) game engine in Crystal, inspired by
+Bevy, built on top of [`wgpu-cr`](../wgpu-cr) for rendering and **SDL3** for the
+platform (window, input, gamepads, audio, timing).
 
-Objectifs directeurs :
+Guiding goals:
 
-- **Facile à utiliser** : démarrage en une ligne (`DefaultPlugins`), API ergonomique.
-- **ECS performant** : sparse sets, composants `struct` cache-friendly, mutation par pointeur.
-- **Rendu 2D texturé** + **caméras 2D/3D** + **viewports** + **shaders façon wgpu** (WGSL).
-- **Manettes** (SDL_Gamepad, hotplug) et **audio** (mixage SDL3).
-- Un **exemple jouable** : Space Invaders.
+- **Easy to use**: one-line startup (`DefaultPlugins`), ergonomic API.
+- **Performant ECS**: sparse sets, cache-friendly `struct` components, mutation via pointer.
+- **Textured 2D rendering** + **2D/3D cameras** + **viewports** + **wgpu-style shaders** (WGSL).
+- **Gamepads** (SDL_Gamepad, hotplug) and **audio** (SDL3 mixing).
+- A **playable example**: Space Invaders.
 
-> Historique : ce plan corrige des défauts de la première ébauche — mutation des composants
-> cassée, stockage indexé par `String`, query non optimale, `@free_ids` mort faute de
-> `despawn`, aucune ressource/singleton, systèmes à plat.
+> History: this plan fixes flaws of the first draft — broken component mutation,
+> `String`-indexed storage, suboptimal query, dead `@free_ids` for lack of
+> `despawn`, no resources/singletons, flat systems.
 
-## Décisions d'architecture
+## Architecture decisions
 
-- **Composants = `struct`** (dense arrays cache-friendly). Mutation via **accès pointeur** :
-  la query yield des `Pointer(T)` et `pos.value.x += v` **mute en place** (sémantique Crystal
-  vérifiée : `ptr.value.field = …` écrit dans le dense array).
-- **Rendu = sprites texturés** dès la phase 1 (PNG via SDL_image, sampler + bind group texture).
-- **Shaders façon wgpu** : abstraction `Shader` (WGSL fichier/string → module) + `Material`
-  (shader + pipeline + bind group + uniforms), avec accès aux handles `LibWGPU` bruts pour les
-  cas avancés. Le sprite par défaut est un matériau intégré.
-- **Caméras 2D et 3D + viewports** : abstraction caméra générique (matrice view-projection +
-  sous-région d'écran). Le rendu 2D la consomme en phase 1 ; la math 3D (perspective, look_at)
-  est fournie, le rendu de meshes 3D viendra plus tard.
-- **Plateforme = SDL3.** Choix retenu à l'implémentation : **binding FFI maison minimal
-  embarqué** (`src/flock/platform/lib_sdl.cr`, lié à SDL3 Homebrew) plutôt que le shard
-  `Hadeweka/SDL-Crystal-Bindings` — linking entièrement maîtrisé, surface réduite à ce que
-  Flock utilise, aucun `shards install`. Extractible en `../sdl3-cr` ou remplaçable par le
-  shard plus tard. *(À confirmer avec l'utilisateur.)*
-- **Rendu bas niveau = wgpu-cr**. Surface wgpu créée depuis le `CAMetalLayer` de
-  `SDL_Metal_CreateView`/`SDL_Metal_GetLayer` (remplace la glue Objective-C de wgpu-cr).
-- macOS/Metal d'abord. Prérequis : `brew install sdl3 sdl3_image` ; wgpu-native téléchargé par
-  le postinstall de wgpu-cr.
+- **Components = `struct`** (cache-friendly dense arrays). Mutation via **pointer access**:
+  the query yields `Pointer(T)` and `pos.value.x += v` **mutates in place** (Crystal semantics
+  verified: `ptr.value.field = …` writes into the dense array).
+- **Rendering = textured sprites** from phase 1 (PNG via SDL_image, sampler + texture bind group).
+- **wgpu-style shaders**: `Shader` abstraction (WGSL file/string → module) + `Material`
+  (shader + pipeline + bind group + uniforms), with access to raw `LibWGPU` handles for
+  advanced cases. The default sprite is a built-in material.
+- **2D and 3D cameras + viewports**: generic camera abstraction (view-projection matrix +
+  screen sub-region). 2D rendering consumes it in phase 1; 3D math (perspective, look_at)
+  is provided, 3D mesh rendering comes later.
+- **Platform = SDL3.** Choice made at implementation time: **minimal embedded homegrown
+  FFI binding** (`src/flock/platform/lib_sdl.cr`, linked to Homebrew SDL3) rather than the
+  `Hadeweka/SDL-Crystal-Bindings` shard — fully controlled linking, surface reduced to what
+  Flock uses, no `shards install`. Extractable into `../sdl3-cr` or replaceable by the
+  shard later. *(To confirm with the user.)*
+- **Low-level rendering = wgpu-cr**. wgpu surface created from the `CAMetalLayer` of
+  `SDL_Metal_CreateView`/`SDL_Metal_GetLayer` (replaces wgpu-cr's Objective-C glue).
+- macOS/Metal first. Prerequisites: `brew install sdl3 sdl3_image`; wgpu-native downloaded by
+  wgpu-cr's postinstall.
 
-## Arborescence
+## Directory tree
 
 ```
 flock/
 ├── shard.yml
 ├── README.md
-├── assets/                     # sprites .png, sons .wav
+├── assets/                     # .png sprites, .wav sounds
 ├── src/
 │   ├── flock.cr
 │   └── flock/
 │       ├── ecs/
 │       │   ├── entity.cr       # struct Entity(id, generation)
-│       │   ├── component.cr    # module Component + ComponentRegistry (ids entiers denses)
-│       │   ├── sparse_set.cr   # Storage (abstrait) + SparseSet(T) (accès pointeur)
-│       │   ├── world.cr        # spawn/despawn, storages, ressources, query (yield pointeurs)
-│       │   └── commands.cr     # mutations structurelles différées
+│       │   ├── component.cr    # module Component + ComponentRegistry (dense integer ids)
+│       │   ├── sparse_set.cr   # Storage (abstract) + SparseSet(T) (pointer access)
+│       │   ├── world.cr        # spawn/despawn, storages, resources, query (yields pointers)
+│       │   └── commands.cr     # deferred structural mutations
 │       ├── app/
 │       │   ├── schedule.cr     # enum Schedule (Startup, First, Update, Render, Last)
 │       │   ├── plugin.cr       # abstract Plugin
-│       │   └── app.cr          # App : plugins, systèmes par schedule, boucle
+│       │   └── app.cr          # App: plugins, systems per schedule, loop
 │       ├── math/
 │       │   └── math3d.cr       # Vec2, Vec3, Mat4 (ortho, perspective, look_at)
-│       ├── time.cr             # ressource Time (delta, elapsed)
-│       ├── assets.cr           # Assets : cache textures/polices/sons + libération
+│       ├── time.cr             # Time resource (delta, elapsed)
+│       ├── assets.cr           # Assets: texture/font/sound cache + release
 │       ├── platform/
-│       │   ├── window.cr       # WindowPlugin : fenêtre SDL + surface wgpu + GpuContext
-│       │   ├── input.cr        # InputPlugin : clavier + manettes (Input, Gamepad)
-│       │   └── audio.cr        # AudioPlugin : chargement/lecture WAV (Audio, Sound)
+│       │   ├── window.cr       # WindowPlugin: SDL window + wgpu surface + GpuContext
+│       │   ├── input.cr        # InputPlugin: keyboard + gamepads (Input, Gamepad)
+│       │   └── audio.cr        # AudioPlugin: WAV loading/playback (Audio, Sound)
 │       └── render/
 │           ├── components.cr   # Transform2D, Transform3D, Sprite
 │           ├── camera.cr       # Camera2D, Camera3D, Viewport, Projection
-│           ├── texture.cr      # PNG (SDL_image) / surface -> texture wgpu
-│           ├── font.cr         # Font (SDL_ttf) : texte -> texture
-│           ├── shader.cr       # Shader : WGSL (fichier/string) -> module wgpu
-│           ├── material.cr     # Material : shader + pipeline + bind group + uniforms
-│           ├── renderer2d.cr   # pipeline quad texturé instancié (matériau par défaut)
+│           ├── texture.cr      # PNG (SDL_image) / surface -> wgpu texture
+│           ├── font.cr         # Font (SDL_ttf): text -> texture
+│           ├── shader.cr       # Shader: WGSL (file/string) -> wgpu module
+│           ├── material.cr     # Material: shader + pipeline + bind group + uniforms
+│           ├── renderer2d.cr   # instanced textured quad pipeline (default material)
 │           └── render_plugin.cr
 ├── examples/
 │   └── space_invaders.cr
@@ -85,14 +85,14 @@ flock/
     └── math_spec.cr            # ortho/perspective/look_at
 ```
 
-## Conception détaillée
+## Detailed design
 
-### 1. ECS — cœur (composants `struct`, mutation par pointeur)
+### 1. ECS — core (`struct` components, mutation via pointer)
 
-**Entity** (`ecs/entity.cr`) : `struct Entity(id : UInt32, generation : UInt32)`. Id gardé en
-`UInt32` de bout en bout (plus de `.to_i` dans le hot path).
+**Entity** (`ecs/entity.cr`): `struct Entity(id : UInt32, generation : UInt32)`. Id kept as
+`UInt32` end to end (no more `.to_i` in the hot path).
 
-**Component + registre** (`ecs/component.cr`) — id entier dense par type, sans hashing :
+**Component + registry** (`ecs/component.cr`) — dense integer id per type, no hashing:
 
 ```crystal
 module Flock
@@ -111,9 +111,9 @@ module Flock
 end
 ```
 
-**Storage + SparseSet** (`ecs/sparse_set.cr`) — interface type-erased (nécessaire pour
-`despawn`), sparse en sentinelle `-1` (pas d'union nilable), et **accès pointeur** pour la
-mutation en place :
+**Storage + SparseSet** (`ecs/sparse_set.cr`) — type-erased interface (needed for
+`despawn`), sparse with `-1` sentinel (no nilable union), and **pointer access** for
+in-place mutation:
 
 ```crystal
 abstract class Storage
@@ -127,22 +127,22 @@ class SparseSet(T) < Storage
   @sparse = [] of Int32                 # -1 = absent
 
   def size : Int32; @dense.size; end
-  def insert(entity, component : T)     # update en place ou push
-  def index_of?(entity : Entity) : Int32?           # 1 lookup, contrôle de génération
-  def get_ptr(entity : Entity) : Pointer(T)?        # @dense.to_unsafe + idx (nil si absent)
+  def insert(entity, component : T)     # in-place update or push
+  def index_of?(entity : Entity) : Int32?           # 1 lookup, generation check
+  def get_ptr(entity : Entity) : Pointer(T)?        # @dense.to_unsafe + idx (nil if absent)
   def has?(entity : Entity) : Bool
   def remove(entity : Entity)           # swap-and-pop O(1)
   def remove_untyped(entity : Entity); remove(entity); end
 end
 ```
 
-> **Note pointeurs** : `get_ptr` renvoie un pointeur dans le dense array, valide tant qu'aucune
-> insertion/suppression ne réalloue le tableau. D'où la règle : toute mutation structurelle
-> pendant une itération passe par `Commands` (différé).
+> **Pointer note**: `get_ptr` returns a pointer into the dense array, valid as long as no
+> insert/remove reallocates the array. Hence the rule: any structural mutation
+> during iteration goes through `Commands` (deferred).
 
-**World** (`ecs/world.cr`) — storages en `Array(Storage?)` indexés par `component_id` (O(1),
-zéro hash), `despawn` réel alimentant `@free_ids`, ressources (singletons), et query par
-pointeurs :
+**World** (`ecs/world.cr`) — storages in `Array(Storage?)` indexed by `component_id` (O(1),
+zero hash), real `despawn` feeding `@free_ids`, resources (singletons), and query by
+pointers:
 
 ```crystal
 class World
@@ -150,28 +150,28 @@ class World
   @resources = {} of String => Resource
   # + next_entity_id / generations / free_ids
 
-  def spawn : Entity                    # recycle via free_ids, bump generation
-  def despawn(entity : Entity)          # remove_untyped sur tous les storages ; id -> free_ids
-  def storage(t : T.class) : SparseSet(T) forall T   # indexé par T.component_id ; valide au
-                                                     # compile que T inclut Flock::Component
+  def spawn : Entity                    # recycles via free_ids, bumps generation
+  def despawn(entity : Entity)          # remove_untyped on all storages; id -> free_ids
+  def storage(t : T.class) : SparseSet(T) forall T   # indexed by T.component_id; checks at
+                                                     # compile time that T includes Flock::Component
   def add(entity, c : T) forall T
   def get(entity, t : T.class) : T? forall T
   def remove(entity, t : T.class) forall T
 
   def insert_resource(r : Resource)
-  def resource(t : T.class) : T forall T             # lève si absent
+  def resource(t : T.class) : T forall T             # raises if absent
   def resource?(t : T.class) : T? forall T
 
-  # Query : pilote sur le plus PETIT ensemble d'entités, 1 lookup par composant,
-  # yield de POINTEURS. En Crystal un macro n'est PAS invocable sur une instance :
-  # on génère donc une vraie surcharge de méthode `query` par arité (1 à 8).
+  # Query: driven by the SMALLEST entity set, 1 lookup per component,
+  # yields POINTERS. In Crystal a macro is NOT callable on an instance:
+  # so we generate a real `query` method overload per arity (1 to 8).
   #   world.query(A, B) { |e, a, b| p = a.value; p.x += b.value.dx; a.value = p }
 end
 
 abstract class Resource; end
 ```
 
-Génération des surcharges (driver = plus petite liste d'entités, un lookup par composant) :
+Overload generation (driver = smallest entity list, one lookup per component):
 
 ```crystal
 {% for n in 1..8 %}
@@ -179,7 +179,7 @@ Génération des surcharges (driver = plus petite liste d'entités, un lookup pa
     {% for i in 1..n %} s{{i}} = storage(T{{i}}) {% end %}
     drv = s1.entities
     {% for i in 2..n %} drv = s{{i}}.entities if s{{i}}.entities.size < drv.size {% end %}
-    drv.dup.each do |entity|            # dup : sûr si le bloc despawn
+    drv.dup.each do |entity|            # dup: safe if the block despawns
       {% for i in 1..n %} p{{i}} = s{{i}}.get_ptr(entity); next unless p{{i}} {% end %}
       yield entity, {% for i in 1..n %}p{{i}},{% end %}
     end
@@ -187,32 +187,32 @@ Génération des surcharges (driver = plus petite liste d'entités, un lookup pa
 {% end %}
 ```
 
-> **Idiome de mutation** : le sucre `ptr.value.x += v` ne persiste PAS en Crystal (le
-> compound-assign lit une copie). Utiliser le write-back du struct
-> (`p = ptr.value; p.x += v; ptr.value = p`) ou l'affectation directe de champ
-> (`ptr.value.x = ptr.value.x + v`, qui, elle, mute en place). Vérifié par test.
+> **Mutation idiom**: the `ptr.value.x += v` sugar does NOT persist in Crystal (the
+> compound-assign reads a copy). Use the struct write-back
+> (`p = ptr.value; p.x += v; ptr.value = p`) or direct field assignment
+> (`ptr.value.x = ptr.value.x + v`, which does mutate in place). Verified by test.
 
-**Commands** (`ecs/commands.cr`) — mutations structurelles différées (évite d'invalider une
-query en cours et les pointeurs dense), appliquées en fin de stage :
+**Commands** (`ecs/commands.cr`) — deferred structural mutations (avoids invalidating an
+in-progress query and dense pointers), applied at end of stage:
 
 ```crystal
 class Commands
-  def spawn(*components) : Entity       # surcharges 0..8 (id réservé tout de suite, adds en file)
+  def spawn(*components) : Entity       # overloads 0..8 (id reserved immediately, adds queued)
   def despawn(entity : Entity)
   def add(entity, component)
-  def apply(world : World)              # vidé par l'App après chaque schedule
+  def apply(world : World)              # drained by the App after each schedule
 end
 ```
 
 ### 2. App, Schedule, Plugins
 
-`schedule.cr` : `enum Schedule; Startup; First; FixedUpdate; Update; Render; Last; end`.
-`FixedUpdate` s'exécute 0..N fois par frame via un accumulateur (`App#advance_fixed`, pas fixe
-`fixed_dt`/`fixed_hz`, borné par `MAX_FIXED_STEPS`) — pour une physique indépendante du fps
-(les systèmes utilisent `Time#fixed_delta`).
-`plugin.cr` : `abstract class Plugin; abstract def build(app : App); end`.
+`schedule.cr`: `enum Schedule; Startup; First; FixedUpdate; Update; Render; Last; end`.
+`FixedUpdate` runs 0..N times per frame via an accumulator (`App#advance_fixed`, fixed step
+`fixed_dt`/`fixed_hz`, bounded by `MAX_FIXED_STEPS`) — for fps-independent physics
+(systems use `Time#fixed_delta`).
+`plugin.cr`: `abstract class Plugin; abstract def build(app : App); end`.
 
-`app.cr` — API volontairement simple :
+`app.cr` — deliberately simple API:
 
 ```crystal
 Flock::App.new
@@ -220,98 +220,97 @@ Flock::App.new
   .add_startup { |w| ... }
   .add_system(Schedule::Update) { |w, cmd| ... }
   .run
-# run : build des plugins ; systèmes Startup une fois ;
-#   boucle : SDL_PollEvent -> Time.tick -> First/Update/Render/Last ; commands.apply après chaque stage.
+# run: build plugins; Startup systems once;
+#   loop: SDL_PollEvent -> Time.tick -> First/Update/Render/Last; commands.apply after each stage.
 ```
 
-Systèmes = `Proc` (`World ->` ou `World, Commands ->`). `DefaultPlugins` agrège tout pour un
-démarrage en une ligne. (Les paramètres de systèmes typés façon Bevy restent une évolution
-possible.)
+Systems = `Proc` (`World ->` or `World, Commands ->`). `DefaultPlugins` aggregates everything for
+one-line startup. (Bevy-style typed system parameters remain a possible evolution.)
 
 ### 3. Math (`math/math3d.cr`)
 
-`Vec2`, `Vec3`, `Mat4` (structs). Fonctions clés :
+`Vec2`, `Vec3`, `Mat4` (structs). Key functions:
 
-- `Mat4.orthographic(left, right, bottom, top, near, far)` — caméra 2D.
-- `Mat4.perspective(fov_y, aspect, near, far)` — caméra 3D.
-- `Mat4.look_at(eye : Vec3, target : Vec3, up : Vec3)` — vue 3D.
+- `Mat4.orthographic(left, right, bottom, top, near, far)` — 2D camera.
+- `Mat4.perspective(fov_y, aspect, near, far)` — 3D camera.
+- `Mat4.look_at(eye : Vec3, target : Vec3, up : Vec3)` — 3D view.
 - multiplication `Mat4 * Mat4`, `Mat4 * Vec4`, translate/rotate/scale.
 
-### 4. Ressource Time (`time.cr`)
+### 4. Time resource (`time.cr`)
 
-`Time < Resource` : `delta`/`elapsed` (secondes) depuis `SDL_GetPerformanceCounter` /
-`Frequency`. Base du mouvement indépendant du framerate.
+`Time < Resource`: `delta`/`elapsed` (seconds) from `SDL_GetPerformanceCounter` /
+`Frequency`. Basis for framerate-independent movement.
 
-### 5. Plateforme SDL3
+### 5. SDL3 platform
 
-**Window** (`platform/window.cr`) — `WindowPlugin` :
-`SDL_Init(VIDEO|GAMEPAD|AUDIO)` ; `SDL_CreateWindow` ; `make_surface` crée la surface wgpu
-**selon la plateforme** (via `SDL_GetWindowProperties`) : Metal/`CAMetalLayer` (macOS),
-`SurfaceSourceXlibWindow`/`WaylandSurface` (Linux, détection runtime `SDL_GetCurrentVideoDriver`),
-`SurfaceSourceWindowsHWND` (Windows) → `instance_create_surface` (puis adapter/device/queue/
-capabilities/`surface_configure` en `Fifo`). Reconfiguration sur redimensionnement.
-(macOS testé au runtime ; Linux/Windows vérifiés en cross-compilation.)
-Publie une ressource `GpuContext < Resource` (instance, adapter, device, queue, surface,
-format, taille fenêtre/framebuffer).
+**Window** (`platform/window.cr`) — `WindowPlugin`:
+`SDL_Init(VIDEO|GAMEPAD|AUDIO)`; `SDL_CreateWindow`; `make_surface` creates the wgpu surface
+**per platform** (via `SDL_GetWindowProperties`): Metal/`CAMetalLayer` (macOS),
+`SurfaceSourceXlibWindow`/`WaylandSurface` (Linux, runtime detection `SDL_GetCurrentVideoDriver`),
+`SurfaceSourceWindowsHWND` (Windows) → `instance_create_surface` (then adapter/device/queue/
+capabilities/`surface_configure` in `Fifo`). Reconfiguration on resize.
+(macOS tested at runtime; Linux/Windows verified via cross-compilation.)
+Publishes a `GpuContext < Resource` resource (instance, adapter, device, queue, surface,
+format, window/framebuffer size).
 
-**Input** (`platform/input.cr`) — `InputPlugin`, **polling** par frame (plus simple que les
-callbacks, contraints par les procs non-capturants) :
+**Input** (`platform/input.cr`) — `InputPlugin`, per-frame **polling** (simpler than
+callbacks, constrained by non-capturing procs):
 
 ```crystal
 input = world.resource(Flock::Input)
 input.pressed?(Key::Left)            # SDL_GetKeyboardState
-input.just_pressed?(Key::Space)      # diff avec la frame précédente
+input.just_pressed?(Key::Space)      # diff with the previous frame
 pad = input.gamepad?(0)
 pad.try &.pressed?(Button::South)    # SDL_GetGamepadButton
-pad.try &.axis(Axis::LeftX)          # SDL_GetGamepadAxis, deadzone appliquée
+pad.try &.axis(Axis::LeftX)          # SDL_GetGamepadAxis, deadzone applied
 
-input.mouse_position                          # pixels framebuffer (HiDPI)
+input.mouse_position                          # framebuffer pixels (HiDPI)
 input.mouse_pressed?(MouseButton::Left)
-camera.screen_to_world(input.mouse_position, gpu.width.to_f32, gpu.height.to_f32) # -> monde
-input.mouse_wheel                             # défilement de la frame (Vec2, via events)
-input.text_input                              # texte saisi UTF-8 (start_text_input pour activer)
+camera.screen_to_world(input.mouse_position, gpu.width.to_f32, gpu.height.to_f32) # -> world
+input.mouse_wheel                             # frame scroll (Vec2, via events)
+input.text_input                              # UTF-8 typed text (start_text_input to enable)
 ```
 
-Manettes : `SDL_OpenGamepad` sur `SDL_EVENT_GAMEPAD_ADDED`, fermeture sur `_REMOVED`
-(hotplug), mappings intégrés SDL. `Key`/`Button`/`Axis` = enums Flock découplés du binding brut.
+Gamepads: `SDL_OpenGamepad` on `SDL_EVENT_GAMEPAD_ADDED`, close on `_REMOVED`
+(hotplug), built-in SDL mappings. `Key`/`Button`/`Axis` = Flock enums decoupled from the raw binding.
 
-**Audio** (`platform/audio.cr`) — `AudioPlugin` :
+**Audio** (`platform/audio.cr`) — `AudioPlugin`:
 
 ```crystal
 audio = world.resource(Flock::Audio)
-shoot = audio.load("assets/shoot.wav")   # SDL_LoadWAV -> PCM décodé (Sound)
-audio.play(shoot)                        # volume optionnel
+shoot = audio.load("assets/shoot.wav")   # SDL_LoadWAV -> decoded PCM (Sound)
+audio.play(shoot)                        # optional volume
 ```
 
-Device logique via `SDL_OpenAudioDeviceStream` ; lecture simultanée via le **mixage natif
-SDL3** (plusieurs `SDL_AudioStream` liés au même device). `Sound` = PCM pré-décodé (une seule
-décompression par fichier). WAV en phase 1 ; OGG/MP3 (musique) via SDL3_mixer plus tard.
+Logical device via `SDL_OpenAudioDeviceStream`; simultaneous playback via **native SDL3
+mixing** (multiple `SDL_AudioStream`s bound to the same device). `Sound` = pre-decoded PCM (a single
+decompression per file). WAV in phase 1; OGG/MP3 (music) via SDL3_mixer later.
 
-### 6. Caméras & viewports (`render/camera.cr`)
+### 6. Cameras & viewports (`render/camera.cr`)
 
-Abstraction générique : une caméra produit une **matrice view-projection** et rend dans un
-**viewport** (sous-région d'écran). Deux composants ergonomiques, tous deux `struct` +
-`include Component` :
+Generic abstraction: a camera produces a **view-projection matrix** and renders into a
+**viewport** (screen sub-region). Two ergonomic components, both `struct` +
+`include Component`:
 
 ```crystal
-struct Viewport                          # sous-région en pixels (nil = plein écran)
+struct Viewport                          # sub-region in pixels (nil = fullscreen)
   property x, y, width, height : Float32
 end
 
 struct Camera2D
-  property position : Vec2               # centre visé
-  property zoom : Float64                # 1.0 = neutre
+  property position : Vec2               # target center
+  property zoom : Float64                # 1.0 = neutral
   property rotation : Float64
   property viewport : Viewport?
-  property order : Int32                 # ordre de rendu (croissant)
-  property clear_color : Color?          # nil = pas de clear (superposition)
+  property order : Int32                 # render order (ascending)
+  property clear_color : Color?          # nil = no clear (overlay)
   property active : Bool
-  # view_projection(fb_size) : Mat4  -> ortho(taille viewport) * inverse(transform caméra)
+  # view_projection(fb_size) : Mat4  -> ortho(viewport size) * inverse(camera transform)
 end
 
 struct Camera3D
   property position : Vec3
-  property target   : Vec3               # (ou orientation) ; up : Vec3
+  property target   : Vec3               # (or orientation); up : Vec3
   property up       : Vec3
   property fov_y    : Float64
   property near, far : Float64
@@ -319,111 +318,111 @@ struct Camera3D
   property order    : Int32
   property clear_color : Color?
   property active   : Bool
-  # view_projection(fb_size) : Mat4  -> perspective(fov, aspect du viewport) * look_at(...)
+  # view_projection(fb_size) : Mat4  -> perspective(fov, viewport aspect) * look_at(...)
 end
 ```
 
-Le système de rendu :
+The rendering system:
 
-1. Rassemble toutes les caméras (2D et 3D) actives, triées par `order`.
-2. Pour chacune : calcule l'aspect ratio depuis son `viewport` (ou le framebuffer) ; appelle
-   `render_pass_encoder_set_viewport` + `set_scissor_rect` (présents dans wgpu-cr) ; clear
-   optionnel ; pousse la matrice view-projection dans l'uniform ; rend la scène visible.
+1. Gathers all active cameras (2D and 3D), sorted by `order`.
+2. For each: computes the aspect ratio from its `viewport` (or the framebuffer); calls
+   `render_pass_encoder_set_viewport` + `set_scissor_rect` (present in wgpu-cr); optional
+   clear; pushes the view-projection matrix into the uniform; renders the visible scene.
 
-Cas d'usage couverts : split-screen (2 caméras, 2 viewports), minimap (petite caméra en
-overlay, `clear_color = nil`), HUD. **Phase 1 : seul le pass 2D (Camera2D) est câblé** ;
-Camera3D + math perspective sont fournies, le pass de meshes 3D arrive plus tard.
+Use cases covered: split-screen (2 cameras, 2 viewports), minimap (small overlay camera,
+`clear_color = nil`), HUD. **Phase 1: only the 2D pass (Camera2D) is wired**;
+Camera3D + perspective math are provided, the 3D mesh pass comes later.
 
-### 7. Rendu 2D texturé (`render/`)
+### 7. Textured 2D rendering (`render/`)
 
-**Composants** (`render/components.cr`) — structs : `Transform2D` (position `Vec2`, rotation,
-scale `Vec2`), `Transform3D` (Vec3 + rotation + scale, pour la 3D à venir), `Sprite`
-(`texture : TextureHandle`, `color : Color` teinte, `size : Vec2`, `uv_rect` pour atlas).
+**Components** (`render/components.cr`) — structs: `Transform2D` (position `Vec2`, rotation,
+scale `Vec2`), `Transform3D` (Vec3 + rotation + scale, for upcoming 3D), `Sprite`
+(`texture : TextureHandle`, `color : Color` tint, `size : Vec2`, `uv_rect` for atlases).
 
-**Texture** (`render/texture.cr`) : `IMG_Load` (SDL_image) → pixels RGBA →
-`device_create_texture` + `queue_write_texture` ; un `Sampler` partagé. Cache par chemin
+**Texture** (`render/texture.cr`): `IMG_Load` (SDL_image) → RGBA pixels →
+`device_create_texture` + `queue_write_texture`; a shared `Sampler`. Cached by path
 (`Hash(String, TextureHandle)`).
 
-**Renderer2D** (`render/renderer2d.cr`) — quads texturés instanciés (implémentation retenue,
-plus simple que des vertex/index buffers) :
+**Renderer2D** (`render/renderer2d.cr`) — instanced textured quads (chosen implementation,
+simpler than vertex/index buffers):
 
-- **Géométrie dans le shader** : le quad unitaire (6 sommets pos+uv) est un `const` WGSL
-  indexé par `@builtin(vertex_index)`. Aucun vertex/index buffer.
-- **Storage buffer d'instances** réécrit par frame (`queue_write_buffer`) : par entité
-  (Transform2D, Sprite) → matrice modèle (16f) + teinte (4f) + uv (4f) = 96 o. Le shader lit
-  `instances[@builtin(instance_index)]`. Capacité doublée à la demande.
-- uniform buffer : view-projection **de la caméra courante** ; bind groups en **layout auto**
-  (`render_pipeline_get_bind_group_layout`) : group0 = uniform+storage, group1 = texture+sampler.
-- **Batching conscient des couches** : tri des sprites par `(z, texture)` puis un
-  `draw(6, count, 0, first_instance)` par série contiguë de même texture → superposition
-  correcte **et** draws minimaux (N sprites d'une même texture = 1 draw). Stats exposées :
+- **Geometry in the shader**: the unit quad (6 pos+uv vertices) is a WGSL `const`
+  indexed by `@builtin(vertex_index)`. No vertex/index buffer.
+- **Instance storage buffer** rewritten per frame (`queue_write_buffer`): per entity
+  (Transform2D, Sprite) → model matrix (16f) + tint (4f) + uv (4f) = 96 B. The shader reads
+  `instances[@builtin(instance_index)]`. Capacity doubled on demand.
+- uniform buffer: view-projection **of the current camera**; bind groups in **auto layout**
+  (`render_pipeline_get_bind_group_layout`): group0 = uniform+storage, group1 = texture+sampler.
+- **Layer-aware batching**: sprites sorted by `(z, texture)` then one
+  `draw(6, count, 0, first_instance)` per contiguous run of the same texture → correct
+  layering **and** minimal draws (N sprites of the same texture = 1 draw). Stats exposed:
   `Renderer2D#last_sprites` / `#last_draw_calls`.
-- **blending alpha activé** ; `fs_main` = `texture * teinte`.
-- Chemin par frame calqué sur `triangle.cr` (`surface_get_current_texture` → render pass →
-  submit → `surface_present`) ; la 1re frame (surface pas encore prête) est sautée.
+- **alpha blending enabled**; `fs_main` = `texture * tint`.
+- Per-frame path modeled on `triangle.cr` (`surface_get_current_texture` → render pass →
+  submit → `surface_present`); the 1st frame (surface not ready yet) is skipped.
 
-**RenderPlugin** (`render/render_plugin.cr`) : crée Renderer2D + Sampler au Startup (depuis
-`GpuContext`), enregistre le système de rendu (itère les caméras) en `Schedule::Render`.
+**RenderPlugin** (`render/render_plugin.cr`): creates Renderer2D + Sampler at Startup (from
+`GpuContext`), registers the rendering system (iterates cameras) in `Schedule::Render`.
 
-### 8. Shaders & matériaux — façon wgpu (`render/shader.cr`, `render/material.cr`)
+### 8. Shaders & materials — wgpu-style (`render/shader.cr`, `render/material.cr`)
 
-Objectif : exposer le modèle de shaders de wgpu (WGSL, pipeline, bind group, uniforms) de
-façon idiomatique, sans masquer le bas niveau. wgpu-cr étant un binding mince, `Shader` et
-`Material` sont de fines commodités typées au-dessus de `device_create_shader_module` /
-`device_create_render_pipeline`, les handles `LibWGPU` restant accessibles.
+Goal: expose wgpu's shader model (WGSL, pipeline, bind group, uniforms) in an
+idiomatic way, without hiding the low level. Since wgpu-cr is a thin binding, `Shader` and
+`Material` are thin typed conveniences on top of `device_create_shader_module` /
+`device_create_render_pipeline`, with the `LibWGPU` handles remaining accessible.
 
-**Shader** (`render/shader.cr`) — reprend le pattern de `triangle.cr` (`WGPU.string_view` →
-`ShaderSourceWGSL` → `device_create_shader_module`) :
+**Shader** (`render/shader.cr`) — reuses the `triangle.cr` pattern (`WGPU.string_view` →
+`ShaderSourceWGSL` → `device_create_shader_module`):
 
 ```crystal
 struct Shader
   getter module : LibWGPU::ShaderModule
   def self.from_source(gpu : GpuContext, wgsl : String, *, vertex = "vs_main", fragment = "fs_main") : Shader
-  def self.from_file(gpu : GpuContext, path : String, **kw) : Shader   # lit un .wgsl
+  def self.from_file(gpu : GpuContext, path : String, **kw) : Shader   # reads a .wgsl
 end
 ```
 
-**Material** (`render/material.cr`) — associe un shader à une config de pipeline et à des
-uniforms utilisateur ; construit le `RenderPipeline` + bind group correspondants :
+**Material** (`render/material.cr`) — associates a shader with a pipeline config and
+user uniforms; builds the matching `RenderPipeline` + bind group:
 
 ```crystal
 class Material
   def self.build(gpu : GpuContext, shader : Shader, *,
-                 blend      = Blend::AlphaBlend,        # ou Opaque, Additive
+                 blend      = Blend::AlphaBlend,        # or Opaque, Additive
                  topology   = Topology::TriangleList,
-                 vertex_layout : VertexLayout = VertexLayout.sprite,  # pos+uv par défaut
+                 vertex_layout : VertexLayout = VertexLayout.sprite,  # pos+uv by default
                  bindings   : Array(Binding) = ...) : Material         # uniforms/textures/samplers
-  def set_uniform(name : String, value)   # écrit dans l'uniform buffer via queue_write_buffer
+  def set_uniform(name : String, value)   # writes into the uniform buffer via queue_write_buffer
   getter pipeline : LibWGPU::RenderPipeline
   getter bind_group : LibWGPU::BindGroup
 end
 ```
 
-- **Matériau par défaut** : le Renderer2D en fournit un intégré (shader sprite texturé +
-  teinte + view-projection). Chemin « facile » : l'utilisateur ne touche à rien.
-- **Matériaux personnalisés** : `Sprite` (et plus tard `Mesh`) peut référencer un
-  `MaterialHandle`. Le renderer batch par matériau puis par texture. Permet des effets par
-  entité (dissolve, outline, teinte animée…).
-- **Post-processing** : `PostProcess` = matériau plein écran dont le fragment lit la texture de
-  scène (rendu vers une texture intermédiaire puis pass plein écran). Évolution proche ;
-  l'abstraction Material le rend direct.
-- **Échappatoire bas niveau** : `Shader#module`, `Material#pipeline`/`#bind_group` exposent les
-  handles `LibWGPU` — un utilisateur avancé pilote le render pass à la main, « façon wgpu ».
+- **Default material**: Renderer2D provides a built-in one (textured sprite shader +
+  tint + view-projection). The "easy" path: the user touches nothing.
+- **Custom materials**: `Sprite` (and later `Mesh`) can reference a
+  `MaterialHandle`. The renderer batches by material then by texture. Enables per-entity
+  effects (dissolve, outline, animated tint…).
+- **Post-processing**: `PostProcess` = fullscreen material whose fragment reads the scene
+  texture (render into an intermediate texture then fullscreen pass). Near-term evolution;
+  the Material abstraction makes it straightforward.
+- **Low-level escape hatch**: `Shader#module`, `Material#pipeline`/`#bind_group` expose the
+  `LibWGPU` handles — an advanced user drives the render pass by hand, "wgpu-style".
 
-### 9. Exemple — Space Invaders (`examples/space_invaders.cr`)
+### 9. Example — Space Invaders (`examples/space_invaders.cr`)
 
-Démontre ECS + caméra + entrées (clavier **et** manette) + audio + sprites texturés :
+Demonstrates ECS + camera + input (keyboard **and** gamepad) + audio + textured sprites:
 
-- **Startup** : `Camera2D` (plein écran) ; joueur, grille d'invaders, sprites PNG chargés.
-- **Composants jeu** : `Player`, `Invader`, `Bullet`, `Velocity` (+ Transform2D, Sprite).
-- **Systèmes Update** : input joueur (clavier/manette → déplacement, tir via `Commands` +
-  `audio.play(shoot)`) ; mouvement (`query(Transform2D, Velocity)` → write-back du
-  Transform : `tr = t.value; tr.position += … * Time.delta; t.value = tr`) ; déplacement
-  de groupe des invaders ; collisions
-  bullet×invader (AABB → despawn des deux + explosion) ; nettoyage des bullets hors écran.
-- **Render** : automatique (tout ce qui a Transform2D + Sprite, vu par la Camera2D).
-- **Démo shader** (optionnelle) : matériau custom sur les invaders (WGSL clignotant/teinte)
-  pour illustrer l'API shader.
+- **Startup**: `Camera2D` (fullscreen); player, invader grid, loaded PNG sprites.
+- **Game components**: `Player`, `Invader`, `Bullet`, `Velocity` (+ Transform2D, Sprite).
+- **Update systems**: player input (keyboard/gamepad → movement, shooting via `Commands` +
+  `audio.play(shoot)`); movement (`query(Transform2D, Velocity)` → Transform write-back:
+  `tr = t.value; tr.position += … * Time.delta; t.value = tr`); group movement of
+  the invaders; bullet×invader collisions
+  (AABB → despawn of both + explosion); cleanup of off-screen bullets.
+- **Render**: automatic (everything with Transform2D + Sprite, seen by the Camera2D).
+- **Shader demo** (optional): custom material on the invaders (blinking/tint WGSL)
+  to illustrate the shader API.
 
 ### 10. shard.yml & linking
 
@@ -440,75 +439,75 @@ targets:
   space_invaders: { main: examples/space_invaders.cr }
 ```
 
-`@[Link]` SDL3 (Homebrew), sur le modèle wgpu-cr/GLFW :
+`@[Link]` SDL3 (Homebrew), following the wgpu-cr/GLFW model:
 `-L/opt/homebrew/lib -lSDL3 -lSDL3_image -Wl,-rpath,/opt/homebrew/lib`.
 
 ### 11. Tests (`spec/`)
 
-Modèle `wgpu-cr/spec` (spec Crystal standard, headless) :
+`wgpu-cr/spec` model (standard Crystal spec, headless):
 
-- `sparse_set_spec` : insert/get_ptr/remove, swap-and-pop, contrôle de génération.
-- `world_spec` : spawn/despawn, recyclage d'id + bump génération, ressources.
-- `query_spec` : driver = plus petit set, **mutation via pointeur persistante**, robustesse au
-  despawn pendant l'itération (`dup`).
-- `math_spec` : ortho/perspective/look_at (valeurs connues).
-- Rendu/fenêtre : smoke test `WGPU_FRAMES=N` (headless), hors CI bloquante.
+- `sparse_set_spec`: insert/get_ptr/remove, swap-and-pop, generation check.
+- `world_spec`: spawn/despawn, id recycling + generation bump, resources.
+- `query_spec`: driver = smallest set, **persistent mutation via pointer**, robustness to
+  despawn during iteration (`dup`).
+- `math_spec`: ortho/perspective/look_at (known values).
+- Rendering/window: `WGPU_FRAMES=N` smoke test (headless), outside blocking CI.
 
-## État d'implémentation (toutes phases livrées et vérifiées)
+## Implementation status (all phases delivered and verified)
 
-Toutes les phases ci-dessous sont implémentées. Cœur testé par `crystal spec` (29 exemples,
-headless) ; couches GPU/plateforme vérifiées en headless via `WGPU_FRAMES=N crystal run …`
-(fenêtre + N frames + sortie propre, sans erreur de validation wgpu).
+All phases below are implemented. Core tested by `crystal spec` (29 examples,
+headless); GPU/platform layers verified headless via `WGPU_FRAMES=N crystal run …`
+(window + N frames + clean exit, no wgpu validation error).
 
-- ✅ **1. ECS** — entity, component/registry, sparse_set (pointeur), world, commands + specs.
+- ✅ **1. ECS** — entity, component/registry, sparse_set (pointer), world, commands + specs.
 - ✅ **2. Math** — Vec2/Vec3/Mat4 (ortho/perspective/look_at, translate/rotate/scale) + specs.
-- ✅ **3. App/Schedule/Plugin + Time** — boucle, plugins, `run_headless` + specs.
-- ✅ **4. Window** — SDL3 + surface wgpu (via `SDL_Metal_GetLayer`), runner, resize.
-- ✅ **5. Shaders & matériaux** — `Shader` (WGSL) + `Material` plein écran (exemple plasma).
-- ✅ **6. Caméras/viewports + Render2D** — quads texturés instanciés, blending, Camera2D/3D.
-- ✅ **7. Entrées** — clavier + manettes (hotplug, zone morte).
-- ✅ **8. Audio** — WAV + sons procéduraux, mixage SDL3.
-- ✅ **9. Space Invaders** — assemblage jouable (`examples/space_invaders.cr`) + README.
+- ✅ **3. App/Schedule/Plugin + Time** — loop, plugins, `run_headless` + specs.
+- ✅ **4. Window** — SDL3 + wgpu surface (via `SDL_Metal_GetLayer`), runner, resize.
+- ✅ **5. Shaders & materials** — `Shader` (WGSL) + fullscreen `Material` (plasma example).
+- ✅ **6. Cameras/viewports + Render2D** — instanced textured quads, blending, Camera2D/3D.
+- ✅ **7. Input** — keyboard + gamepads (hotplug, dead zone).
+- ✅ **8. Audio** — WAV + procedural sounds, SDL3 mixing.
+- ✅ **9. Space Invaders** — playable assembly (`examples/space_invaders.cr`) + README.
 
-Découvertes Crystal ayant infléchi la conception (détaillées plus haut) : (a) les macros ne
-sont pas invocables sur une instance → `query`/`Commands#spawn` sont des **surcharges de
-méthode** générées par arité ; (b) `ptr.value.x += v` ne persiste pas, mais l'affectation
-directe `ptr.value.x = …` et les **méthodes mutantes** `ptr.value.move(…)` oui.
+Crystal discoveries that shaped the design (detailed above): (a) macros are
+not callable on an instance → `query`/`Commands#spawn` are **method overloads**
+generated per arity; (b) `ptr.value.x += v` does not persist, but direct
+assignment `ptr.value.x = …` and **mutating methods** `ptr.value.move(…)` do.
 
-Chargement d'images : `Texture.load(gpu, path)` (PNG/JPG… via SDL_image, conversion RGBA8)
-**implémenté et vérifié** ; `Texture.from_pixels` pour les textures procédurales.
+Image loading: `Texture.load(gpu, path)` (PNG/JPG… via SDL_image, RGBA8 conversion)
+**implemented and verified**; `Texture.from_pixels` for procedural textures.
 
-Gestion mémoire : `Resource#release` + `World#shutdown` (appelé par `App#run`) libèrent les
-handles GPU/SDL dans le bon ordre (renderer avant device). Assets : `Flock::Assets`
-(via `AssetsPlugin`/DefaultPlugins) met en cache textures/polices/sons par clé et les libère. Tests de rendu : `render_into` +
-`examples/readback_test.cr` (rendu offscreen → copie → map → assertions pixel, headless).
-Erreurs wgpu : `Flock.request_device` branche les callbacks `uncaptured error` / `device lost`
-(→ STDERR), flushés par `instance_process_events` chaque frame. Surface : `render` décode le
-statut d'acquisition et reconfigure (`reconfigure_to_window`) sur `Outdated`/`Lost`.
-Texte : `Flock::Font` (SDL_ttf) rend une chaîne en `Texture` (via `Texture.from_surface`),
-dessinée comme sprite teintable ; vérifié par `examples/text_test.cr`.
+Memory management: `Resource#release` + `World#shutdown` (called by `App#run`) release the
+GPU/SDL handles in the right order (renderer before device). Assets: `Flock::Assets`
+(via `AssetsPlugin`/DefaultPlugins) caches textures/fonts/sounds by key and releases them. Rendering tests: `render_into` +
+`examples/readback_test.cr` (offscreen render → copy → map → pixel assertions, headless).
+wgpu errors: `Flock.request_device` wires the `uncaptured error` / `device lost` callbacks
+(→ STDERR), flushed by `instance_process_events` each frame. Surface: `render` decodes the
+acquisition status and reconfigures (`reconfigure_to_window`) on `Outdated`/`Lost`.
+Text: `Flock::Font` (SDL_ttf) renders a string into a `Texture` (via `Texture.from_surface`),
+drawn as a tintable sprite; verified by `examples/text_test.cr`.
 
-Restes (post-phase, non bloquants) : matériaux personnalisés **par sprite** dans le renderer
-batch ; rendu de meshes 3D consommant Camera3D ; audio compressé (OGG/MP3) via SDL3_mixer.
+Remaining (post-phase, non-blocking): custom **per-sprite** materials in the batching
+renderer; 3D mesh rendering consuming Camera3D; compressed audio (OGG/MP3) via SDL3_mixer.
 
-## Roadmap d'implémentation
+## Implementation roadmap
 
-1. ECS (entity, component/registry, sparse_set pointeur, world, commands) + specs.
+1. ECS (entity, component/registry, sparse_set pointer, world, commands) + specs.
 2. Math (Vec2/Vec3/Mat4, ortho/perspective/look_at) + specs.
-3. App/Schedule/Plugins + Time (boucle sans fenêtre).
-4. Window (SDL3 + surface wgpu) → clear à l'écran.
-5. Shaders & matériaux (Shader WGSL, Material/pipeline) + matériau sprite par défaut.
-6. Caméras/viewports + Render2D texturé (SDL_image, sampler, bind group).
-7. Input (clavier + manettes, hotplug, deadzone).
-8. Audio (WAV, mixage).
+3. App/Schedule/Plugins + Time (windowless loop).
+4. Window (SDL3 + wgpu surface) → clear on screen.
+5. Shaders & materials (WGSL Shader, Material/pipeline) + default sprite material.
+6. Cameras/viewports + textured Render2D (SDL_image, sampler, bind group).
+7. Input (keyboard + gamepads, hotplug, deadzone).
+8. Audio (WAV, mixing).
 9. Space Invaders + README.
-10. (ultérieur) post-processing plein écran ; rendu de meshes 3D consommant Camera3D.
+10. (later) fullscreen post-processing; 3D mesh rendering consuming Camera3D.
 
-## Vérification
+## Verification
 
-- `brew install sdl3 sdl3_image` ; `cd flock && shards install`.
-- `crystal spec` : ECS/world/query/math au vert (headless, sans SDL/GPU).
-- `WGPU_FRAMES=3 crystal run examples/space_invaders.cr` : fenêtre + quelques frames + sortie
-  propre (smoke test).
-- Interactif : joueur déplaçable clavier **et** manette, tir audible, invaders détruits au
-  contact ; démo caméra en ajoutant une 2ᵉ Camera2D avec `viewport` réduit (minimap).
+- `brew install sdl3 sdl3_image`; `cd flock && shards install`.
+- `crystal spec`: ECS/world/query/math green (headless, no SDL/GPU).
+- `WGPU_FRAMES=3 crystal run examples/space_invaders.cr`: window + a few frames + clean
+  exit (smoke test).
+- Interactive: player movable by keyboard **and** gamepad, audible shooting, invaders destroyed on
+  contact; camera demo by adding a 2nd Camera2D with a reduced `viewport` (minimap).

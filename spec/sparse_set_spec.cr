@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 describe Flock::SparseSet do
-  it "insère et relit un composant" do
+  it "inserts and reads back a component" do
     set = Flock::SparseSet(Position).new
     e = Flock::Entity.new(3_u32, 0_u32)
     set.insert(e, Position.new(1.0, 2.0))
@@ -11,7 +11,7 @@ describe Flock::SparseSet do
     set.get?(e).not_nil!.x.should eq(1.0)
   end
 
-  it "met à jour en place via get_ptr" do
+  it "updates in place via get_ptr" do
     set = Flock::SparseSet(Position).new
     e = Flock::Entity.new(0_u32, 0_u32)
     set.insert(e, Position.new(1.0, 1.0))
@@ -19,11 +19,11 @@ describe Flock::SparseSet do
     ptr = set.get_ptr(e).not_nil!
     ptr.value.x = 42.0
 
-    # La mutation par pointeur persiste dans le tableau dense.
+    # The mutation through the pointer persists in the dense array.
     set.get?(e).not_nil!.x.should eq(42.0)
   end
 
-  it "met à jour au lieu de dupliquer sur ré-insertion" do
+  it "updates instead of duplicating on re-insertion" do
     set = Flock::SparseSet(Position).new
     e = Flock::Entity.new(1_u32, 0_u32)
     set.insert(e, Position.new(1.0, 1.0))
@@ -33,7 +33,7 @@ describe Flock::SparseSet do
     set.get?(e).not_nil!.x.should eq(9.0)
   end
 
-  it "retire en O(1) par swap-and-pop en gardant les autres cohérents" do
+  it "removes in O(1) via swap-and-pop while keeping the others consistent" do
     set = Flock::SparseSet(Position).new
     a = Flock::Entity.new(0_u32, 0_u32)
     b = Flock::Entity.new(1_u32, 0_u32)
@@ -42,7 +42,7 @@ describe Flock::SparseSet do
     set.insert(b, Position.new(1.0, 0.0))
     set.insert(c, Position.new(2.0, 0.0))
 
-    set.remove(b) # b est au milieu -> c vient prendre sa place
+    set.remove(b) # b is in the middle -> c takes its place
 
     set.size.should eq(2)
     set.has?(b).should be_false
@@ -50,10 +50,10 @@ describe Flock::SparseSet do
     set.get?(c).not_nil!.x.should eq(2.0)
   end
 
-  it "ignore un handle de génération périmée" do
+  it "ignores a handle with a stale generation" do
     set = Flock::SparseSet(Position).new
     old = Flock::Entity.new(5_u32, 0_u32)
-    fresh = Flock::Entity.new(5_u32, 1_u32) # même id, génération suivante
+    fresh = Flock::Entity.new(5_u32, 1_u32) # same id, next generation
     set.insert(fresh, Position.new(7.0, 7.0))
 
     set.get?(old).should be_nil

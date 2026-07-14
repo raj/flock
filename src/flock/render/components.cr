@@ -1,5 +1,5 @@
 module Flock
-  # Position/orientation/échelle 2D d'une entité. Struct (DOD).
+  # 2D position/orientation/scale of an entity. Struct (DOD).
   struct Transform2D
     include Component
     property position : Vec2
@@ -14,7 +14,7 @@ module Flock
       new(Vec2.new(x, y))
     end
 
-    # Matrice modèle : translate * rotate * scale.
+    # Model matrix: translate * rotate * scale.
     def matrix : Mat4
       Mat4.translation(Vec3.new(@position.x, @position.y, 0)) *
         Mat4.rotation_z(@rotation) *
@@ -22,7 +22,7 @@ module Flock
     end
   end
 
-  # Transform 3D (fourni pour la 3D à venir ; pas encore consommé par le rendu).
+  # 3D transform (provided for upcoming 3D; not yet consumed by rendering).
   struct Transform3D
     include Component
     property position : Vec3
@@ -32,10 +32,10 @@ module Flock
     end
   end
 
-  # Sprite : quad texturé teinté. `texture = nil` -> blanc (couleur pleine).
-  # `size` en unités monde (pixels par défaut). `uv_min`/`uv_size` pour un atlas.
-  # `z` = ordre de dessin (croissant = du fond vers l'avant) : le batcher trie par
-  # (z, texture), donc la superposition est respectée tout en groupant les draws.
+  # Sprite: tinted textured quad. `texture = nil` -> white (solid color).
+  # `size` in world units (pixels by default). `uv_min`/`uv_size` for an atlas.
+  # `z` = draw order (increasing = back to front): the batcher sorts by
+  # (z, texture), so layering is respected while still grouping draws.
   struct Sprite
     include Component
     property size : Vec2

@@ -1,6 +1,6 @@
 module Flock
-  # Ressource : tout l'état GPU partagé (créé par WindowPlugin, consommé par le
-  # renderer). Handles wgpu bruts — libérés à la fermeture par WindowPlugin.
+  # Resource: all the shared GPU state (created by WindowPlugin, consumed by the
+  # renderer). Raw wgpu handles — freed on shutdown by WindowPlugin.
   class GpuContext < Resource
     property instance : LibWGPU::Instance
     property adapter : LibWGPU::Adapter
@@ -21,7 +21,7 @@ module Flock
       @height == 0 ? 1.0f32 : @width.to_f32 / @height.to_f32
     end
 
-    # Libéré en dernier (les autres ressources dépendent du device).
+    # Released last (the other resources depend on the device).
     def release_order : Int32
       100
     end
@@ -36,15 +36,15 @@ module Flock
       LibSDL.quit
     end
 
-    # Reconfigure la surface à la taille courante de la fenêtre (récupération d'une
-    # surface périmée/perdue). No-op sans fenêtre (contexte headless).
+    # Reconfigures the surface to the window's current size (recovery of a
+    # stale/lost surface). No-op without a window (headless context).
     def reconfigure_to_window : Nil
       return if @window.null?
       LibSDL.get_window_size_in_pixels(@window, out w, out h)
       reconfigure(w.to_u32, h.to_u32)
     end
 
-    # Reconfigure la surface (appelé au démarrage et sur redimensionnement).
+    # Reconfigures the surface (called at startup and on resize).
     def reconfigure(w : UInt32, h : UInt32) : Nil
       return if w == 0 || h == 0
       @width = w

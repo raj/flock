@@ -1,4 +1,4 @@
-# Démo : molette + saisie de texte (interactif). Scroll et frappe s'affichent.
+# Demo: mouse wheel + text input (interactive). Scroll and typing are printed.
 require "../src/flock/gpu"
 app = Flock::App.new
 app.add_plugin(Flock::DefaultPlugins.new("Flock — events", 640, 480))
@@ -6,7 +6,7 @@ app.add_startup { |_w, cmd| cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Co
 app.add_system(Flock::Schedule::Update) do |world, _|
   input = world.resource(Flock::Input)
   w = input.mouse_wheel
-  puts "molette: #{w.x}, #{w.y}" if w.x != 0 || w.y != 0
-  puts "texte: #{input.text_input}" unless input.text_input.empty?
+  puts "wheel: #{w.x}, #{w.y}" if w.x != 0 || w.y != 0
+  puts "text: #{input.text_input}" unless input.text_input.empty?
 end
 app.run
