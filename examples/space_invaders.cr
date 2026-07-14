@@ -64,11 +64,13 @@ app = Flock::App.new
 app.add_plugin(Flock::DefaultPlugins.new("Flock — Space Invaders", 800, 600))
 app.add_state(GameState::Running)
 
-# Escape toggles pause (state transition; gameplay systems are gated on Running).
+# Escape toggles pause; losing window focus auto-pauses (window events).
 app.add_system(Flock::Schedule::First) do |world, _cmd|
+  running = world.state(GameState).running?
   if world.resource(Flock::Input).just_pressed?(Flock::Key::Escape)
-    running = world.state(GameState).running?
     world.set_state(running ? GameState::Paused : GameState::Running)
+  elsif running && !world.resource(Flock::WindowState).focused?
+    world.set_state(GameState::Paused) # pause when the player alt-tabs away
   end
 end
 

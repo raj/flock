@@ -85,7 +85,10 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       (event-driven keyboard/gamepad).
 - [x] **Extend coverage.** Mouse, `SDL_SetAudioStreamGain` (audio volume), `SDL_RumbleGamepad`
       (`Gamepad#rumble`, used in Space Invaders), `SDL_GetVersion` (`SDL3.linked_version`) are
-      bound. Remaining: window events (focus/minimize/resize as events).
+      bound. **Window events** (focus/minimize/maximize/restore/resize) are bound too:
+      `EVENT_WINDOW_*` constants + a `WindowEvent` struct (data1/data2), routed by the runner
+      into a `Flock::WindowState` resource (`focused?`/`minimized?`/`maximized?`/`resized?`).
+      Verified (`examples/window_events.cr`); Space Invaders auto-pauses on focus loss.
 - [ ] **Fragile hardcoded constants.** `PIXELFORMAT_RGBA32`, event values… are frozen
       (and little-endian). `SDL_GetVersion` is bound + a sanity spec exists; a header-generated
       binding (like wgpu-cr) remains the ideal.

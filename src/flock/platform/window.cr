@@ -1,4 +1,47 @@
 module Flock
+  # Window state, fed each frame by the runner from SDL window events. Lets a game
+  # react to focus/minimize (e.g. pause or mute when unfocused) and detect resizes.
+  #   world.resource(Flock::WindowState).focused?
+  class WindowState < Resource
+    # Persistent flags (window created focused, not minimized/maximized).
+    getter? focused : Bool = true
+    getter? minimized : Bool = false
+    getter? maximized : Bool = false
+    # True only for the frame in which a resize/pixel-size-change event arrived,
+    # reset at the start of each frame.
+    getter? resized : Bool = false
+    # Set true once a close was requested (EVENT_QUIT / WINDOW_CLOSE_REQUESTED).
+    getter? close_requested : Bool = false
+
+    # --- Called by the runner (WindowPlugin) ---
+
+    def begin_frame : Nil
+      @resized = false
+    end
+
+    def on_focus(gained : Bool) : Nil
+      @focused = gained
+    end
+
+    def on_minimized : Nil
+      @minimized = true
+    end
+
+    # RESTORED / MAXIMIZED both un-minimize; `maximized` tracks the latter.
+    def on_restored(maximized : Bool) : Nil
+      @minimized = false
+      @maximized = maximized
+    end
+
+    def on_resized : Nil
+      @resized = true
+    end
+
+    def on_close_requested : Nil
+      @close_requested = true
+    end
+  end
+
   # Creates the SDL3 window + the wgpu surface (dispatched per platform: Metal on
   # macOS, X11/Wayland on Linux, HWND on Windows — via `make_surface`), inserts the
   # GpuContext resource, and installs the runner: the main loop (SDL events + one
@@ -36,6 +79,7 @@ module Flock
         fb_w.to_u32, fb_h.to_u32, window, view)
       gpu.reconfigure(fb_w.to_u32, fb_h.to_u32)
       app.world.insert_resource(gpu)
+      app.world.insert_resource(WindowState.new)
 
       install_runner(app, gpu)
     end
@@ -101,13 +145,18 @@ module Flock
         while running
           break if max_frames && frame >= max_frames
 
-          # Event dispatch: close, wheel, text (routed to Input).
+          # Event dispatch: close, wheel, text (routed to Input), window state.
           input = a.world.resource?(Input)
           input.try &.clear_frame_events
+          win = a.world.resource?(WindowState)
+          win.try &.begin_frame
           while LibSDL.poll_event(pointerof(event))
             case event.type
             when LibSDL::EVENT_QUIT
               running = false
+              win.try &.on_close_requested
+            when LibSDL::EVENT_WINDOW_CLOSE_REQUESTED
+              win.try &.on_close_requested
             when LibSDL::EVENT_MOUSE_WHEEL
               if inp = input
                 we = pointerof(event).as(Pointer(LibSDL::MouseWheelEvent)).value
@@ -118,6 +167,18 @@ module Flock
                 te = pointerof(event).as(Pointer(LibSDL::TextInputEvent)).value
                 inp.push_text(String.new(te.text)) unless te.text.null?
               end
+            when LibSDL::EVENT_WINDOW_FOCUS_GAINED
+              win.try &.on_focus(true)
+            when LibSDL::EVENT_WINDOW_FOCUS_LOST
+              win.try &.on_focus(false)
+            when LibSDL::EVENT_WINDOW_MINIMIZED
+              win.try &.on_minimized
+            when LibSDL::EVENT_WINDOW_MAXIMIZED
+              win.try &.on_restored(maximized: true)
+            when LibSDL::EVENT_WINDOW_RESTORED
+              win.try &.on_restored(maximized: false)
+            when LibSDL::EVENT_WINDOW_RESIZED, LibSDL::EVENT_WINDOW_PIXEL_SIZE_CHANGED
+              win.try &.on_resized
             end
           end
 
