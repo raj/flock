@@ -27,9 +27,10 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
 - [x] **Text / font rendering** via SDL_ttf: `Flock::Font.load` + `font.render_texture(gpu,
       text)` → `Texture` drawn as a sprite (tintable). Verified by `examples/text_test.cr`
       (readback); title integrated into Space Invaders. Remaining: per-string cache, glyph atlas.
-- [ ] **Per-sprite materials** — `Material` only does fullscreen; the renderer has a single
-      pipeline. Allow a `Sprite` to reference a custom material (batch by material
-      then texture).
+- [x] **Per-sprite materials** — `SpriteMaterial` (built via `Renderer2D#build_material(wgsl)`)
+      shares an explicit pipeline layout so a `Sprite#material` swaps the shader while reusing
+      the uniform/instance/texture bind groups. Batched by (z, material, texture). Verified
+      (`examples/material_test.cr`: custom fragment forces blue via readback).
 - [x] **Fixed timestep**: `FixedUpdate` schedule run 0..N times/frame via an accumulator
       (`App#advance_fixed`, bounded by `MAX_FIXED_STEPS`), configurable fixed step
       (`app.fixed_dt=`/`fixed_hz`), `add_fixed_system`, `Time#fixed_delta`. Verified

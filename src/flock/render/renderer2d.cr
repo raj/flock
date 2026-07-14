@@ -1,4 +1,24 @@
 module Flock
+  # A custom sprite material: a render pipeline (built from user WGSL by
+  # `Renderer2D#build_material`) sharing the renderer's instancing convention and
+  # pipeline layout. Assign to `Sprite#material` to draw that sprite with it.
+  class SpriteMaterial
+    @@next_id = 1 # 0 is reserved for the renderer's default material
+
+    getter id : Int32
+    getter pipeline : LibWGPU::RenderPipeline
+
+    def initialize(@pipeline : LibWGPU::RenderPipeline, @shader : LibWGPU::ShaderModule)
+      @id = @@next_id
+      @@next_id += 1
+    end
+
+    def release : Nil
+      LibWGPU.render_pipeline_release(@pipeline)
+      LibWGPU.shader_module_release(@shader)
+    end
+  end
+
   # 2D renderer: instanced textured quads. All geometry (unit quad) lives in the
   # shader (const arrays indexed by vertex_index); per frame we only rewrite the
   # instance storage buffer + the view-projection uniform. One draw calls
@@ -55,12 +75,15 @@ module Flock
 
     @shader : LibWGPU::ShaderModule
     @pipeline : LibWGPU::RenderPipeline
+    @pipeline_layout : LibWGPU::PipelineLayout
     @group0_layout : LibWGPU::BindGroupLayout
     @group1_layout : LibWGPU::BindGroupLayout
     @sampler : LibWGPU::Sampler
     @uniform_buf : LibWGPU::Buffer
     @instance_buf : LibWGPU::Buffer
     @group0 : LibWGPU::BindGroup
+    # Custom per-sprite materials built via `build_material`, released on shutdown.
+    @materials : Array(SpriteMaterial) = [] of SpriteMaterial
 
     # Statistics for the last frame (batching).
     getter last_sprites : Int32 = 0
@@ -69,18 +92,13 @@ module Flock
     getter white : Texture
 
     def initialize(@gpu : GpuContext)
-      code = WGPU.string_view(WGSL)
-      src = LibWGPU::ShaderSourceWGSL.new
-      src.chain.s_type = LibWGPU::SType::ShaderSourceWGSL
-      src.code = code
-      sdesc = LibWGPU::ShaderModuleDescriptor.new
-      sdesc.label = WGPU.empty_string_view
-      sdesc.next_in_chain = pointerof(src).as(Pointer(LibWGPU::ChainedStruct))
-      @shader = LibWGPU.device_create_shader_module(@gpu.device, pointerof(sdesc))
-
-      @pipeline = build_pipeline
-      @group0_layout = LibWGPU.render_pipeline_get_bind_group_layout(@pipeline, 0_u32)
-      @group1_layout = LibWGPU.render_pipeline_get_bind_group_layout(@pipeline, 1_u32)
+      @shader = compile_shader(WGSL)
+      # Explicit shared layouts so bind groups (uniform/storage/texture) and the
+      # pipeline layout can be reused across every sprite material.
+      @group0_layout = build_group0_layout
+      @group1_layout = build_group1_layout
+      @pipeline_layout = build_pipeline_layout
+      @pipeline = build_pipeline(@shader)
       @sampler = build_sampler
       @white = Texture.white(@gpu)
 
@@ -88,6 +106,28 @@ module Flock
       @instance_buf = make_buffer((@instance_capacity * BYTES_PER_INSTANCE).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       @group0 = build_group0
+    end
+
+    # Builds a sprite material from custom WGSL following the sprite convention
+    # (group0 = uniform view-proj + instance storage; group1 = texture + sampler;
+    # vs_main / fs_main; instances read via @builtin(instance_index)). Assign it to
+    # `Sprite#material`. Shares the renderer's pipeline layout, uniform and instances.
+    def build_material(wgsl : String) : SpriteMaterial
+      mod = compile_shader(wgsl)
+      material = SpriteMaterial.new(build_pipeline(mod), mod)
+      @materials << material
+      material
+    end
+
+    private def compile_shader(wgsl : String) : LibWGPU::ShaderModule
+      code = WGPU.string_view(wgsl)
+      src = LibWGPU::ShaderSourceWGSL.new
+      src.chain.s_type = LibWGPU::SType::ShaderSourceWGSL
+      src.code = code
+      sdesc = LibWGPU::ShaderModuleDescriptor.new
+      sdesc.label = WGPU.empty_string_view
+      sdesc.next_in_chain = pointerof(src).as(Pointer(LibWGPU::ChainedStruct))
+      LibWGPU.device_create_shader_module(@gpu.device, pointerof(sdesc))
     end
 
     # Frees all GPU handles (pipeline, buffers, bind groups, sampler, textures).
@@ -98,9 +138,12 @@ module Flock
       LibWGPU.buffer_release(@instance_buf)
       LibWGPU.buffer_release(@uniform_buf)
       LibWGPU.sampler_release(@sampler)
+      @materials.each &.release
+      @materials.clear
+      LibWGPU.render_pipeline_release(@pipeline)
+      LibWGPU.pipeline_layout_release(@pipeline_layout)
       LibWGPU.bind_group_layout_release(@group0_layout)
       LibWGPU.bind_group_layout_release(@group1_layout)
-      LibWGPU.render_pipeline_release(@pipeline)
       LibWGPU.shader_module_release(@shader)
       @white.release
     end
@@ -129,12 +172,77 @@ module Flock
       LibWGPU.device_create_sampler(@gpu.device, pointerof(d))
     end
 
-    private def build_pipeline : LibWGPU::RenderPipeline
+    # group0: uniform view-projection (binding 0) + read-only instance storage
+    # (binding 1), both visible to the vertex stage.
+    private def build_group0_layout : LibWGPU::BindGroupLayout
+      ubuf = LibWGPU::BufferBindingLayout.new
+      ubuf.type_ = LibWGPU::BufferBindingType::Uniform
+      e0 = LibWGPU::BindGroupLayoutEntry.new
+      e0.binding = 0_u32
+      e0.visibility = LibWGPU::ShaderStage::Vertex
+      e0.buffer = ubuf
+
+      sbuf = LibWGPU::BufferBindingLayout.new
+      sbuf.type_ = LibWGPU::BufferBindingType::ReadOnlyStorage
+      e1 = LibWGPU::BindGroupLayoutEntry.new
+      e1.binding = 1_u32
+      e1.visibility = LibWGPU::ShaderStage::Vertex
+      e1.buffer = sbuf
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[2]
+      entries[0] = e0
+      entries[1] = e1
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 2_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
+    # group1: texture (binding 0) + sampler (binding 1), visible to the fragment stage.
+    private def build_group1_layout : LibWGPU::BindGroupLayout
+      tex = LibWGPU::TextureBindingLayout.new
+      tex.sample_type = LibWGPU::TextureSampleType::Float
+      tex.view_dimension = LibWGPU::TextureViewDimension::N2D
+      e0 = LibWGPU::BindGroupLayoutEntry.new
+      e0.binding = 0_u32
+      e0.visibility = LibWGPU::ShaderStage::Fragment
+      e0.texture = tex
+
+      smp = LibWGPU::SamplerBindingLayout.new
+      smp.type_ = LibWGPU::SamplerBindingType::Filtering
+      e1 = LibWGPU::BindGroupLayoutEntry.new
+      e1.binding = 1_u32
+      e1.visibility = LibWGPU::ShaderStage::Fragment
+      e1.sampler = smp
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[2]
+      entries[0] = e0
+      entries[1] = e1
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 2_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
+    private def build_pipeline_layout : LibWGPU::PipelineLayout
+      layouts = uninitialized LibWGPU::BindGroupLayout[2]
+      layouts[0] = @group0_layout
+      layouts[1] = @group1_layout
+      d = LibWGPU::PipelineLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.bind_group_layout_count = 2_u64
+      d.bind_group_layouts = layouts.to_unsafe
+      LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(d))
+    end
+
+    private def build_pipeline(shader : LibWGPU::ShaderModule) : LibWGPU::RenderPipeline
       vs = WGPU.string_view("vs_main")
       fs = WGPU.string_view("fs_main")
 
       vertex = LibWGPU::VertexState.new
-      vertex.module_ = @shader
+      vertex.module_ = shader
       vertex.entry_point = vs
 
       blend = LibWGPU::BlendState.new
@@ -153,7 +261,7 @@ module Flock
       target.blend = pointerof(blend)
 
       fragment = LibWGPU::FragmentState.new
-      fragment.module_ = @shader
+      fragment.module_ = shader
       fragment.entry_point = fs
       fragment.target_count = 1_u64
       fragment.targets = pointerof(target)
@@ -169,7 +277,7 @@ module Flock
 
       desc = LibWGPU::RenderPipelineDescriptor.new
       desc.label = WGPU.empty_string_view
-      desc.layout = WGPU.null(LibWGPU::PipelineLayout) # auto
+      desc.layout = @pipeline_layout # shared explicit layout (materials reuse it)
       desc.vertex = vertex
       desc.primitive = primitive
       desc.multisample = multisample
@@ -271,23 +379,26 @@ module Flock
       cameras << Camera2D.new(clear_color: Color.new(0.05, 0.05, 0.08)) if cameras.empty?
       cameras.sort_by!(&.order)
 
-      # Collect: (z, texture, model, color, uv_min, uv_size).
-      sprites = [] of {Float32, Texture, Mat4, Color, Vec2, Vec2}
+      # Collect: (z, material_id, pipeline, texture, model, color, uv_min, uv_size).
+      sprites = [] of {Float32, Int32, LibWGPU::RenderPipeline, Texture, Mat4, Color, Vec2, Vec2}
       world.query(Transform2D, Sprite) do |_e, tf, sp|
         texture = sp.value.texture || @white
+        mat = sp.value.material
+        mat_id = mat ? mat.id : 0                 # 0 = default material
+        pipeline = mat ? mat.pipeline : @pipeline
         # The shader quad is unit [-0.5, 0.5]: apply the sprite's size.
         model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
-        sprites << {sp.value.z, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
+        sprites << {sp.value.z, mat_id, pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
       end
-      # Sort by layer (z) then texture: correct layering + grouping of draws.
-      sprites.sort_by! { |s| {s[0], s[1].view.address} }
+      # Sort by layer (z), then material, then texture: correct layering + batching.
+      sprites.sort_by! { |s| {s[0], s[1], s[3].view.address} }
       @last_sprites = sprites.size
       ensure_capacity(sprites.size) if sprites.size > 0
 
       # Fill the instance storage buffer (in sorted order).
       unless sprites.empty?
         @scratch.clear
-        sprites.each do |(_z, _tex, model, color, uv_min, uv_size)|
+        sprites.each do |(_z, _mid, _pipe, _tex, model, color, uv_min, uv_size)|
           @scratch.concat(model.m)
           @scratch.push(color.r, color.g, color.b, color.a)
           @scratch.push(uv_min.x, uv_min.y, uv_size.x, uv_size.y)
@@ -330,16 +441,19 @@ module Flock
         end
 
         unless sprites.empty?
-          LibWGPU.render_pass_encoder_set_pipeline(pass, @pipeline)
-          LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
-          # One draw per contiguous run of the same texture (in sorted layer order).
+          # One draw per contiguous run of the same (material, texture), in sorted
+          # layer order. group0 (uniform+instances) is shared via the explicit layout.
           i = 0
           while i < sprites.size
-            tex = sprites[i][1]
+            mat_id = sprites[i][1]
+            pipeline = sprites[i][2]
+            tex = sprites[i][3]
             j = i + 1
-            while j < sprites.size && sprites[j][1].view.address == tex.view.address
+            while j < sprites.size && sprites[j][1] == mat_id && sprites[j][3].view.address == tex.view.address
               j += 1
             end
+            LibWGPU.render_pass_encoder_set_pipeline(pass, pipeline)
+            LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
             LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(tex), 0_u64, Pointer(UInt32).null)
             LibWGPU.render_pass_encoder_draw(pass, 6_u32, (j - i).to_u32, 0_u32, i.to_u32)
             @last_draw_calls += 1

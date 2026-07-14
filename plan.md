@@ -487,8 +487,12 @@ acquisition status and reconfigures (`reconfigure_to_window`) on `Outdated`/`Los
 Text: `Flock::Font` (SDL_ttf) renders a string into a `Texture` (via `Texture.from_surface`),
 drawn as a tintable sprite; verified by `examples/text_test.cr`.
 
-Remaining (post-phase, non-blocking): custom **per-sprite** materials in the batching
-renderer; 3D mesh rendering consuming Camera3D; compressed audio (OGG/MP3) via SDL3_mixer.
+Per-sprite materials: `SpriteMaterial` (`Renderer2D#build_material(wgsl)`) shares an explicit
+pipeline layout so a `Sprite#material` swaps the shader while reusing the uniform/instance/
+texture bind groups; batched by (z, material, texture). Verified by `examples/material_test.cr`.
+
+Remaining (post-phase, non-blocking): 3D mesh rendering consuming Camera3D; compressed audio
+(OGG/MP3) via SDL3_mixer.
 
 ## Implementation roadmap
 

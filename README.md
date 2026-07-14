@@ -49,6 +49,17 @@ WGPU_FRAMES=120 crystal run examples/space_invaders.cr
 crystal run examples/readback_test.cr    # a colored sprite
 crystal run examples/text_test.cr        # text rendering (SDL_ttf)
 crystal run examples/assets_test.cr      # asset cache (same key -> same instance)
+crystal run examples/material_test.cr    # per-sprite custom material (WGSL)
+```
+
+## Per-sprite materials
+
+```crystal
+# A custom sprite shader (same instancing convention as the default material):
+mat = renderer.build_material(MY_WGSL)      # renderer = world.resource(Flock::Renderer2D)
+cmd.spawn(Flock::Transform2D.at(0, 0),
+  Flock::Sprite.new(Flock::Vec2.new(64, 64), Flock::Color::WHITE, material: mat))
+# Sprites are batched by (z, material, texture); nil material = default sprite shader.
 ```
 
 ## Assets (cache)

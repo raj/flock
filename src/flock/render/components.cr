@@ -34,19 +34,22 @@ module Flock
 
   # Sprite: tinted textured quad. `texture = nil` -> white (solid color).
   # `size` in world units (pixels by default). `uv_min`/`uv_size` for an atlas.
-  # `z` = draw order (increasing = back to front): the batcher sorts by
-  # (z, texture), so layering is respected while still grouping draws.
+  # `z` = draw order (increasing = back to front). `material = nil` -> renderer's
+  # default sprite shader; a custom `SpriteMaterial` swaps the shader. The batcher
+  # sorts by (z, material, texture), so layering is respected while grouping draws.
   struct Sprite
     include Component
     property size : Vec2
     property color : Color
     property texture : Texture?
     property z : Float32
+    property material : SpriteMaterial?
     property uv_min : Vec2
     property uv_size : Vec2
 
     def initialize(@size : Vec2, @color : Color = Color::WHITE, @texture : Texture? = nil,
-                   @z : Float32 = 0.0f32, @uv_min : Vec2 = Vec2.new(0, 0), @uv_size : Vec2 = Vec2.new(1, 1))
+                   @z : Float32 = 0.0f32, @material : SpriteMaterial? = nil,
+                   @uv_min : Vec2 = Vec2.new(0, 0), @uv_size : Vec2 = Vec2.new(1, 1))
     end
   end
 end
