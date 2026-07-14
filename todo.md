@@ -30,7 +30,10 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
 - [ ] **Matériaux par sprite** — `Material` ne fait que le plein écran ; le renderer a un seul
       pipeline. Permettre à un `Sprite` de référencer un matériau custom (batch par matériau
       puis texture).
-- [ ] **Fixed timestep** (`FixedUpdate` + accumulateur) pour une physique stable.
+- [x] **Fixed timestep** : schedule `FixedUpdate` exécuté 0..N fois/frame via un accumulateur
+      (`App#advance_fixed`, borné par `MAX_FIXED_STEPS`), pas fixe configurable
+      (`app.fixed_dt=`/`fixed_hz`), `add_fixed_system`, `Time#fixed_delta`. Vérifié
+      (`spec/app_spec.cr`, déterministe) ; mouvement de Space Invaders passé en FixedUpdate.
 - [ ] **Événements / états** façon Bevy (`Events` inter-systèmes, machine à états de jeu).
 - [ ] **Audio** : `play` crée un stream par lecture et le récupère à `queued==0`, ce qui peut
       couper la fin du son ; ajouter volume (`SDL_SetAudioStreamGain`), musique en boucle, `stop`.

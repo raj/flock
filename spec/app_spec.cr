@@ -48,4 +48,27 @@ describe Flock::App do
     app = Flock::App.new
     expect_raises(Exception, /runner/) { app.run }
   end
+
+  it "fixed timestep : advance_fixed exécute FixedUpdate le bon nombre de fois" do
+    app = Flock::App.new
+    app.fixed_dt = 0.03
+    n = 0
+    app.add_fixed_system { |_w, _c| n += 1 }
+
+    app.advance_fixed(0.10).should eq(3) # floor(0.10 / 0.03) = 3 (reste ~0.01)
+    n.should eq(3)
+    app.advance_fixed(0.01).should eq(0) # 0.01 + 0.01 = 0.02 < 0.03
+    n.should eq(3)
+    app.advance_fixed(0.02).should eq(1) # 0.02 + 0.02 = 0.04 >= 0.03
+    n.should eq(4)
+
+    app.world.resource(Flock::Time).fixed_delta.should eq(0.03)
+  end
+
+  it "fixed timestep : borné par MAX_FIXED_STEPS (anti-spirale)" do
+    app = Flock::App.new
+    app.fixed_dt = 0.01
+    app.add_fixed_system { |_w, _c| }
+    app.advance_fixed(10.0).should eq(Flock::App::MAX_FIXED_STEPS) # énorme dt -> plafonné
+  end
 end

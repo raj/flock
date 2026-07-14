@@ -6,6 +6,8 @@ module Flock
   class Time < Resource
     getter delta : Float64 = 0.0
     getter elapsed : Float64 = 0.0
+    # Pas de temps fixe (constant), à utiliser dans les systèmes FixedUpdate.
+    property fixed_delta : Float64 = 1.0 / 60.0
 
     @last : ::Time::Instant
     @start : ::Time::Instant

@@ -122,9 +122,9 @@ app.add_system(Flock::Schedule::Update) do |world, cmd|
   end
 end
 
-# --- Intégration du mouvement (tout ce qui a une Velocity) ---
-app.add_system(Flock::Schedule::Update) do |world, _cmd|
-  dt = world.resource(Flock::Time).delta.to_f32
+# --- Intégration du mouvement (pas de temps FIXE : vitesse stable, indépendante du fps) ---
+app.add_fixed_system do |world, _cmd|
+  dt = world.resource(Flock::Time).fixed_delta.to_f32
   world.query(Flock::Transform2D, Velocity) do |_e, tf, vel|
     tf.value.position = tf.value.position + vel.value.linear * dt
   end

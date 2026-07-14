@@ -206,7 +206,10 @@ end
 
 ### 2. App, Schedule, Plugins
 
-`schedule.cr` : `enum Schedule; Startup; First; Update; Render; Last; end`.
+`schedule.cr` : `enum Schedule; Startup; First; FixedUpdate; Update; Render; Last; end`.
+`FixedUpdate` s'exécute 0..N fois par frame via un accumulateur (`App#advance_fixed`, pas fixe
+`fixed_dt`/`fixed_hz`, borné par `MAX_FIXED_STEPS`) — pour une physique indépendante du fps
+(les systèmes utilisent `Time#fixed_delta`).
 `plugin.cr` : `abstract class Plugin; abstract def build(app : App); end`.
 
 `app.cr` — API volontairement simple :
