@@ -89,9 +89,12 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       `EVENT_WINDOW_*` constants + a `WindowEvent` struct (data1/data2), routed by the runner
       into a `Flock::WindowState` resource (`focused?`/`minimized?`/`maximized?`/`resized?`).
       Verified (`examples/window_events.cr`); Space Invaders auto-pauses on focus loss.
-- [ ] **Fragile hardcoded constants.** `PIXELFORMAT_RGBA32`, event values… are frozen
-      (and little-endian). `SDL_GetVersion` is bound + a sanity spec exists; a header-generated
-      binding (like wgpu-cr) remains the ideal.
+- [x] **Fragile hardcoded constants.** The numeric constants (`INIT_*`/`WINDOW_*`/`EVENT_*`/
+      `AUDIO_*`/`PIXELFORMAT_RGBA32`) are now **generated** into `src/sdl3/constants.cr` by
+      `scripts/generate_constants.cr` (`shards run sdl3-gen`): it compiles a probe against the
+      installed SDL3 (`pkg-config --cflags`) so the C compiler evaluates the macros/bit-shifts/
+      endianness/event-enum numbering — no drift. Generated file is checked in (consumers need
+      no compiler). Types/structs/funs stay handwritten in `src/sdl3.cr`.
 - [x] **Sanity test.** `spec/sdl3_spec.cr` links SDL3 (pkg-config) and asserts a v3 runtime
       via `SDL3.linked_version` — detects a linking/ABI break.
 
