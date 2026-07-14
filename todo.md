@@ -20,7 +20,10 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
       bug réel : `Sprite.size` n'était pas appliqué au modèle (quads 1×1).
 
 ### Fonctionnalités manquantes
-- [ ] **Souris** (position, boutons, molette) — non exposée, bloquant pour UI/jeux.
+- [x] **Souris** : `Input#mouse_position` (pixels framebuffer, HiDPI) + `mouse_pressed?` /
+      `just_pressed?` / `just_released?` (`MouseButton`), + `Camera2D#screen_to_world`. Vérifié
+      (`spec/camera_spec.cr`, `examples/mouse_demo.cr`). Reste : **molette** (nécessite les
+      données d'événements SDL, cf. item sdl3-cr) et curseur (masquer/capturer).
 - [x] **Rendu de texte / police** via SDL_ttf : `Flock::Font.load` + `font.render_texture(gpu,
       text)` → `Texture` dessinée comme sprite (teintable). Vérifié par `examples/text_test.cr`
       (readback) ; titre intégré dans Space Invaders. Reste : cache par chaîne, atlas de glyphes.

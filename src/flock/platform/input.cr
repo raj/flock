@@ -28,6 +28,17 @@ module Flock
     DpadRight = 10
   end
 
+  # Boutons de souris (index SDL). `mask` = bit dans le masque de SDL_GetMouseState.
+  enum MouseButton : Int32
+    Left   = 1
+    Middle = 2
+    Right  = 3
+
+    def mask : UInt32
+      1_u32 << (value - 1)
+    end
+  end
+
   # Axes analogiques (valeurs = SDL_GamepadAxis).
   enum Axis : Int32
     LeftX        = 0
@@ -67,6 +78,13 @@ module Flock
     @gamepads : Array(Gamepad) = [] of Gamepad
     @open : Hash(LibSDL::JoystickID, LibSDL::Gamepad) = {} of LibSDL::JoystickID => LibSDL::Gamepad
 
+    # Souris : position en pixels framebuffer (repère du rendu, origine haut-gauche),
+    # + masques de boutons (frame courante / précédente pour just_pressed/released).
+    @mouse_position : Vec2 = Vec2.new
+    @mouse_current : UInt32 = 0_u32
+    @mouse_previous : UInt32 = 0_u32
+    @window : LibSDL::Window = Pointer(Void).null.as(LibSDL::Window)
+
     def pressed?(key : Key) : Bool
       @current[key.value]
     end
@@ -87,6 +105,32 @@ module Flock
       @gamepads.size
     end
 
+    # --- Souris ---
+
+    # Position en pixels framebuffer (même repère que le rendu). Pour les coordonnées
+    # monde, passer à `Camera2D#screen_to_world(mouse_position, gpu.width, gpu.height)`.
+    def mouse_position : Vec2
+      @mouse_position
+    end
+
+    def mouse_pressed?(button : MouseButton) : Bool
+      (@mouse_current & button.mask) != 0
+    end
+
+    def mouse_just_pressed?(button : MouseButton) : Bool
+      (@mouse_current & button.mask) != 0 && (@mouse_previous & button.mask) == 0
+    end
+
+    def mouse_just_released?(button : MouseButton) : Bool
+      (@mouse_current & button.mask) == 0 && (@mouse_previous & button.mask) != 0
+    end
+
+    # Renseigné par InputPlugin : permet de convertir les points fenêtre en pixels
+    # framebuffer (HiDPI).
+    def attach_window(window : LibSDL::Window) : Nil
+      @window = window
+    end
+
     # Appelé une fois par frame (avant la logique de jeu).
     def refresh : Nil
       # Clavier : previous <- current, current <- état SDL.
@@ -96,7 +140,23 @@ module Flock
       KEY_COUNT.times { |i| @previous[i] = @current[i] }
       n.times { |i| @current[i] = ptr[i] }
 
+      refresh_mouse
       refresh_gamepads
+    end
+
+    private def refresh_mouse : Nil
+      @mouse_previous = @mouse_current
+      @mouse_current = LibSDL.get_mouse_state(out mx, out my)
+      if @window.null?
+        @mouse_position = Vec2.new(mx, my)
+      else
+        # SDL renvoie des points fenêtre ; on convertit en pixels framebuffer (HiDPI).
+        LibSDL.get_window_size(@window, out pw, out ph)
+        LibSDL.get_window_size_in_pixels(@window, out fw, out fh)
+        sx = pw > 0 ? fw.to_f32 / pw.to_f32 : 1.0f32
+        sy = ph > 0 ? fh.to_f32 / ph.to_f32 : 1.0f32
+        @mouse_position = Vec2.new(mx * sx, my * sy)
+      end
     end
 
     private def refresh_gamepads : Nil
@@ -129,7 +189,12 @@ module Flock
   # Insère la ressource Input et la rafraîchit chaque frame (schedule First).
   class InputPlugin < Plugin
     def build(app : App) : Nil
-      app.world.insert_resource(Input.new)
+      input = Input.new
+      # Attache la fenêtre (publiée par WindowPlugin) pour la conversion HiDPI.
+      if gpu = app.world.resource?(GpuContext)
+        input.attach_window(gpu.window)
+      end
+      app.world.insert_resource(input)
       app.add_system(Schedule::First) do |world, _cmd|
         world.resource(Input).refresh
       end

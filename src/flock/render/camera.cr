@@ -29,6 +29,20 @@ module Flock
                    @active : Bool = true)
     end
 
+    # Convertit une position écran (pixels framebuffer, origine haut-gauche) en
+    # coordonnées monde. Inverse analytique de `view_projection` (pan/zoom/rotation).
+    def screen_to_world(screen : Vec2, fb_w : Float32, fb_h : Float32) : Vec2
+      dx = screen.x - fb_w * 0.5f32
+      dy = screen.y - fb_h * 0.5f32
+      vx = dx / @zoom
+      vy = -dy / @zoom # écran y vers le bas -> monde y vers le haut
+      c = Math.cos(@rotation)
+      s = Math.sin(@rotation)
+      wx = (c * vx - s * vy).to_f32
+      wy = (s * vx + c * vy).to_f32
+      Vec2.new(@position.x + wx, @position.y + wy)
+    end
+
     # Matrice view-projection pour une cible de dimensions (w, h) en pixels.
     def view_projection(w : Float32, h : Float32) : Mat4
       hw = (w * 0.5f32) / @zoom

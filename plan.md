@@ -257,6 +257,10 @@ input.just_pressed?(Key::Space)      # diff avec la frame précédente
 pad = input.gamepad?(0)
 pad.try &.pressed?(Button::South)    # SDL_GetGamepadButton
 pad.try &.axis(Axis::LeftX)          # SDL_GetGamepadAxis, deadzone appliquée
+
+input.mouse_position                          # pixels framebuffer (HiDPI)
+input.mouse_pressed?(MouseButton::Left)
+camera.screen_to_world(input.mouse_position, gpu.width.to_f32, gpu.height.to_f32) # -> monde
 ```
 
 Manettes : `SDL_OpenGamepad` sur `SDL_EVENT_GAMEPAD_ADDED`, fermeture sur `_REMOVED`

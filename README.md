@@ -8,7 +8,8 @@ Un moteur de jeu **orienté données (ECS)** en Crystal, inspiré de Bevy, au-de
 - **App / plugins / schedules** : `Startup / First / Update / Render / Last`.
 - **Rendu 2D** : sprites texturés instanciés, caméras 2D/3D, viewports, blending alpha.
 - **Shaders façon wgpu** : `Shader` (WGSL) + `Material` (pipeline + uniform), handles bruts accessibles.
-- **Entrées** : clavier + **manettes** (SDL_Gamepad, hotplug, zone morte).
+- **Entrées** : clavier, **souris** (position/boutons + `Camera2D#screen_to_world`),
+  **manettes** (SDL_Gamepad, hotplug, zone morte).
 - **Audio** : WAV + sons procéduraux, mixage natif SDL3.
 
 Voir [`plan.md`](plan.md) pour la conception détaillée.
@@ -34,6 +35,7 @@ crystal spec        # 29 exemples, sans SDL ni GPU
 crystal run examples/space_invaders.cr     # le jeu : clavier + manette + son
 crystal run examples/window_app.cr         # caméra 2D + sprites colorés
 crystal run examples/custom_shader.cr      # effet plasma (shader WGSL custom)
+crystal run examples/mouse_demo.cr         # un carré suit la souris, rouge au clic
 
 # Smoke test headless (quitte après N frames) :
 WGPU_FRAMES=120 crystal run examples/space_invaders.cr
