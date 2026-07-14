@@ -13,6 +13,7 @@ require "./platform/audio"
 
 require "./render/color"
 require "./render/texture"
+require "./render/font"
 require "./render/camera"
 require "./render/components"
 require "./render/shader"

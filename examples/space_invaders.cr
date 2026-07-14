@@ -59,6 +59,18 @@ app.add_startup do |world, cmd|
 
   cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.03, 0.03, 0.07)))
 
+  # Titre (rendu de texte via SDL_ttf).
+  begin
+    gpu = world.resource(Flock::GpuContext)
+    font = Flock::Font.load("/System/Library/Fonts/Supplemental/Arial.ttf", 36)
+    title = font.render_texture(gpu, "SPACE INVADERS")
+    cmd.spawn(
+      Flock::Transform2D.at(0, 260),
+      Flock::Sprite.new(Flock::Vec2.new(title.width, title.height), Flock::Color.new(0.6, 0.9, 1.0), title, z: 10.0f32))
+  rescue ex
+    puts "titre ignoré (police indisponible) : #{ex.message}"
+  end
+
   cmd.spawn(
     Player.new(360.0f32),
     Flock::Transform2D.at(0, -250),

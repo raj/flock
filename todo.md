@@ -21,7 +21,9 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
 
 ### Fonctionnalités manquantes
 - [ ] **Souris** (position, boutons, molette) — non exposée, bloquant pour UI/jeux.
-- [ ] **Rendu de texte / police** (score, HUD) — absent.
+- [x] **Rendu de texte / police** via SDL_ttf : `Flock::Font.load` + `font.render_texture(gpu,
+      text)` → `Texture` dessinée comme sprite (teintable). Vérifié par `examples/text_test.cr`
+      (readback) ; titre intégré dans Space Invaders. Reste : cache par chaîne, atlas de glyphes.
 - [ ] **Matériaux par sprite** — `Material` ne fait que le plein écran ; le renderer a un seul
       pipeline. Permettre à un `Sprite` de référencer un matériau custom (batch par matériau
       puis texture).

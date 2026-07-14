@@ -68,7 +68,8 @@ flock/
 │       └── render/
 │           ├── components.cr   # Transform2D, Transform3D, Sprite
 │           ├── camera.cr       # Camera2D, Camera3D, Viewport, Projection
-│           ├── texture.cr      # chargement PNG (SDL_image) -> texture wgpu
+│           ├── texture.cr      # PNG (SDL_image) / surface -> texture wgpu
+│           ├── font.cr         # Font (SDL_ttf) : texte -> texture
 │           ├── shader.cr       # Shader : WGSL (fichier/string) -> module wgpu
 │           ├── material.cr     # Material : shader + pipeline + bind group + uniforms
 │           ├── renderer2d.cr   # pipeline quad texturé instancié (matériau par défaut)
@@ -470,6 +471,8 @@ handles GPU/SDL dans le bon ordre (renderer avant device). Tests de rendu : `ren
 Erreurs wgpu : `Flock.request_device` branche les callbacks `uncaptured error` / `device lost`
 (→ STDERR), flushés par `instance_process_events` chaque frame. Surface : `render` décode le
 statut d'acquisition et reconfigure (`reconfigure_to_window`) sur `Outdated`/`Lost`.
+Texte : `Flock::Font` (SDL_ttf) rend une chaîne en `Texture` (via `Texture.from_surface`),
+dessinée comme sprite teintable ; vérifié par `examples/text_test.cr`.
 
 Restes (post-phase, non bloquants) : matériaux personnalisés **par sprite** dans le renderer
 batch ; rendu de meshes 3D consommant Camera3D ; audio compressé (OGG/MP3) via SDL3_mixer.

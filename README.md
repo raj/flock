@@ -16,7 +16,7 @@ Voir [`plan.md`](plan.md) pour la conception détaillée.
 ## Prérequis (macOS / Metal)
 
 ```sh
-brew install sdl3 sdl3_image
+brew install sdl3 sdl3_image sdl3_ttf
 ```
 
 `wgpu-native` est fourni par le voisin `../wgpu-cr` (téléchargé par son `postinstall`).
@@ -38,9 +38,19 @@ crystal run examples/custom_shader.cr      # effet plasma (shader WGSL custom)
 # Smoke test headless (quitte après N frames) :
 WGPU_FRAMES=120 crystal run examples/space_invaders.cr
 
-# Test de rendu par readback (sans fenêtre) : rend en offscreen et vérifie les
-# pixels ; exit 0 si OK. Réutilisable comme test GPU en CI.
-crystal run examples/readback_test.cr
+# Tests headless par readback (rendu offscreen + assertions pixel ; exit 0 si OK) :
+crystal run examples/readback_test.cr    # un sprite coloré
+crystal run examples/text_test.cr        # rendu de texte (SDL_ttf)
+```
+
+## Texte
+
+```crystal
+font = Flock::Font.load("/System/Library/Fonts/Supplemental/Arial.ttf", 40)
+tex  = font.render_texture(gpu, "Score : 42")   # texture RGBA (texte blanc)
+cmd.spawn(Flock::Transform2D.at(0, 260),
+  Flock::Sprite.new(Flock::Vec2.new(tex.width, tex.height), Flock::Color::WHITE, tex))
+# La teinte du sprite colore le texte. Mettre en cache pour du texte qui change souvent.
 ```
 
 Space Invaders : **flèches / A-D** ou **stick gauche** pour bouger, **Espace / bouton A** pour tirer.

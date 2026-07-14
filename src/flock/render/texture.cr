@@ -55,14 +55,12 @@ module Flock
       from_pixels(gpu, 1, 1, Bytes[255_u8, 255_u8, 255_u8, 255_u8])
     end
 
-    # Charge une image (PNG, JPG…) via SDL_image, convertie en RGBA8.
-    def self.load(gpu : GpuContext, path : String) : Texture
-      raw = LibSDL.img_load(path.to_unsafe)
-      raise "IMG_Load #{path}: #{String.new(LibSDL.get_error)}" if raw.null?
-
-      conv = LibSDL.convert_surface(raw, LibSDL::PIXELFORMAT_RGBA32)
-      LibSDL.destroy_surface(raw)
-      raise "SDL_ConvertSurface #{path}: #{String.new(LibSDL.get_error)}" if conv.null?
+    # Crée une texture depuis une SDL_Surface (convertie en RGBA8). Ne libère PAS
+    # `surf` (le caller en garde la propriété). Réutilisé par le chargement d'image
+    # (SDL_image) et le rendu de texte (SDL_ttf).
+    def self.from_surface(gpu : GpuContext, surf : Pointer(LibSDL::Surface)) : Texture
+      conv = LibSDL.convert_surface(surf, LibSDL::PIXELFORMAT_RGBA32)
+      raise "SDL_ConvertSurface: #{String.new(LibSDL.get_error)}" if conv.null?
 
       s = conv.value
       w = s.w
@@ -77,8 +75,16 @@ module Flock
         (pixels.to_unsafe + row * row_bytes).copy_from(src + row * pitch, row_bytes)
       end
       LibSDL.destroy_surface(conv)
-
       from_pixels(gpu, w, h, pixels)
+    end
+
+    # Charge une image (PNG, JPG…) via SDL_image, convertie en RGBA8.
+    def self.load(gpu : GpuContext, path : String) : Texture
+      raw = LibSDL.img_load(path.to_unsafe)
+      raise "IMG_Load #{path}: #{String.new(LibSDL.get_error)}" if raw.null?
+      tex = from_surface(gpu, raw)
+      LibSDL.destroy_surface(raw)
+      tex
     end
   end
 end
