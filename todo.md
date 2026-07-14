@@ -83,13 +83,14 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       text to `Input` (`mouse_wheel`, `text_input`, `start_text_input`). Verified
       (`examples/events_test.cr`, `events_demo.cr`). The infra makes it easy to add other types
       (event-driven keyboard/gamepad).
-- [ ] **Extend coverage** as Flock needs: mouse, `SDL_SetAudioStreamGain`,
-      `SDL_RumbleGamepad`, window events (focus/minimize), `SDL_GetVersion`.
+- [x] **Extend coverage.** Mouse, `SDL_SetAudioStreamGain` (audio volume), `SDL_RumbleGamepad`
+      (`Gamepad#rumble`, used in Space Invaders), `SDL_GetVersion` (`SDL3.linked_version`) are
+      bound. Remaining: window events (focus/minimize/resize as events).
 - [ ] **Fragile hardcoded constants.** `PIXELFORMAT_RGBA32`, event values… are frozen
-      (and little-endian). Bind `SDL_GetVersion` + a sanity spec; ideally a generator
-      from the headers (like wgpu-cr).
-- [ ] **No tests.** Minimal headless spec (`SDL_Init(0)` + version) to detect a
-      linking/ABI break.
+      (and little-endian). `SDL_GetVersion` is bound + a sanity spec exists; a header-generated
+      binding (like wgpu-cr) remains the ideal.
+- [x] **Sanity test.** `spec/sdl3_spec.cr` links SDL3 (pkg-config) and asserts a v3 runtime
+      via `SDL3.linked_version` — detects a linking/ABI break.
 
 ## Diagnostics
 

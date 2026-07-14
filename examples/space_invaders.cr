@@ -155,6 +155,7 @@ app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, 
         Velocity.new(Flock::Vec2.new(0, 480)),
       )
       world.resource(Flock::Audio).play(world.resource(Sfx).shoot)
+      input.gamepad?.try &.rumble(0.4, 0.4, 80) # haptic feedback if a gamepad is connected
     end
   end
 end

@@ -66,6 +66,14 @@ module Flock
       v = v.clamp(-1.0f32, 1.0f32)
       v.abs < @deadzone ? 0.0f32 : v
     end
+
+    # Vibrates the gamepad for `ms` milliseconds. `low`/`high` (0..1) are the
+    # low-/high-frequency motor intensities.
+    def rumble(low : Number = 1.0, high : Number = 1.0, ms : Int = 300) : Bool
+      lo = (low.clamp(0.0, 1.0) * 0xFFFF).to_u16
+      hi = (high.clamp(0.0, 1.0) * 0xFFFF).to_u16
+      LibSDL.rumble_gamepad(@handle, lo, hi, ms.to_u32)
+    end
   end
 
   # Input resource: keyboard state (with just_pressed/just_released) + gamepads.
