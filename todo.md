@@ -47,9 +47,12 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
 
 - [x] **Portabilité du linking.** Passé de `/opt/homebrew/lib` en dur à des annotations
       `@[Link(pkg_config: "sdl3" / "sdl3-image" / "sdl3-ttf")]` (portable macOS/Linux ; Windows
-      via vcpkg/msys2). Repli `-lSDL3*` si pkg-config absent. Reste : côté **Flock**, le
-      montage de surface est encore Metal-only (`SurfaceSourceMetalLayer`) → pour Linux/Windows,
-      utiliser `SDL_GetWindowProperties` + la source wgpu adaptée (X11/Wayland/HWND).
+      via vcpkg/msys2). Repli `-lSDL3*` si pkg-config absent.
+- [x] **Montage de surface multi-plateforme.** `WindowPlugin#make_surface` dispatche par
+      plateforme via `SDL_GetWindowProperties` : Metal (macOS), X11/Wayland (Linux, détection
+      runtime via `SDL_GetCurrentVideoDriver`), HWND (Windows). macOS testé au runtime ;
+      Linux et Windows **vérifiés en cross-compilation** (`crystal build --cross-compile`), pas
+      encore au runtime. Reste : valider sur de vraies machines Linux/Windows.
 - [x] **Exposer les données d'événements.** Structs `MouseWheelEvent` / `TextInputEvent` +
       constantes de type ; le runner de WindowPlugin dispatche les events et route molette +
       texte vers `Input` (`mouse_wheel`, `text_input`, `start_text_input`). Vérifié

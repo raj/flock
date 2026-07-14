@@ -23,6 +23,10 @@ brew install sdl3 sdl3_image sdl3_ttf
 `wgpu-native` est fourni par le voisin `../wgpu-cr` (téléchargé par son `postinstall`).
 Flock le référence par chemin relatif — aucun `shards install` requis pour les exemples.
 
+**Portabilité** : le linking SDL passe par pkg-config et la création de surface est dispatchée
+par plateforme (Metal macOS, X11/Wayland Linux, HWND Windows). **macOS** est testé au runtime ;
+**Linux/Windows** sont vérifiés en cross-compilation mais pas encore validés sur machine réelle.
+
 ## Tester (cœur ECS + math, headless)
 
 ```sh

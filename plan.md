@@ -240,10 +240,12 @@ possible.)
 ### 5. Plateforme SDL3
 
 **Window** (`platform/window.cr`) — `WindowPlugin` :
-`SDL_Init(VIDEO|GAMEPAD|AUDIO)` ; `SDL_CreateWindow(… METAL|RESIZABLE)` ;
-`SDL_Metal_CreateView` → `SDL_Metal_GetLayer` (`CAMetalLayer*`) → `SurfaceSourceMetalLayer`
-→ `instance_create_surface` (puis adapter/device/queue/capabilities/`surface_configure` en
-`Fifo`, chemin calqué sur `triangle.cr`). Reconfiguration sur `SDL_EVENT_WINDOW_RESIZED`.
+`SDL_Init(VIDEO|GAMEPAD|AUDIO)` ; `SDL_CreateWindow` ; `make_surface` crée la surface wgpu
+**selon la plateforme** (via `SDL_GetWindowProperties`) : Metal/`CAMetalLayer` (macOS),
+`SurfaceSourceXlibWindow`/`WaylandSurface` (Linux, détection runtime `SDL_GetCurrentVideoDriver`),
+`SurfaceSourceWindowsHWND` (Windows) → `instance_create_surface` (puis adapter/device/queue/
+capabilities/`surface_configure` en `Fifo`). Reconfiguration sur redimensionnement.
+(macOS testé au runtime ; Linux/Windows vérifiés en cross-compilation.)
 Publie une ressource `GpuContext < Resource` (instance, adapter, device, queue, surface,
 format, taille fenêtre/framebuffer).
 
