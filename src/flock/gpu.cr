@@ -5,6 +5,7 @@ require "../flock"                    # cœur (math, ecs, app, time)
 require "../../../wgpu-cr/src/wgpu"   # binding wgpu (shard voisin, chemin relatif)
 require "../../../sdl3-cr/src/sdl3"   # binding SDL3 (shard voisin, chemin relatif)
 
+require "./platform/gpu_errors"
 require "./platform/gpu_context"
 require "./platform/window"
 require "./platform/input"

@@ -30,7 +30,7 @@ module Flock
       raise "instance_create_surface failed" if surface.null?
 
       adapter = WGPU.request_adapter(instance, compatible_surface: surface)
-      device = WGPU.request_device(instance, adapter)
+      device = Flock.request_device(instance, adapter) # device + callbacks d'erreur wgpu
       queue = LibWGPU.device_get_queue(device)
 
       caps = LibWGPU::SurfaceCapabilities.new
@@ -68,6 +68,7 @@ module Flock
           end
 
           a.update
+          LibWGPU.instance_process_events(gpu.instance) # flush les callbacks d'erreur wgpu
           frame += 1
         end
 

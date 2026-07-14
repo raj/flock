@@ -12,7 +12,7 @@ SIZE = 64_u32 # 64*4 = 256 octets/ligne (déjà aligné pour copy_texture_to_buf
 # --- Contexte GPU headless (pas de surface/fenêtre) ---
 instance = WGPU.create_instance
 adapter = WGPU.request_adapter(instance)
-device = WGPU.request_device(instance, adapter)
+device = Flock.request_device(instance, adapter) # device + capture des erreurs wgpu
 queue = LibWGPU.device_get_queue(device)
 
 gpu = Flock::GpuContext.new(

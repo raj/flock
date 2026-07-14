@@ -467,6 +467,8 @@ Chargement d'images : `Texture.load(gpu, path)` (PNG/JPG… via SDL_image, conve
 Gestion mémoire : `Resource#release` + `World#shutdown` (appelé par `App#run`) libèrent les
 handles GPU/SDL dans le bon ordre (renderer avant device). Tests de rendu : `render_into` +
 `examples/readback_test.cr` (rendu offscreen → copie → map → assertions pixel, headless).
+Erreurs wgpu : `Flock.request_device` branche les callbacks `uncaptured error` / `device lost`
+(→ STDERR), flushés par `instance_process_events` chaque frame.
 
 Restes (post-phase, non bloquants) : matériaux personnalisés **par sprite** dans le renderer
 batch ; rendu de meshes 3D consommant Camera3D ; audio compressé (OGG/MP3) via SDL3_mixer.

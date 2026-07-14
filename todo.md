@@ -7,8 +7,10 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
 ### Correctness / robustesse (prioritaire)
 - [x] **Libérer les ressources GPU.** `Resource#release` (+ ordre) + `World#shutdown` appelé
       par `App#run` ; `GpuContext`/`Renderer2D`/`Material`/`Texture` libèrent leurs handles.
-- [ ] **Capturer les erreurs wgpu.** Brancher un callback `uncaptured error` / `device lost`
-      (aujourd'hui une erreur de validation passe en silence).
+- [x] **Capturer les erreurs wgpu.** `Flock.request_device` crée le device avec les callbacks
+      `uncaptured error` + `device lost` (journalisés sur STDERR) ; le runner appelle
+      `instance_process_events` par frame pour les flusher. Vérifié : un buffer invalide
+      déclenche `[wgpu][Validation]`.
 - [ ] **Récupérer une surface perdue.** Décoder le statut de `surface_get_current_texture`
       (transitoire `196609` en 1ʳᵉ frame) et reconfigurer sur `Outdated`/`Lost`, pas seulement
       au resize.
