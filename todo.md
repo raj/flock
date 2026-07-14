@@ -58,7 +58,10 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
 - [x] **Multi-viewport / per-region clear**: each camera paints its own viewport with its own
       clear color via a scissored full-region quad (small no-blend clear pipeline). True
       split-screen. Verified (`examples/split_screen_test.cr` readback; `split_screen.cr` demo).
-- [ ] **Configurable sampler** (linear vs nearest, mipmaps) — currently nearest only.
+- [x] **Configurable sampler**: per-texture `filter` (Nearest/Linear) + `wrap` (Clamp/Repeat),
+      passed to `Texture.from_pixels`/`load`; the renderer caches a GPU sampler per (filter, wrap).
+      Verified (`examples/sampler_test.cr`: linear blends a 2×2 checker). Remaining: mipmap
+      generation (needs level downsampling on upload).
 - [x] **3D rendering** of meshes consuming `Camera3D`: `Mesh` (vertex/index buffers,
       `Mesh.cube`) + `MeshRenderer`/`Transform3D` components + `Renderer3D` (per-mesh draw via a
       model storage buffer, depth buffer, directional lighting). Verified (`examples/cube3d.cr`,

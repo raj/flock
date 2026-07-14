@@ -55,6 +55,8 @@ crystal run examples/text_test.cr        # text rendering (SDL_ttf)
 crystal run examples/assets_test.cr      # asset cache (same key -> same instance)
 crystal run examples/material_test.cr    # per-sprite custom material (WGSL)
 crystal run examples/cube3d_test.cr      # 3D mesh + Camera3D + depth
+crystal run examples/split_screen_test.cr # per-viewport region clear
+crystal run examples/sampler_test.cr     # linear vs nearest filtering
 ```
 
 ## Per-sprite materials

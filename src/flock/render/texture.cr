@@ -1,4 +1,17 @@
 module Flock
+  # Texture sampling: magnification/minification filter and wrap mode. `Nearest` is
+  # crisp (pixel-art), `Linear` is smooth. Chosen per texture; the renderer builds and
+  # caches a matching GPU sampler.
+  enum SamplerFilter
+    Nearest
+    Linear
+  end
+
+  enum SamplerWrap
+    Clamp  # ClampToEdge
+    Repeat
+  end
+
   # 2D GPU texture (RGBA8). Created from a pixel array (procedural) — PNG loading
   # via SDL_image builds on top (see `Texture.load`).
   class Texture
@@ -6,9 +19,12 @@ module Flock
     getter view : LibWGPU::TextureView
     getter width : UInt32
     getter height : UInt32
+    getter filter : SamplerFilter
+    getter wrap : SamplerWrap
 
     def initialize(@texture : LibWGPU::Texture, @view : LibWGPU::TextureView,
-                   @width : UInt32, @height : UInt32)
+                   @width : UInt32, @height : UInt32,
+                   @filter : SamplerFilter = SamplerFilter::Nearest, @wrap : SamplerWrap = SamplerWrap::Clamp)
     end
 
     def release : Nil
@@ -17,7 +33,9 @@ module Flock
     end
 
     # `pixels`: RGBA8, `width * height * 4` bytes, row by row.
-    def self.from_pixels(gpu : GpuContext, width : Int, height : Int, pixels : Bytes) : Texture
+    def self.from_pixels(gpu : GpuContext, width : Int, height : Int, pixels : Bytes,
+                         filter : SamplerFilter = SamplerFilter::Nearest,
+                         wrap : SamplerWrap = SamplerWrap::Clamp) : Texture
       w = width.to_u32
       h = height.to_u32
 
@@ -47,7 +65,7 @@ module Flock
         pixels.to_unsafe.as(Void*), pixels.size.to_u64, pointerof(layout), pointerof(ext))
 
       view = LibWGPU.texture_create_view(tex, Pointer(LibWGPU::TextureViewDescriptor).null)
-      Texture.new(tex, view, w, h)
+      Texture.new(tex, view, w, h, filter, wrap)
     end
 
     # 1x1 white texture: sprite with no texture = solid color (texture * tint).
@@ -58,7 +76,9 @@ module Flock
     # Creates a texture from an SDL_Surface (converted to RGBA8). Does NOT free
     # `surf` (the caller retains ownership). Reused by image loading
     # (SDL_image) and text rendering (SDL_ttf).
-    def self.from_surface(gpu : GpuContext, surf : Pointer(LibSDL::Surface)) : Texture
+    def self.from_surface(gpu : GpuContext, surf : Pointer(LibSDL::Surface),
+                          filter : SamplerFilter = SamplerFilter::Nearest,
+                          wrap : SamplerWrap = SamplerWrap::Clamp) : Texture
       conv = LibSDL.convert_surface(surf, LibSDL::PIXELFORMAT_RGBA32)
       raise "SDL_ConvertSurface: #{String.new(LibSDL.get_error)}" if conv.null?
 
@@ -75,14 +95,16 @@ module Flock
         (pixels.to_unsafe + row * row_bytes).copy_from(src + row * pitch, row_bytes)
       end
       LibSDL.destroy_surface(conv)
-      from_pixels(gpu, w, h, pixels)
+      from_pixels(gpu, w, h, pixels, filter, wrap)
     end
 
     # Loads an image (PNG, JPG…) via SDL_image, converted to RGBA8.
-    def self.load(gpu : GpuContext, path : String) : Texture
+    def self.load(gpu : GpuContext, path : String,
+                  filter : SamplerFilter = SamplerFilter::Nearest,
+                  wrap : SamplerWrap = SamplerWrap::Clamp) : Texture
       raw = LibSDL.img_load(path.to_unsafe)
       raise "IMG_Load #{path}: #{String.new(LibSDL.get_error)}" if raw.null?
-      tex = from_surface(gpu, raw)
+      tex = from_surface(gpu, raw, filter, wrap)
       LibSDL.destroy_surface(raw)
       tex
     end

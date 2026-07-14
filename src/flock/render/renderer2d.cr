@@ -90,7 +90,8 @@ module Flock
     @pipeline_layout : LibWGPU::PipelineLayout
     @group0_layout : LibWGPU::BindGroupLayout
     @group1_layout : LibWGPU::BindGroupLayout
-    @sampler : LibWGPU::Sampler
+    # GPU samplers cached by (filter, wrap), built on demand per texture.
+    @samplers : Hash(Tuple(SamplerFilter, SamplerWrap), LibWGPU::Sampler) = {} of Tuple(SamplerFilter, SamplerWrap) => LibWGPU::Sampler
     @uniform_buf : LibWGPU::Buffer
     @instance_buf : LibWGPU::Buffer
     @group0 : LibWGPU::BindGroup
@@ -117,7 +118,6 @@ module Flock
       @group1_layout = build_group1_layout
       @pipeline_layout = build_pipeline_layout
       @pipeline = build_pipeline(@shader)
-      @sampler = build_sampler
       @white = Texture.white(@gpu)
 
       @uniform_buf = make_buffer(64_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
@@ -217,7 +217,8 @@ module Flock
       LibWGPU.bind_group_release(@group0)
       LibWGPU.buffer_release(@instance_buf)
       LibWGPU.buffer_release(@uniform_buf)
-      LibWGPU.sampler_release(@sampler)
+      @samplers.each_value { |s| LibWGPU.sampler_release(s) }
+      @samplers.clear
       @materials.each &.release
       @materials.clear
       LibWGPU.bind_group_release(@clear_group)
@@ -242,15 +243,23 @@ module Flock
       LibWGPU.device_create_buffer(@gpu.device, pointerof(desc))
     end
 
-    private def build_sampler : LibWGPU::Sampler
+    private def sampler_for(filter : SamplerFilter, wrap : SamplerWrap) : LibWGPU::Sampler
+      @samplers[{filter, wrap}] ||= build_sampler(filter, wrap)
+    end
+
+    private def build_sampler(filter : SamplerFilter, wrap : SamplerWrap) : LibWGPU::Sampler
+      addr = wrap.repeat? ? LibWGPU::AddressMode::Repeat : LibWGPU::AddressMode::ClampToEdge
+      fmode = filter.linear? ? LibWGPU::FilterMode::Linear : LibWGPU::FilterMode::Nearest
+      mmode = filter.linear? ? LibWGPU::MipmapFilterMode::Linear : LibWGPU::MipmapFilterMode::Nearest
+
       d = LibWGPU::SamplerDescriptor.new
       d.label = WGPU.empty_string_view
-      d.address_mode_u = LibWGPU::AddressMode::ClampToEdge
-      d.address_mode_v = LibWGPU::AddressMode::ClampToEdge
-      d.address_mode_w = LibWGPU::AddressMode::ClampToEdge
-      d.mag_filter = LibWGPU::FilterMode::Nearest
-      d.min_filter = LibWGPU::FilterMode::Nearest
-      d.mipmap_filter = LibWGPU::MipmapFilterMode::Nearest
+      d.address_mode_u = addr
+      d.address_mode_v = addr
+      d.address_mode_w = addr
+      d.mag_filter = fmode
+      d.min_filter = fmode
+      d.mipmap_filter = mmode
       d.lod_min_clamp = 0.0f32
       d.lod_max_clamp = 1.0f32
       d.max_anisotropy = 1_u16
@@ -401,7 +410,7 @@ module Flock
         e0.texture_view = texture.view
         e1 = LibWGPU::BindGroupEntry.new
         e1.binding = 1_u32
-        e1.sampler = @sampler
+        e1.sampler = sampler_for(texture.filter, texture.wrap)
 
         entries = uninitialized LibWGPU::BindGroupEntry[2]
         entries[0] = e0

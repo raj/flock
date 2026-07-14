@@ -351,8 +351,9 @@ scale `Vec2`), `Transform3D` (Vec3 + rotation + scale, for upcoming 3D), `Sprite
 (`texture : TextureHandle`, `color : Color` tint, `size : Vec2`, `uv_rect` for atlases).
 
 **Texture** (`render/texture.cr`): `IMG_Load` (SDL_image) → RGBA pixels →
-`device_create_texture` + `queue_write_texture`; a shared `Sampler`. Cached by path
-(`Hash(String, TextureHandle)`).
+`device_create_texture` + `queue_write_texture`. Each texture carries a `filter`
+(Nearest/Linear) + `wrap` (Clamp/Repeat); the renderer caches one GPU sampler per
+(filter, wrap). Cached by key in `Assets`.
 
 **Renderer2D** (`render/renderer2d.cr`) — instanced textured quads (chosen implementation,
 simpler than vertex/index buffers):
