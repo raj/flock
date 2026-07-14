@@ -34,16 +34,19 @@ module Flock
 
   # Sprite : quad texturé teinté. `texture = nil` -> blanc (couleur pleine).
   # `size` en unités monde (pixels par défaut). `uv_min`/`uv_size` pour un atlas.
+  # `z` = ordre de dessin (croissant = du fond vers l'avant) : le batcher trie par
+  # (z, texture), donc la superposition est respectée tout en groupant les draws.
   struct Sprite
     include Component
     property size : Vec2
     property color : Color
     property texture : Texture?
+    property z : Float32
     property uv_min : Vec2
     property uv_size : Vec2
 
     def initialize(@size : Vec2, @color : Color = Color::WHITE, @texture : Texture? = nil,
-                   @uv_min : Vec2 = Vec2.new(0, 0), @uv_size : Vec2 = Vec2.new(1, 1))
+                   @z : Float32 = 0.0f32, @uv_min : Vec2 = Vec2.new(0, 0), @uv_size : Vec2 = Vec2.new(1, 1))
     end
   end
 end

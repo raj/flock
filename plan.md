@@ -330,17 +330,23 @@ scale `Vec2`), `Transform3D` (Vec3 + rotation + scale, pour la 3D à venir), `Sp
 `device_create_texture` + `queue_write_texture` ; un `Sampler` partagé. Cache par chemin
 (`Hash(String, TextureHandle)`).
 
-**Renderer2D** (`render/renderer2d.cr`) — quad texturé instancié :
+**Renderer2D** (`render/renderer2d.cr`) — quads texturés instanciés (implémentation retenue,
+plus simple que des vertex/index buffers) :
 
-- vertex buffer (quad unitaire, 4 sommets pos+uv) + index buffer (6 indices).
-- instance buffer réécrit par frame (`queue_write_buffer`) : par entité (Transform2D, Sprite)
-  → matrice modèle + teinte + uv_rect.
-- uniform buffer : view-projection **de la caméra courante**.
-- bind group : uniform + texture + sampler ; **blending alpha activé** (`ColorTargetState.blend`).
-- shader WGSL inline : `vs_main` = viewproj × modèle × quad ; `fs_main` = `texture * teinte`.
-- Par caméra : batch par texture (regroupe les sprites d'une même texture), `draw_indexed(6, N)`.
+- **Géométrie dans le shader** : le quad unitaire (6 sommets pos+uv) est un `const` WGSL
+  indexé par `@builtin(vertex_index)`. Aucun vertex/index buffer.
+- **Storage buffer d'instances** réécrit par frame (`queue_write_buffer`) : par entité
+  (Transform2D, Sprite) → matrice modèle (16f) + teinte (4f) + uv (4f) = 96 o. Le shader lit
+  `instances[@builtin(instance_index)]`. Capacité doublée à la demande.
+- uniform buffer : view-projection **de la caméra courante** ; bind groups en **layout auto**
+  (`render_pipeline_get_bind_group_layout`) : group0 = uniform+storage, group1 = texture+sampler.
+- **Batching conscient des couches** : tri des sprites par `(z, texture)` puis un
+  `draw(6, count, 0, first_instance)` par série contiguë de même texture → superposition
+  correcte **et** draws minimaux (N sprites d'une même texture = 1 draw). Stats exposées :
+  `Renderer2D#last_sprites` / `#last_draw_calls`.
+- **blending alpha activé** ; `fs_main` = `texture * teinte`.
 - Chemin par frame calqué sur `triangle.cr` (`surface_get_current_texture` → render pass →
-  submit → `surface_present`).
+  submit → `surface_present`) ; la 1re frame (surface pas encore prête) est sautée.
 
 **RenderPlugin** (`render/render_plugin.cr`) : crée Renderer2D + Sampler au Startup (depuis
 `GpuContext`), enregistre le système de rendu (itère les caméras) en `Schedule::Render`.

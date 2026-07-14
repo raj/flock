@@ -62,6 +62,10 @@ module Flock
     @instance_buf : LibWGPU::Buffer
     @group0 : LibWGPU::BindGroup
 
+    # Statistiques de la dernière frame (batching).
+    getter last_sprites : Int32 = 0
+    getter last_draw_calls : Int32 = 0
+
     getter white : Texture
 
     def initialize(@gpu : GpuContext)
@@ -222,23 +226,27 @@ module Flock
 
     # Collecte les sprites (triés par texture), les caméras, et rend la frame.
     def render(world : World) : Nil
+      @last_draw_calls = 0
       cameras = [] of Camera2D
       world.query(Camera2D) { |_e, cam| cameras << cam.value if cam.value.active }
       cameras << Camera2D.new(clear_color: Color.new(0.05, 0.05, 0.08)) if cameras.empty?
       cameras.sort_by!(&.order)
 
-      sprites = [] of {Texture, Mat4, Color, Vec2, Vec2}
+      # Collecte : (z, texture, modèle, couleur, uv_min, uv_size).
+      sprites = [] of {Float32, Texture, Mat4, Color, Vec2, Vec2}
       world.query(Transform2D, Sprite) do |_e, tf, sp|
         texture = sp.value.texture || @white
-        sprites << {texture, tf.value.matrix, sp.value.color, sp.value.uv_min, sp.value.uv_size}
+        sprites << {sp.value.z, texture, tf.value.matrix, sp.value.color, sp.value.uv_min, sp.value.uv_size}
       end
-      sprites.sort_by! { |s| s[0].view.address }
+      # Tri par couche (z) puis texture : superposition correcte + groupement des draws.
+      sprites.sort_by! { |s| {s[0], s[1].view.address} }
+      @last_sprites = sprites.size
       ensure_capacity(sprites.size) if sprites.size > 0
 
-      # Remplit le storage buffer d'instances.
+      # Remplit le storage buffer d'instances (dans l'ordre trié).
       unless sprites.empty?
         @scratch.clear
-        sprites.each do |(_tex, model, color, uv_min, uv_size)|
+        sprites.each do |(_z, _tex, model, color, uv_min, uv_size)|
           @scratch.concat(model.m)
           @scratch.push(color.r, color.g, color.b, color.a)
           @scratch.push(uv_min.x, uv_min.y, uv_size.x, uv_size.y)
@@ -289,15 +297,17 @@ module Flock
         unless sprites.empty?
           LibWGPU.render_pass_encoder_set_pipeline(pass, @pipeline)
           LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
+          # Un draw par série contiguë de même texture (dans l'ordre de couche trié).
           i = 0
           while i < sprites.size
-            tex = sprites[i][0]
+            tex = sprites[i][1]
             j = i + 1
-            while j < sprites.size && sprites[j][0].view.address == tex.view.address
+            while j < sprites.size && sprites[j][1].view.address == tex.view.address
               j += 1
             end
             LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(tex), 0_u64, Pointer(UInt32).null)
             LibWGPU.render_pass_encoder_draw(pass, 6_u32, (j - i).to_u32, 0_u32, i.to_u32)
+            @last_draw_calls += 1
             i = j
           end
         end
