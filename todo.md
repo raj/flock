@@ -11,9 +11,9 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
       `uncaptured error` + `device lost` (journalisés sur STDERR) ; le runner appelle
       `instance_process_events` par frame pour les flusher. Vérifié : un buffer invalide
       déclenche `[wgpu][Validation]`.
-- [ ] **Récupérer une surface perdue.** Décoder le statut de `surface_get_current_texture`
-      (transitoire `196609` en 1ʳᵉ frame) et reconfigurer sur `Outdated`/`Lost`, pas seulement
-      au resize.
+- [x] **Récupérer une surface perdue.** `Renderer2D#render` décode le statut de
+      `surface_get_current_texture` : rend sur `SuccessOptimal`/`Suboptimal`, reconfigure via
+      `GpuContext#reconfigure_to_window` sur `Outdated`/`Lost`, saute sur Timeout/Error/transitoire.
 - [x] **Tests de rendu automatisés (readback).** `examples/readback_test.cr` : rendu offscreen
       → `copy_texture_to_buffer` → map → assertions pixel (centre rouge / coin noir), exit 0/1.
       `Renderer2D#render_into` sépare le rendu de l'acquisition de surface. A déjà attrapé un

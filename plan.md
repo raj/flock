@@ -468,7 +468,8 @@ Gestion mémoire : `Resource#release` + `World#shutdown` (appelé par `App#run`)
 handles GPU/SDL dans le bon ordre (renderer avant device). Tests de rendu : `render_into` +
 `examples/readback_test.cr` (rendu offscreen → copie → map → assertions pixel, headless).
 Erreurs wgpu : `Flock.request_device` branche les callbacks `uncaptured error` / `device lost`
-(→ STDERR), flushés par `instance_process_events` chaque frame.
+(→ STDERR), flushés par `instance_process_events` chaque frame. Surface : `render` décode le
+statut d'acquisition et reconfigure (`reconfigure_to_window`) sur `Outdated`/`Lost`.
 
 Restes (post-phase, non bloquants) : matériaux personnalisés **par sprite** dans le renderer
 batch ; rendu de meshes 3D consommant Camera3D ; audio compressé (OGG/MP3) via SDL3_mixer.

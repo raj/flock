@@ -239,18 +239,26 @@ module Flock
       @group0 = build_group0
     end
 
-    # Rend la frame sur la surface de la fenêtre.
+    # Rend la frame sur la surface de la fenêtre, en gérant les statuts d'acquisition.
     def render(world : World) : Nil
       st = LibWGPU::SurfaceTexture.new
       LibWGPU.surface_get_current_texture(@gpu.surface, pointerof(st))
-      return unless st.status.success_optimal? || st.status.success_suboptimal?
-      target = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
 
-      render_into(target, @gpu.width, @gpu.height, world)
-
-      LibWGPU.surface_present(@gpu.surface)
-      LibWGPU.texture_view_release(target)
-      LibWGPU.texture_release(st.texture)
+      case st.status
+      when .success_optimal?, .success_suboptimal?
+        # Suboptimal reste affichable ; la surface sera reconfigurée au prochain resize.
+        target = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
+        render_into(target, @gpu.width, @gpu.height, world)
+        LibWGPU.surface_present(@gpu.surface)
+        LibWGPU.texture_view_release(target)
+        LibWGPU.texture_release(st.texture)
+      when .outdated?, .lost?
+        # Surface périmée (resize) ou perdue (changement d'affichage) : on reconfigure
+        # à la taille courante et on réessaiera à la frame suivante.
+        @gpu.reconfigure_to_window
+      else
+        # Timeout / Error / statut transitoire (ex. 1re frame) : on saute cette frame.
+      end
     end
 
     # Rend le monde dans une cible arbitraire (surface OU texture offscreen). Sépare

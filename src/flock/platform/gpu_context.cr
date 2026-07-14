@@ -36,6 +36,14 @@ module Flock
       LibSDL.quit
     end
 
+    # Reconfigure la surface à la taille courante de la fenêtre (récupération d'une
+    # surface périmée/perdue). No-op sans fenêtre (contexte headless).
+    def reconfigure_to_window : Nil
+      return if @window.null?
+      LibSDL.get_window_size_in_pixels(@window, out w, out h)
+      reconfigure(w.to_u32, h.to_u32)
+    end
+
     # Reconfigure la surface (appelé au démarrage et sur redimensionnement).
     def reconfigure(w : UInt32, h : UInt32) : Nil
       return if w == 0 || h == 0
