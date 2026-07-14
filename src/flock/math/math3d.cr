@@ -139,6 +139,26 @@ module Flock
       Mat4.new(a)
     end
 
+    # Rotation about the X axis (radians).
+    def self.rotation_x(rad : Number) : Mat4
+      c = Math.cos(rad).to_f32
+      s = Math.sin(rad).to_f32
+      a = identity.m
+      a[5] = c; a[6] = s
+      a[9] = -s; a[10] = c
+      Mat4.new(a)
+    end
+
+    # Rotation about the Y axis (radians).
+    def self.rotation_y(rad : Number) : Mat4
+      c = Math.cos(rad).to_f32
+      s = Math.sin(rad).to_f32
+      a = identity.m
+      a[0] = c; a[2] = -s
+      a[8] = s; a[10] = c
+      Mat4.new(a)
+    end
+
     # Matrix product (column-major): self * other.
     def *(o : Mat4) : Mat4
       a = StaticArray(Float32, 16).new(0.0f32)

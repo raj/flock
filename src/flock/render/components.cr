@@ -22,13 +22,32 @@ module Flock
     end
   end
 
-  # 3D transform (provided for upcoming 3D; not yet consumed by rendering).
+  # 3D transform. `rotation` is Euler angles (radians, applied Z*Y*X).
   struct Transform3D
     include Component
     property position : Vec3
+    property rotation : Vec3
     property scale : Vec3
 
-    def initialize(@position : Vec3 = Vec3.new, @scale : Vec3 = Vec3.new(1, 1, 1))
+    def initialize(@position : Vec3 = Vec3.new, @rotation : Vec3 = Vec3.new,
+                   @scale : Vec3 = Vec3.new(1, 1, 1))
+    end
+
+    # Model matrix: translate * rotate(Z*Y*X) * scale.
+    def matrix : Mat4
+      Mat4.translation(@position) *
+        Mat4.rotation_z(@rotation.z) * Mat4.rotation_y(@rotation.y) * Mat4.rotation_x(@rotation.x) *
+        Mat4.scale(@scale)
+    end
+  end
+
+  # Attaches a Mesh to an entity for 3D rendering (with Transform3D), consumed by
+  # Renderer3D + Camera3D.
+  struct MeshRenderer
+    include Component
+    property mesh : Mesh
+
+    def initialize(@mesh : Mesh)
     end
   end
 

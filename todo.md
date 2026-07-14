@@ -48,7 +48,11 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
 - [ ] **Multi-viewport / per-region clear**: the clear covers the whole attachment → a viewport
       cannot clear in its own color (true split-screen: scissor or separate passes).
 - [ ] **Configurable sampler** (linear vs nearest, mipmaps) — currently nearest only.
-- [ ] **3D rendering** of meshes consuming `Camera3D` (the perspective/look_at math is ready).
+- [x] **3D rendering** of meshes consuming `Camera3D`: `Mesh` (vertex/index buffers,
+      `Mesh.cube`) + `MeshRenderer`/`Transform3D` components + `Renderer3D` (per-mesh draw via a
+      model storage buffer, depth buffer, directional lighting). Verified (`examples/cube3d.cr`,
+      `cube3d_test.cr` readback). Remaining: normal matrix for non-uniform scale, mesh loading
+      (glTF/OBJ), instanced meshes.
 
 ## sdl3-cr
 
@@ -72,6 +76,13 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       from the headers (like wgpu-cr).
 - [ ] **No tests.** Minimal headless spec (`SDL_Init(0)` + version) to detect a
       linking/ABI break.
+
+## Diagnostics
+
+- [ ] **Forward wgpu-native detailed logs.** The uncaptured-error callback only gives a terse
+      "Validation Error"; wgpu-native's own log has the real cause (e.g. "Bytes per row does not
+      respect COPY_BYTES_PER_ROW_ALIGNMENT"). Bind `wgpuSetLogCallback`/`wgpuSetLogLevel` and
+      forward to STDERR (opt-in via env, e.g. `FLOCK_WGPU_LOG`).
 
 ## Web / WASM export (later)
 

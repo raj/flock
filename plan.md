@@ -491,8 +491,12 @@ Per-sprite materials: `SpriteMaterial` (`Renderer2D#build_material(wgsl)`) share
 pipeline layout so a `Sprite#material` swaps the shader while reusing the uniform/instance/
 texture bind groups; batched by (z, material, texture). Verified by `examples/material_test.cr`.
 
-Remaining (post-phase, non-blocking): 3D mesh rendering consuming Camera3D; compressed audio
-(OGG/MP3) via SDL3_mixer.
+3D: `Mesh` (vertex/index buffers, `Mesh.cube`) + `MeshRenderer`/`Transform3D` + `Renderer3D`
+(per-mesh draws via a model storage buffer, depth buffer, directional lighting) consume
+`Camera3D`. Verified by `examples/cube3d.cr` / `cube3d_test.cr`.
+
+Remaining (post-phase, non-blocking): compressed audio (OGG/MP3) via SDL3_mixer; mesh loading
+(glTF/OBJ); web/WASM export (see todo).
 
 ## Implementation roadmap
 

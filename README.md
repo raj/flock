@@ -41,6 +41,7 @@ crystal run examples/window_app.cr         # 2D camera + colored sprites
 crystal run examples/custom_shader.cr      # plasma effect (custom WGSL shader)
 crystal run examples/mouse_demo.cr         # a square follows the mouse, red on click
 crystal run examples/events_demo.cr        # wheel + text input (console)
+crystal run examples/cube3d.cr             # a spinning lit 3D cube (Camera3D + depth)
 
 # Headless smoke test (quits after N frames):
 WGPU_FRAMES=120 crystal run examples/space_invaders.cr
@@ -50,6 +51,7 @@ crystal run examples/readback_test.cr    # a colored sprite
 crystal run examples/text_test.cr        # text rendering (SDL_ttf)
 crystal run examples/assets_test.cr      # asset cache (same key -> same instance)
 crystal run examples/material_test.cr    # per-sprite custom material (WGSL)
+crystal run examples/cube3d_test.cr      # 3D mesh + Camera3D + depth
 ```
 
 ## Per-sprite materials
