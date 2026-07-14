@@ -15,10 +15,26 @@ module Flock
 
     MAX_FIXED_STEPS = 8 # "spiral of death" guard if a frame is very slow
 
+    # A registered system plus its ordering metadata: an optional `label`, optional
+    # `before`/`after` a label (topologically sorted within the schedule), and an
+    # optional `run_if` condition.
+    struct SystemEntry
+      getter proc : System
+      getter label : Symbol?
+      getter before : Symbol?
+      getter after : Symbol?
+      getter run_if : Proc(World, Bool)?
+
+      def initialize(@proc : System, @label : Symbol? = nil, @before : Symbol? = nil,
+                     @after : Symbol? = nil, @run_if : Proc(World, Bool)? = nil)
+      end
+    end
+
     getter world : World
     getter fixed_dt : Float64 = 1.0 / 60.0
 
-    @systems : Hash(Schedule, Array(System)) = {} of Schedule => Array(System)
+    @systems : Hash(Schedule, Array(SystemEntry)) = {} of Schedule => Array(SystemEntry)
+    @order_cache : Hash(Schedule, Array(SystemEntry)) = {} of Schedule => Array(SystemEntry)
     @runner : Proc(App, Nil)? = nil
     @accumulator : Float64 = 0.0
     # OnEnter/OnExit systems keyed by "State(S)=value".
@@ -27,9 +43,17 @@ module Flock
 
     def initialize
       @world = World.new
-      Schedule.values.each { |s| @systems[s] = [] of System }
+      Schedule.values.each { |s| @systems[s] = [] of SystemEntry }
       @world.insert_resource(Time.new)
       time.fixed_delta = @fixed_dt
+    end
+
+    # Central registration: appends a system entry and invalidates the cached order.
+    private def register(schedule : Schedule, proc : System, label : Symbol? = nil,
+                         before : Symbol? = nil, after : Symbol? = nil,
+                         run_if : Proc(World, Bool)? = nil) : Nil
+      @systems[schedule] << SystemEntry.new(proc, label, before, after, run_if)
+      @order_cache.delete(schedule)
     end
 
     # Fixed timestep (seconds) of the FixedUpdate systems.
@@ -60,18 +84,22 @@ module Flock
       self
     end
 
-    def add_system(schedule : Schedule, &block : World, Commands ->) : self
-      @systems[schedule] << block
+    # Adds a system to a schedule. Optional ordering: `label` names it; `before`/`after`
+    # order it relative to another label; `run_if` gates it on a condition.
+    def add_system(schedule : Schedule, *, label : Symbol? = nil, before : Symbol? = nil,
+                   after : Symbol? = nil, run_if : Proc(World, Bool)? = nil,
+                   &block : World, Commands ->) : self
+      register(schedule, block, label, before, after, run_if)
       self
     end
 
     def add_startup(&block : World, Commands ->) : self
-      @systems[Schedule::Startup] << block
+      register(Schedule::Startup, block)
       self
     end
 
     def add_fixed_system(&block : World, Commands ->) : self
-      @systems[Schedule::FixedUpdate] << block
+      register(Schedule::FixedUpdate, block)
       self
     end
 
@@ -79,7 +107,7 @@ module Flock
     # so events remain readable for one extra frame (see Events(T)/EventReader).
     def add_event(type : T.class) : self forall T
       @world.events(T)
-      @systems[Schedule::Last] << ->(w : World, _c : Commands) { w.events(T).update; nil }
+      register(Schedule::Last, ->(w : World, _c : Commands) { w.events(T).update; nil })
       self
     end
 
@@ -89,12 +117,12 @@ module Flock
     def add_state(initial : S) : self forall S
       @world.insert_resource(State(S).new(initial))
 
-      @systems[Schedule::Startup] << ->(w : World, c : Commands) do
+      register(Schedule::Startup, ->(w : World, c : Commands) do
         run_state_systems(@on_enter, state_key(State(S).name, w.resource(State(S)).current), w, c)
         nil
-      end
+      end)
 
-      @systems[Schedule::First] << ->(w : World, c : Commands) do
+      register(Schedule::First, ->(w : World, c : Commands) do
         st = w.resource(State(S))
         if pending = st.pending
           st.pending = nil
@@ -106,7 +134,7 @@ module Flock
           end
         end
         nil
-      end
+      end)
       self
     end
 
@@ -134,10 +162,7 @@ module Flock
 
     # Adds a system that runs only while the state of type S equals `state`.
     def add_system_in_state(state : S, schedule : Schedule, &block : World, Commands ->) : self forall S
-      @systems[schedule] << ->(w : World, c : Commands) do
-        block.call(w, c) if w.state(S) == state
-        nil
-      end
+      register(schedule, block, run_if: ->(w : World) { w.state(S) == state })
       self
     end
 
@@ -148,11 +173,64 @@ module Flock
 
     # --- Execution ---------------------------------------------------------
 
-    # Runs all systems of a schedule then applies the queued commands.
+    # Runs all systems of a schedule (in resolved order, honoring run_if) then applies
+    # the queued commands.
     def run_schedule(schedule : Schedule) : Nil
       cmd = Commands.new(@world)
-      @systems[schedule].each &.call(@world, cmd)
+      ordered_systems(schedule).each do |entry|
+        if cond = entry.run_if
+          next unless cond.call(@world)
+        end
+        entry.proc.call(@world, cmd)
+      end
       cmd.apply
+    end
+
+    private def ordered_systems(schedule : Schedule) : Array(SystemEntry)
+      @order_cache[schedule] ||= topo_order(@systems[schedule])
+    end
+
+    # Stable topological sort by before/after label constraints. Systems without
+    # constraints keep registration order; a cycle falls back to registration order.
+    private def topo_order(entries : Array(SystemEntry)) : Array(SystemEntry)
+      n = entries.size
+      return entries if n <= 1
+
+      by_label = {} of Symbol => Array(Int32)
+      entries.each_with_index do |e, i|
+        if l = e.label
+          (by_label[l] ||= [] of Int32) << i
+        end
+      end
+
+      succ = Array(Array(Int32)).new(n) { [] of Int32 }
+      indeg = Array(Int32).new(n, 0)
+      link = ->(from : Int32, to : Int32) do
+        succ[from] << to
+        indeg[to] += 1
+      end
+      entries.each_with_index do |e, i|
+        if a = e.after
+          by_label[a]?.try &.each { |j| link.call(j, i) } # j runs before i
+        end
+        if b = e.before
+          by_label[b]?.try &.each { |j| link.call(i, j) } # i runs before j
+        end
+      end
+
+      ready = (0...n).select { |i| indeg[i] == 0 }
+      result = [] of SystemEntry
+      until ready.empty?
+        i = ready.min # smallest index -> stable (registration order on ties)
+        ready.delete(i)
+        result << entries[i]
+        succ[i].each do |j|
+          indeg[j] -= 1
+          ready << j if indeg[j] == 0
+        end
+      end
+
+      result.size == n ? result : entries
     end
 
     def startup : Nil

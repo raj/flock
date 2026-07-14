@@ -6,7 +6,8 @@ A **data-oriented (ECS)** game engine in Crystal, inspired by Bevy, built on top
 - **ECS**: sparse sets, cache-friendly `struct` components, mutation via pointer,
   multi-component `query` (driven by the smallest set), resources, deferred commands.
 - **App / plugins / schedules**: `Startup / First / FixedUpdate / Update / Render / Last`,
-  events (`Events(T)`), and a state machine (`State(S)` + in-state systems).
+  system ordering (`label`/`before`/`after`/`run_if`), events (`Events(T)`), and a state
+  machine (`State(S)` + in-state systems).
 - **2D rendering**: instanced textured sprites, 2D/3D cameras, viewports, alpha blending.
 - **wgpu-style shaders**: `Shader` (WGSL) + `Material` (pipeline + uniform), raw handles accessible.
 - **Input**: keyboard, **mouse** (position/buttons + `Camera2D#screen_to_world`),

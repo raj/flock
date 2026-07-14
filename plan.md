@@ -211,6 +211,9 @@ end
 `fixed_dt`/`fixed_hz`, bounded by `MAX_FIXED_STEPS`) — for fps-independent physics
 (systems use `Time#fixed_delta`).
 `plugin.cr`: `abstract class Plugin; abstract def build(app : App); end`.
+System ordering: `add_system(schedule, label:, before:, after:, run_if:)` — systems within a
+schedule are topologically sorted by before/after labels (stable otherwise), and `run_if`
+gates a system on a `World -> Bool` condition.
 
 Events & states: `Events(T)` (per-type queue, double-buffered so events live 2 frames;
 `send_event`/`each_event` for the simple case, `EventReader(T)` for a per-reader cursor that

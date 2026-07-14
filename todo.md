@@ -48,7 +48,9 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       one-shots are reclaimed at `queued==0` (input side), which can clip the very tail.
 
 ### Convenience / architecture
-- [ ] **System ordering** within a schedule (labels, `before`/`after`, `run_if` conditions).
+- [x] **System ordering** within a schedule: `add_system(schedule, label:, before:, after:,
+      run_if:)` — stable topological sort by before/after labels, `run_if` gates a system
+      (`add_system_in_state` now builds on it). Verified (`spec/system_order_spec.cr`).
 - [x] **Asset manager** (`Flock::Assets`, via `AssetsPlugin`/DefaultPlugins): cache by key
       for textures (`texture(path)`), fonts (`font(path, size)`) and sounds (`sound(path)`) +
       `store_texture`; centralized release (`release`, before the device). Verified
