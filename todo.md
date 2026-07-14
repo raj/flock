@@ -5,17 +5,17 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
 ## Flock
 
 ### Correctness / robustesse (prioritaire)
-- [ ] **Libérer les ressources GPU.** `Renderer2D`, `Texture`, `Material` créent buffers /
-      pipelines / bind groups / textures sans jamais appeler `*_release` ; le cache
-      `tex_groups` et les textures s'accumulent. Ajouter `finalize`/`release` ou un registre.
+- [x] **Libérer les ressources GPU.** `Resource#release` (+ ordre) + `World#shutdown` appelé
+      par `App#run` ; `GpuContext`/`Renderer2D`/`Material`/`Texture` libèrent leurs handles.
 - [ ] **Capturer les erreurs wgpu.** Brancher un callback `uncaptured error` / `device lost`
       (aujourd'hui une erreur de validation passe en silence).
 - [ ] **Récupérer une surface perdue.** Décoder le statut de `surface_get_current_texture`
       (transitoire `196609` en 1ʳᵉ frame) et reconfigurer sur `Outdated`/`Lost`, pas seulement
       au resize.
-- [ ] **Tests de rendu automatisés (readback).** Rendre dans une texture → copier vers un
-      buffer → mapper → asserter la couleur d'un pixel (le chemin readback existe déjà côté
-      wgpu-cr, cf. exemple compute). Donne une vraie couverture headless du pipeline.
+- [x] **Tests de rendu automatisés (readback).** `examples/readback_test.cr` : rendu offscreen
+      → `copy_texture_to_buffer` → map → assertions pixel (centre rouge / coin noir), exit 0/1.
+      `Renderer2D#render_into` sépare le rendu de l'acquisition de surface. A déjà attrapé un
+      bug réel : `Sprite.size` n'était pas appliqué au modèle (quads 1×1).
 
 ### Fonctionnalités manquantes
 - [ ] **Souris** (position, boutons, molette) — non exposée, bloquant pour UI/jeux.

@@ -71,14 +71,8 @@ module Flock
           frame += 1
         end
 
-        # Fermeture : libère les handles wgpu puis SDL.
-        LibWGPU.surface_release(gpu.surface)
-        LibWGPU.queue_release(gpu.queue)
-        LibWGPU.device_release(gpu.device)
-        LibWGPU.adapter_release(gpu.adapter)
-        LibWGPU.instance_release(gpu.instance)
-        LibSDL.destroy_window(gpu.window)
-        LibSDL.quit
+        # La libération (wgpu + SDL) est faite par App#run -> World#shutdown ->
+        # GpuContext#release (ordre garanti : renderer avant device).
         puts "[Flock] fenêtre fermée (#{frame} frames)"
       end
     end

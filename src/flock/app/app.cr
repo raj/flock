@@ -85,6 +85,7 @@ module Flock
       else
         raise "Aucun runner installé : ajoute WindowPlugin (boucle SDL) ou utilise run_headless."
       end
+      @world.shutdown # libère les ressources GPU/SDL à la fermeture
     end
 
     # Boucle finie et déterministe, sans fenêtre — pour tests et exécution headless.

@@ -90,6 +90,21 @@ module Flock
       @group0 = build_group0
     end
 
+    # Libère tous les handles GPU (pipeline, buffers, bind groups, sampler, textures).
+    def release : Nil
+      @tex_groups.each_value { |bg| LibWGPU.bind_group_release(bg) }
+      @tex_groups.clear
+      LibWGPU.bind_group_release(@group0)
+      LibWGPU.buffer_release(@instance_buf)
+      LibWGPU.buffer_release(@uniform_buf)
+      LibWGPU.sampler_release(@sampler)
+      LibWGPU.bind_group_layout_release(@group0_layout)
+      LibWGPU.bind_group_layout_release(@group1_layout)
+      LibWGPU.render_pipeline_release(@pipeline)
+      LibWGPU.shader_module_release(@shader)
+      @white.release
+    end
+
     private def make_buffer(size : UInt64, usage : LibWGPU::BufferUsage) : LibWGPU::Buffer
       desc = LibWGPU::BufferDescriptor.new
       desc.label = WGPU.empty_string_view
@@ -224,8 +239,24 @@ module Flock
       @group0 = build_group0
     end
 
-    # Collecte les sprites (triés par texture), les caméras, et rend la frame.
+    # Rend la frame sur la surface de la fenêtre.
     def render(world : World) : Nil
+      st = LibWGPU::SurfaceTexture.new
+      LibWGPU.surface_get_current_texture(@gpu.surface, pointerof(st))
+      return unless st.status.success_optimal? || st.status.success_suboptimal?
+      target = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
+
+      render_into(target, @gpu.width, @gpu.height, world)
+
+      LibWGPU.surface_present(@gpu.surface)
+      LibWGPU.texture_view_release(target)
+      LibWGPU.texture_release(st.texture)
+    end
+
+    # Rend le monde dans une cible arbitraire (surface OU texture offscreen). Sépare
+    # la logique de rendu de l'acquisition de surface → réutilisable pour les tests
+    # de rendu par readback.
+    def render_into(target : LibWGPU::TextureView, width : UInt32, height : UInt32, world : World) : Nil
       @last_draw_calls = 0
       cameras = [] of Camera2D
       world.query(Camera2D) { |_e, cam| cameras << cam.value if cam.value.active }
@@ -236,7 +267,9 @@ module Flock
       sprites = [] of {Float32, Texture, Mat4, Color, Vec2, Vec2}
       world.query(Transform2D, Sprite) do |_e, tf, sp|
         texture = sp.value.texture || @white
-        sprites << {sp.value.z, texture, tf.value.matrix, sp.value.color, sp.value.uv_min, sp.value.uv_size}
+        # Le quad du shader est unitaire [-0.5, 0.5] : on applique la taille du sprite.
+        model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
+        sprites << {sp.value.z, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
       end
       # Tri par couche (z) puis texture : superposition correcte + groupement des draws.
       sprites.sort_by! { |s| {s[0], s[1].view.address} }
@@ -255,14 +288,8 @@ module Flock
           @scratch.to_unsafe.as(Void*), (@scratch.size * 4).to_u64)
       end
 
-      # Acquiert la texture de la surface.
-      st = LibWGPU::SurfaceTexture.new
-      LibWGPU.surface_get_current_texture(@gpu.surface, pointerof(st))
-      return unless st.status.success_optimal? || st.status.success_suboptimal?
-      target = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
-
       cameras.each_with_index do |cam, ci|
-        vp = cam.view_projection(@gpu.width.to_f32, @gpu.height.to_f32)
+        vp = cam.view_projection(width.to_f32, height.to_f32)
         LibWGPU.queue_write_buffer(@gpu.queue, @uniform_buf, 0_u64,
           vp.m.to_unsafe.as(Void*), 64_u64)
 
@@ -323,10 +350,6 @@ module Flock
         LibWGPU.render_pass_encoder_release(pass)
         LibWGPU.command_encoder_release(encoder)
       end
-
-      LibWGPU.surface_present(@gpu.surface)
-      LibWGPU.texture_view_release(target)
-      LibWGPU.texture_release(st.texture)
     end
   end
 end

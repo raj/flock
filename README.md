@@ -37,6 +37,10 @@ crystal run examples/custom_shader.cr      # effet plasma (shader WGSL custom)
 
 # Smoke test headless (quitte après N frames) :
 WGPU_FRAMES=120 crystal run examples/space_invaders.cr
+
+# Test de rendu par readback (sans fenêtre) : rend en offscreen et vérifie les
+# pixels ; exit 0 si OK. Réutilisable comme test GPU en CI.
+crystal run examples/readback_test.cr
 ```
 
 Space Invaders : **flèches / A-D** ou **stick gauche** pour bouger, **Espace / bouton A** pour tirer.

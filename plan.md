@@ -464,6 +464,10 @@ directe `ptr.value.x = …` et les **méthodes mutantes** `ptr.value.move(…)` 
 Chargement d'images : `Texture.load(gpu, path)` (PNG/JPG… via SDL_image, conversion RGBA8)
 **implémenté et vérifié** ; `Texture.from_pixels` pour les textures procédurales.
 
+Gestion mémoire : `Resource#release` + `World#shutdown` (appelé par `App#run`) libèrent les
+handles GPU/SDL dans le bon ordre (renderer avant device). Tests de rendu : `render_into` +
+`examples/readback_test.cr` (rendu offscreen → copie → map → assertions pixel, headless).
+
 Restes (post-phase, non bloquants) : matériaux personnalisés **par sprite** dans le renderer
 batch ; rendu de meshes 3D consommant Camera3D ; audio compressé (OGG/MP3) via SDL3_mixer.
 

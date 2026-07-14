@@ -1,6 +1,16 @@
 module Flock
   # Singleton global (Time, Input, Audio, GpuContext…). À sous-classer.
   abstract class Resource
+    # Libère les ressources natives détenues. No-op par défaut ; surchargé par les
+    # ressources qui possèdent des handles GPU/SDL (GpuContext, Renderer2D, Material).
+    def release : Nil
+    end
+
+    # Ordre de libération (croissant). GpuContext se libère en dernier (il détient le
+    # device dont dépendent les autres).
+    def release_order : Int32
+      0
+    end
   end
 
   # Conteneur central de l'ECS : entités, storages de composants, ressources.
@@ -92,6 +102,13 @@ module Flock
 
     def resource?(type : T.class) : T? forall T
       @resources[T.name]?.as(T?)
+    end
+
+    # Libère toutes les ressources (ordre croissant de release_order) et vide le
+    # registre. Appelé par App#run à la fermeture.
+    def shutdown : Nil
+      @resources.values.sort_by(&.release_order).each(&.release)
+      @resources.clear
     end
 
     # --- Query -------------------------------------------------------------

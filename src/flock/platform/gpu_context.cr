@@ -21,6 +21,21 @@ module Flock
       @height == 0 ? 1.0f32 : @width.to_f32 / @height.to_f32
     end
 
+    # Libéré en dernier (les autres ressources dépendent du device).
+    def release_order : Int32
+      100
+    end
+
+    def release : Nil
+      LibWGPU.surface_release(@surface) unless @surface.null?
+      LibWGPU.queue_release(@queue)
+      LibWGPU.device_release(@device)
+      LibWGPU.adapter_release(@adapter)
+      LibWGPU.instance_release(@instance)
+      LibSDL.destroy_window(@window) unless @window.null?
+      LibSDL.quit
+    end
+
     # Reconfigure la surface (appelé au démarrage et sur redimensionnement).
     def reconfigure(w : UInt32, h : UInt32) : Nil
       return if w == 0 || h == 0

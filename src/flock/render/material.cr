@@ -13,8 +13,10 @@ module Flock
     getter bind_group : LibWGPU::BindGroup
     @uniform : LibWGPU::Buffer
     @layout : LibWGPU::BindGroupLayout
+    @shader_module : LibWGPU::ShaderModule
 
     def initialize(@gpu : GpuContext, shader : Shader)
+      @shader_module = shader.module
       @pipeline = build_pipeline(shader)
       @layout = LibWGPU.render_pipeline_get_bind_group_layout(@pipeline, 0_u32)
 
@@ -36,6 +38,14 @@ module Flock
       bd.entry_count = 1_u64
       bd.entries = pointerof(e)
       @bind_group = LibWGPU.device_create_bind_group(@gpu.device, pointerof(bd))
+    end
+
+    def release : Nil
+      LibWGPU.render_pipeline_release(@pipeline)
+      LibWGPU.bind_group_release(@bind_group)
+      LibWGPU.buffer_release(@uniform)
+      LibWGPU.bind_group_layout_release(@layout)
+      LibWGPU.shader_module_release(@shader_module)
     end
 
     # Écrit les paramètres utilisateur dans l'uniform (complétés à 16 floats).

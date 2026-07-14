@@ -11,6 +11,11 @@ module Flock
                    @width : UInt32, @height : UInt32)
     end
 
+    def release : Nil
+      LibWGPU.texture_view_release(@view)
+      LibWGPU.texture_release(@texture)
+    end
+
     # `pixels` : RGBA8, `width * height * 4` octets, ligne par ligne.
     def self.from_pixels(gpu : GpuContext, width : Int, height : Int, pixels : Bytes) : Texture
       w = width.to_u32
