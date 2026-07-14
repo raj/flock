@@ -73,6 +73,23 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
 - [ ] **No tests.** Minimal headless spec (`SDL_Init(0)` + version) to detect a
       linking/ABI break.
 
+## Web / WASM export (later)
+
+Ship a Flock game as HTML/WebAssembly. Feasible but a real project, deferred.
+- [ ] **Toolchain**: Crystal → browser WASM is proven by the `wesh` shard
+      (`/Users/rajdeenoo/Documents/code/crystal/wesh`): `crystal-js` interop + `wasm-ld` +
+      `wasm-opt` + WASI sysroot. Confirmed: Flock's **headless core** (math/ECS/app/time, no
+      native deps) already cross-compiles to `wasm32-wasi`.
+- [ ] **Blocker**: rendering (wgpu-native) and platform (SDL3) are **native libs**, unavailable
+      in the browser. Need a browser backend: WebGPU (or WebGL2) on a `<canvas>`, DOM input +
+      Web Gamepad API, WebAudio, `requestAnimationFrame` — all via `crystal-js` JS interop.
+- [ ] **Approach**: write a `WebPlugins` backend paralleling `DefaultPlugins` (the plugin split
+      keeps game/ECS code unchanged). `wesh` binds the DOM (not canvas/WebGPU), so it only
+      helps with the toolchain + surrounding HTML UI, not the game rendering.
+- [ ] **Incremental spike**: (1) run the ECS core in-browser via the wesh toolchain (no render,
+      state to `console.log`); (2) minimal canvas-2D/WebGL2 sprite backend for Space Invaders;
+      (3) then WebGPU for parity with the native backend.
+
 ## Suggested next steps
 
 - **Reliability track**: (1) resource release + wgpu error callback, (2) pixel-readback
