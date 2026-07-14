@@ -36,6 +36,7 @@ crystal run examples/space_invaders.cr     # le jeu : clavier + manette + son
 crystal run examples/window_app.cr         # caméra 2D + sprites colorés
 crystal run examples/custom_shader.cr      # effet plasma (shader WGSL custom)
 crystal run examples/mouse_demo.cr         # un carré suit la souris, rouge au clic
+crystal run examples/events_demo.cr        # molette + saisie de texte (console)
 
 # Smoke test headless (quitte après N frames) :
 WGPU_FRAMES=120 crystal run examples/space_invaders.cr

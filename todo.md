@@ -22,8 +22,8 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
 ### Fonctionnalités manquantes
 - [x] **Souris** : `Input#mouse_position` (pixels framebuffer, HiDPI) + `mouse_pressed?` /
       `just_pressed?` / `just_released?` (`MouseButton`), + `Camera2D#screen_to_world`. Vérifié
-      (`spec/camera_spec.cr`, `examples/mouse_demo.cr`). Reste : **molette** (nécessite les
-      données d'événements SDL, cf. item sdl3-cr) et curseur (masquer/capturer).
+      (`spec/camera_spec.cr`, `examples/mouse_demo.cr`). Molette exposée (`Input#mouse_wheel`,
+      via events). Reste : curseur (masquer/capturer/mode relatif).
 - [x] **Rendu de texte / police** via SDL_ttf : `Flock::Font.load` + `font.render_texture(gpu,
       text)` → `Texture` dessinée comme sprite (teintable). Vérifié par `examples/text_test.cr`
       (readback) ; titre intégré dans Space Invaders. Reste : cache par chaîne, atlas de glyphes.
@@ -48,10 +48,11 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
 - [ ] **Portabilité du linking (vrai point faible).** `@[Link]` code en dur `/opt/homebrew/lib`
       → macOS Homebrew uniquement. Passer par `pkg-config sdl3 --libs` (ou `sdl3-config`) et
       prévoir Linux/Windows → Flock pourrait alors viser X11/Wayland/HWND (SDL abstrait la fenêtre).
-- [ ] **Exposer les données d'événements.** `Event` est un blob de 128 o dont on ne lit que
-      `type` → tout est en polling. Exposer les sous-structs (clavier avec scancode, souris,
-      gamepad avec `which`) pour l'entrée événementielle, la saisie de texte, un `just_pressed`
-      fiable.
+- [x] **Exposer les données d'événements.** Structs `MouseWheelEvent` / `TextInputEvent` +
+      constantes de type ; le runner de WindowPlugin dispatche les events et route molette +
+      texte vers `Input` (`mouse_wheel`, `text_input`, `start_text_input`). Vérifié
+      (`examples/events_test.cr`, `events_demo.cr`). L'infra permet d'ajouter d'autres types
+      (clavier/gamepad événementiels) facilement.
 - [ ] **Étendre la couverture** selon les besoins Flock : souris, `SDL_SetAudioStreamGain`,
       `SDL_RumbleGamepad`, events fenêtre (focus/minimize), `SDL_GetVersion`.
 - [ ] **Constantes en dur fragiles.** `PIXELFORMAT_RGBA32`, valeurs d'événements… sont figées

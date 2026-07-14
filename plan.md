@@ -261,6 +261,8 @@ pad.try &.axis(Axis::LeftX)          # SDL_GetGamepadAxis, deadzone appliquée
 input.mouse_position                          # pixels framebuffer (HiDPI)
 input.mouse_pressed?(MouseButton::Left)
 camera.screen_to_world(input.mouse_position, gpu.width.to_f32, gpu.height.to_f32) # -> monde
+input.mouse_wheel                             # défilement de la frame (Vec2, via events)
+input.text_input                              # texte saisi UTF-8 (start_text_input pour activer)
 ```
 
 Manettes : `SDL_OpenGamepad` sur `SDL_EVENT_GAMEPAD_ADDED`, fermeture sur `_REMOVED`

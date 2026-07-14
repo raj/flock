@@ -85,6 +85,11 @@ module Flock
     @mouse_previous : UInt32 = 0_u32
     @window : LibSDL::Window = Pointer(Void).null.as(LibSDL::Window)
 
+    # Événementiels (alimentés par le runner à partir des events SDL, remis à zéro
+    # au début de chaque frame) : molette + texte saisi.
+    @wheel : Vec2 = Vec2.new
+    @text : String = ""
+
     def pressed?(key : Key) : Bool
       @current[key.value]
     end
@@ -123,6 +128,40 @@ module Flock
 
     def mouse_just_released?(button : MouseButton) : Bool
       (@mouse_current & button.mask) == 0 && (@mouse_previous & button.mask) != 0
+    end
+
+    # Défilement de la molette accumulé sur la frame (x = horizontal, y = vertical).
+    def mouse_wheel : Vec2
+      @wheel
+    end
+
+    # Texte saisi pendant la frame (UTF-8). Nécessite `start_text_input`.
+    def text_input : String
+      @text
+    end
+
+    # Active/désactive la réception des événements de texte pour la fenêtre.
+    def start_text_input : Nil
+      LibSDL.start_text_input(@window) unless @window.null?
+    end
+
+    def stop_text_input : Nil
+      LibSDL.stop_text_input(@window) unless @window.null?
+    end
+
+    # --- Appelés par le runner (WindowPlugin) ---
+
+    def clear_frame_events : Nil
+      @wheel = Vec2.new
+      @text = ""
+    end
+
+    def push_wheel(x : Float32, y : Float32) : Nil
+      @wheel = Vec2.new(@wheel.x + x, @wheel.y + y)
+    end
+
+    def push_text(str : String) : Nil
+      @text += str
     end
 
     # Renseigné par InputPlugin : permet de convertir les points fenêtre en pixels
@@ -193,6 +232,7 @@ module Flock
       # Attache la fenêtre (publiée par WindowPlugin) pour la conversion HiDPI.
       if gpu = app.world.resource?(GpuContext)
         input.attach_window(gpu.window)
+        input.start_text_input # active la réception des events de texte
       end
       app.world.insert_resource(input)
       app.add_system(Schedule::First) do |world, _cmd|

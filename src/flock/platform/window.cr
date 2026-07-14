@@ -57,8 +57,24 @@ module Flock
         while running
           break if max_frames && frame >= max_frames
 
+          # Dispatch des événements : fermeture, molette, texte (routés vers Input).
+          input = a.world.resource?(Input)
+          input.try &.clear_frame_events
           while LibSDL.poll_event(pointerof(event))
-            running = false if event.type == LibSDL::EVENT_QUIT
+            case event.type
+            when LibSDL::EVENT_QUIT
+              running = false
+            when LibSDL::EVENT_MOUSE_WHEEL
+              if inp = input
+                we = pointerof(event).as(Pointer(LibSDL::MouseWheelEvent)).value
+                inp.push_wheel(we.x, we.y)
+              end
+            when LibSDL::EVENT_TEXT_INPUT
+              if inp = input
+                te = pointerof(event).as(Pointer(LibSDL::TextInputEvent)).value
+                inp.push_text(String.new(te.text)) unless te.text.null?
+              end
+            end
           end
 
           # Redimensionnement : reconfigure la surface si la taille a changé.
