@@ -212,6 +212,10 @@ end
 (systems use `Time#fixed_delta`).
 `plugin.cr`: `abstract class Plugin; abstract def build(app : App); end`.
 
+Events & states: `Events(T)` (per-type frame queue; `send_event`/`each_event`, `add_event`
+clears it each frame) and `State(S)` (state machine; `add_state`, `set_state` deferred to the
+next frame, `add_system_in_state(value, schedule)` gates a system on the current state).
+
 `app.cr` — deliberately simple API:
 
 ```crystal

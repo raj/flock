@@ -72,6 +72,30 @@ module Flock
       self
     end
 
+    # Registers an event type T: creates its queue and clears it each frame (Last).
+    def add_event(type : T.class) : self forall T
+      @world.events(T)
+      @systems[Schedule::Last] << ->(w : World, _c : Commands) { w.events(T).clear; nil }
+      self
+    end
+
+    # Registers a state machine of type S with an initial value; deferred transitions
+    # are applied at the start of each frame (First).
+    def add_state(initial : S) : self forall S
+      @world.insert_resource(State(S).new(initial))
+      @systems[Schedule::First] << ->(w : World, _c : Commands) { w.resource(State(S)).apply_pending; nil }
+      self
+    end
+
+    # Adds a system that runs only while the state of type S equals `state`.
+    def add_system_in_state(state : S, schedule : Schedule, &block : World, Commands ->) : self forall S
+      @systems[schedule] << ->(w : World, c : Commands) do
+        block.call(w, c) if w.state(S) == state
+        nil
+      end
+      self
+    end
+
     # Installed by WindowPlugin to drive the loop via SDL events.
     def runner(&block : App ->) : Nil
       @runner = block

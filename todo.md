@@ -35,7 +35,11 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       (`App#advance_fixed`, bounded by `MAX_FIXED_STEPS`), configurable fixed step
       (`app.fixed_dt=`/`fixed_hz`), `add_fixed_system`, `Time#fixed_delta`. Verified
       (`spec/app_spec.cr`, deterministic); Space Invaders movement moved to FixedUpdate.
-- [ ] **Events / states** Bevy-style (`Events` inter-system, game state machine).
+- [x] **Events / states** Bevy-style: `Events(T)` per-type frame queue (`send_event`/
+      `each_event`, `App#add_event` clears each frame) + `State(S)` machine (`add_state`,
+      `set_state` deferred to next frame, `add_system_in_state`). Verified
+      (`spec/events_state_spec.cr`); Space Invaders gained an Escape pause state. Remaining:
+      OnEnter/OnExit transition schedules; per-reader event cursors.
 - [ ] **Audio**: `play` creates a stream per playback and reclaims it at `queued==0`, which can
       cut off the tail of the sound; add volume (`SDL_SetAudioStreamGain`), looping music, `stop`.
 

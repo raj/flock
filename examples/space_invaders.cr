@@ -7,6 +7,12 @@
 # Controls: arrows / A-D or left stick to move, Space / A button to shoot.
 require "../src/flock/gpu"
 
+# Game states: gameplay runs only while Running (Escape toggles pause).
+enum GameState
+  Running
+  Paused
+end
+
 # --- Game components ---
 struct Player
   include Flock::Component
@@ -51,6 +57,15 @@ end
 
 app = Flock::App.new
 app.add_plugin(Flock::DefaultPlugins.new("Flock — Space Invaders", 800, 600))
+app.add_state(GameState::Running)
+
+# Escape toggles pause (state transition; gameplay systems are gated on Running).
+app.add_system(Flock::Schedule::First) do |world, _cmd|
+  if world.resource(Flock::Input).just_pressed?(Flock::Key::Escape)
+    running = world.state(GameState).running?
+    world.set_state(running ? GameState::Paused : GameState::Running)
+  end
+end
 
 # --- Startup: camera, player, invader grid ---
 app.add_startup do |world, cmd|
@@ -90,7 +105,7 @@ app.add_startup do |world, cmd|
 end
 
 # --- Player movement + shooting ---
-app.add_system(Flock::Schedule::Update) do |world, cmd|
+app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, cmd|
   input = world.resource(Flock::Input)
   time = world.resource(Flock::Time)
   dt = time.delta.to_f32
@@ -123,7 +138,7 @@ app.add_system(Flock::Schedule::Update) do |world, cmd|
 end
 
 # --- Movement integration (FIXED timestep: stable speed, independent of fps) ---
-app.add_fixed_system do |world, _cmd|
+app.add_system_in_state(GameState::Running, Flock::Schedule::FixedUpdate) do |world, _cmd|
   dt = world.resource(Flock::Time).fixed_delta.to_f32
   world.query(Flock::Transform2D, Velocity) do |_e, tf, vel|
     tf.value.position = tf.value.position + vel.value.linear * dt
@@ -131,7 +146,7 @@ app.add_fixed_system do |world, _cmd|
 end
 
 # --- Invader march (group: bounce off edges + drop down) ---
-app.add_system(Flock::Schedule::Update) do |world, _cmd|
+app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, _cmd|
   state = world.resource(InvaderState)
   dt = world.resource(Flock::Time).delta.to_f32
 
@@ -158,14 +173,14 @@ app.add_system(Flock::Schedule::Update) do |world, _cmd|
 end
 
 # --- Cleanup of bullets that left the screen ---
-app.add_system(Flock::Schedule::Update) do |world, cmd|
+app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, cmd|
   world.query(Bullet, Flock::Transform2D) do |e, _b, tf|
     cmd.despawn(e) if tf.value.position.y > 320.0f32
   end
 end
 
 # --- Bullet x invader collisions (AABB) ---
-app.add_system(Flock::Schedule::Update) do |world, cmd|
+app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, cmd|
   bullets = [] of {Flock::Entity, Flock::Vec2, Flock::Vec2}
   world.query(Bullet, Flock::Transform2D, Flock::Sprite) do |e, _b, tf, sp|
     bullets << {e, tf.value.position, sp.value.size * 0.5f32}
