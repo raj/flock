@@ -49,5 +49,31 @@ module Flock
     def self.white(gpu : GpuContext) : Texture
       from_pixels(gpu, 1, 1, Bytes[255_u8, 255_u8, 255_u8, 255_u8])
     end
+
+    # Charge une image (PNG, JPG…) via SDL_image, convertie en RGBA8.
+    def self.load(gpu : GpuContext, path : String) : Texture
+      raw = LibSDL.img_load(path.to_unsafe)
+      raise "IMG_Load #{path}: #{String.new(LibSDL.get_error)}" if raw.null?
+
+      conv = LibSDL.convert_surface(raw, LibSDL::PIXELFORMAT_RGBA32)
+      LibSDL.destroy_surface(raw)
+      raise "SDL_ConvertSurface #{path}: #{String.new(LibSDL.get_error)}" if conv.null?
+
+      s = conv.value
+      w = s.w
+      h = s.h
+      pitch = s.pitch
+      src = s.pixels.as(UInt8*)
+
+      # Recopie compacte (les lignes SDL peuvent être paddées : pitch >= w*4).
+      row_bytes = w * 4
+      pixels = Bytes.new(h * row_bytes)
+      h.times do |row|
+        (pixels.to_unsafe + row * row_bytes).copy_from(src + row * pitch, row_bytes)
+      end
+      LibSDL.destroy_surface(conv)
+
+      from_pixels(gpu, w, h, pixels)
+    end
   end
 end

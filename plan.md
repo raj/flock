@@ -455,9 +455,11 @@ sont pas invocables sur une instance → `query`/`Commands#spawn` sont des **sur
 méthode** générées par arité ; (b) `ptr.value.x += v` ne persiste pas, mais l'affectation
 directe `ptr.value.x = …` et les **méthodes mutantes** `ptr.value.move(…)` oui.
 
-Restes (post-phase, non bloquants) : chargement PNG via SDL_image (le rendu accepte déjà des
-textures — `Texture.from_pixels` marche, seul `Texture.load` PNG manque) ; matériaux
-personnalisés **par sprite** dans le renderer batch ; rendu de meshes 3D consommant Camera3D.
+Chargement d'images : `Texture.load(gpu, path)` (PNG/JPG… via SDL_image, conversion RGBA8)
+**implémenté et vérifié** ; `Texture.from_pixels` pour les textures procédurales.
+
+Restes (post-phase, non bloquants) : matériaux personnalisés **par sprite** dans le renderer
+batch ; rendu de meshes 3D consommant Camera3D ; audio compressé (OGG/MP3) via SDL3_mixer.
 
 ## Roadmap d'implémentation
 
