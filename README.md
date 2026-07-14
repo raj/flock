@@ -48,12 +48,23 @@ WGPU_FRAMES=120 crystal run examples/space_invaders.cr
 # Tests headless par readback (rendu offscreen + assertions pixel ; exit 0 si OK) :
 crystal run examples/readback_test.cr    # un sprite coloré
 crystal run examples/text_test.cr        # rendu de texte (SDL_ttf)
+crystal run examples/assets_test.cr      # cache d'assets (même clé -> même instance)
+```
+
+## Assets (cache)
+
+```crystal
+assets = world.resource(Flock::Assets)          # fourni par DefaultPlugins
+tex = assets.texture("assets/player.png")       # chargé une fois, mis en cache
+fnt = assets.font("assets/Roboto.ttf", 24)
+snd = assets.sound("assets/shoot.wav")
+# libération centralisée à la fermeture (assets.release, avant le device)
 ```
 
 ## Texte
 
 ```crystal
-font = Flock::Font.load("/System/Library/Fonts/Supplemental/Arial.ttf", 40)
+font = assets.font("/System/Library/Fonts/Supplemental/Arial.ttf", 40)
 tex  = font.render_texture(gpu, "Score : 42")   # texture RGBA (texte blanc)
 cmd.spawn(Flock::Transform2D.at(0, 260),
   Flock::Sprite.new(Flock::Vec2.new(tex.width, tex.height), Flock::Color::WHITE, tex))

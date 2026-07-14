@@ -37,7 +37,10 @@ Classé par impact. `[ ]` à faire. Concerne `flock/` et le shard voisin `sdl3-c
 
 ### Confort / archi
 - [ ] **Ordre des systèmes** dans un schedule (labels, `before`/`after`, conditions `run_if`).
-- [ ] **Asset manager** (cache + handles) au lieu de charger les textures à la main.
+- [x] **Asset manager** (`Flock::Assets`, via `AssetsPlugin`/DefaultPlugins) : cache par clé
+      pour textures (`texture(path)`), polices (`font(path, size)`) et sons (`sound(path)`) +
+      `store_texture` ; libération centralisée (`release`, avant le device). Vérifié
+      (`examples/assets_test.cr`) ; titre de Space Invaders routé via le cache.
 - [ ] **Multi-viewport / clear par région** : le clear porte sur toute l'attache → un viewport
       ne peut pas s'effacer dans sa propre couleur (vrai split-screen : scissor ou passes séparées).
 - [ ] **Sampler configurable** (linear vs nearest, mipmaps) — actuellement nearest only.

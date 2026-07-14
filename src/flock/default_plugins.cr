@@ -10,6 +10,7 @@ module Flock
       app.add_plugin(RenderPlugin.new)
       app.add_plugin(InputPlugin.new)
       app.add_plugin(AudioPlugin.new)
+      app.add_plugin(AssetsPlugin.new)
     end
   end
 end

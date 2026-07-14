@@ -7,6 +7,20 @@ module Flock
     def initialize(@spec : LibSDL::AudioSpec, @data : Bytes)
     end
 
+    # Charge un WAV depuis un fichier (ne nécessite pas de device audio).
+    def self.load(path : String) : Sound
+      spec = LibSDL::AudioSpec.new
+      buf = Pointer(UInt8).null
+      len = 0_u32
+      unless LibSDL.load_wav(path.to_unsafe, pointerof(spec), pointerof(buf), pointerof(len))
+        raise "SDL_LoadWAV #{path}: #{String.new(LibSDL.get_error)}"
+      end
+      data = Bytes.new(len)
+      data.copy_from(buf, len)
+      LibSDL.sdl_free(buf.as(Void*))
+      Sound.new(spec, data)
+    end
+
     # Bip procédural (onde carrée) — utile pour un exemple sans fichier audio.
     def self.beep(frequency : Number = 440.0, seconds : Number = 0.12,
                   volume : Number = 0.25, sample_rate : Int32 = 48_000) : Sound
@@ -40,16 +54,7 @@ module Flock
     end
 
     def load(path : String) : Sound
-      spec = LibSDL::AudioSpec.new
-      buf = Pointer(UInt8).null
-      len = 0_u32
-      unless LibSDL.load_wav(path.to_unsafe, pointerof(spec), pointerof(buf), pointerof(len))
-        raise "SDL_LoadWAV #{path}: #{String.new(LibSDL.get_error)}"
-      end
-      data = Bytes.new(len)
-      data.copy_from(buf, len)
-      LibSDL.sdl_free(buf.as(Void*))
-      Sound.new(spec, data)
+      Sound.load(path)
     end
 
     def play(sound : Sound) : Nil

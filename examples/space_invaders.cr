@@ -39,7 +39,7 @@ class InvaderState < Flock::Resource
   property speed : Float32 = 45.0f32
 end
 
-class Assets < Flock::Resource
+class Sfx < Flock::Resource
   getter shoot : Flock::Sound
   getter explosion : Flock::Sound
 
@@ -55,15 +55,16 @@ app.add_plugin(Flock::DefaultPlugins.new("Flock — Space Invaders", 800, 600))
 # --- Startup : caméra, joueur, grille d'invaders ---
 app.add_startup do |world, cmd|
   world.insert_resource(InvaderState.new)
-  world.insert_resource(Assets.new)
+  world.insert_resource(Sfx.new)
 
   cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.03, 0.03, 0.07)))
 
-  # Titre (rendu de texte via SDL_ttf).
+  # Titre (rendu de texte via SDL_ttf) ; police et texture gérées par l'asset manager.
   begin
     gpu = world.resource(Flock::GpuContext)
-    font = Flock::Font.load("/System/Library/Fonts/Supplemental/Arial.ttf", 36)
-    title = font.render_texture(gpu, "SPACE INVADERS")
+    assets = world.resource(Flock::Assets)
+    font = assets.font("/System/Library/Fonts/Supplemental/Arial.ttf", 36)
+    title = assets.store_texture("title", font.render_texture(gpu, "SPACE INVADERS"))
     cmd.spawn(
       Flock::Transform2D.at(0, 260),
       Flock::Sprite.new(Flock::Vec2.new(title.width, title.height), Flock::Color.new(0.6, 0.9, 1.0), title, z: 10.0f32))
@@ -116,7 +117,7 @@ app.add_system(Flock::Schedule::Update) do |world, cmd|
         Flock::Sprite.new(Flock::Vec2.new(6, 16), Flock::Color.new(1.0, 1.0, 0.4)),
         Velocity.new(Flock::Vec2.new(0, 480)),
       )
-      world.resource(Flock::Audio).play(world.resource(Assets).shoot)
+      world.resource(Flock::Audio).play(world.resource(Sfx).shoot)
     end
   end
 end
@@ -182,7 +183,7 @@ app.add_system(Flock::Schedule::Update) do |world, cmd|
         cmd.despawn(be)
         cmd.despawn(ie)
         dead << ie.id
-        world.resource(Flock::Audio).play(world.resource(Assets).explosion)
+        world.resource(Flock::Audio).play(world.resource(Sfx).explosion)
         break
       end
     end

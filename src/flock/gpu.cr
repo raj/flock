@@ -21,4 +21,5 @@ require "./render/material"
 require "./render/renderer2d"
 require "./render/render_plugin"
 
+require "./assets"
 require "./default_plugins"

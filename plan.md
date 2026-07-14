@@ -61,6 +61,7 @@ flock/
 │       ├── math/
 │       │   └── math3d.cr       # Vec2, Vec3, Mat4 (ortho, perspective, look_at)
 │       ├── time.cr             # ressource Time (delta, elapsed)
+│       ├── assets.cr           # Assets : cache textures/polices/sons + libération
 │       ├── platform/
 │       │   ├── window.cr       # WindowPlugin : fenêtre SDL + surface wgpu + GpuContext
 │       │   ├── input.cr        # InputPlugin : clavier + manettes (Input, Gamepad)
@@ -475,7 +476,8 @@ Chargement d'images : `Texture.load(gpu, path)` (PNG/JPG… via SDL_image, conve
 **implémenté et vérifié** ; `Texture.from_pixels` pour les textures procédurales.
 
 Gestion mémoire : `Resource#release` + `World#shutdown` (appelé par `App#run`) libèrent les
-handles GPU/SDL dans le bon ordre (renderer avant device). Tests de rendu : `render_into` +
+handles GPU/SDL dans le bon ordre (renderer avant device). Assets : `Flock::Assets`
+(via `AssetsPlugin`/DefaultPlugins) met en cache textures/polices/sons par clé et les libère. Tests de rendu : `render_into` +
 `examples/readback_test.cr` (rendu offscreen → copie → map → assertions pixel, headless).
 Erreurs wgpu : `Flock.request_device` branche les callbacks `uncaptured error` / `device lost`
 (→ STDERR), flushés par `instance_process_events` chaque frame. Surface : `render` décode le
