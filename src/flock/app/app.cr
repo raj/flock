@@ -21,6 +21,9 @@ module Flock
     @systems : Hash(Schedule, Array(System)) = {} of Schedule => Array(System)
     @runner : Proc(App, Nil)? = nil
     @accumulator : Float64 = 0.0
+    # OnEnter/OnExit systems keyed by "State(S)=value".
+    @on_enter : Hash(String, Array(System)) = {} of String => Array(System)
+    @on_exit : Hash(String, Array(System)) = {} of String => Array(System)
 
     def initialize
       @world = World.new
@@ -79,12 +82,53 @@ module Flock
       self
     end
 
-    # Registers a state machine of type S with an initial value; deferred transitions
-    # are applied at the start of each frame (First).
+    # Registers a state machine of type S with an initial value. Deferred transitions
+    # are applied at the start of each frame (First): OnExit(old) then OnEnter(new) run
+    # once per change. OnEnter(initial) runs at startup.
     def add_state(initial : S) : self forall S
       @world.insert_resource(State(S).new(initial))
-      @systems[Schedule::First] << ->(w : World, _c : Commands) { w.resource(State(S)).apply_pending; nil }
+
+      @systems[Schedule::Startup] << ->(w : World, c : Commands) do
+        run_state_systems(@on_enter, state_key(State(S).name, w.resource(State(S)).current), w, c)
+        nil
+      end
+
+      @systems[Schedule::First] << ->(w : World, c : Commands) do
+        st = w.resource(State(S))
+        if pending = st.pending
+          st.pending = nil
+          unless pending == st.current
+            old = st.current
+            st.current = pending
+            run_state_systems(@on_exit, state_key(State(S).name, old), w, c)
+            run_state_systems(@on_enter, state_key(State(S).name, pending), w, c)
+          end
+        end
+        nil
+      end
       self
+    end
+
+    # Runs a system once when entering the given state value.
+    def add_on_enter(value : S, &block : World, Commands ->) : self forall S
+      (@on_enter[state_key(State(S).name, value)] ||= [] of System) << block
+      self
+    end
+
+    # Runs a system once when leaving the given state value.
+    def add_on_exit(value : S, &block : World, Commands ->) : self forall S
+      (@on_exit[state_key(State(S).name, value)] ||= [] of System) << block
+      self
+    end
+
+    private def state_key(type_name : String, value) : String
+      "#{type_name}=#{value}"
+    end
+
+    private def run_state_systems(map : Hash(String, Array(System)), key : String, world : World, cmd : Commands) : Nil
+      if list = map[key]?
+        list.each &.call(world, cmd)
+      end
     end
 
     # Adds a system that runs only while the state of type S equals `state`.

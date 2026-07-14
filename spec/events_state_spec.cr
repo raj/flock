@@ -54,4 +54,22 @@ describe "State" do
     menu_ticks.should eq(1)
     play_ticks.should eq(2)
   end
+
+  it "runs OnEnter(initial) at startup and OnExit(old)/OnEnter(new) on transition" do
+    app = Flock::App.new
+    app.add_state(Phase::Menu)
+    entered = [] of Phase
+    exited = [] of Phase
+    app.add_on_enter(Phase::Menu) { |_w, _c| entered << Phase::Menu }
+    app.add_on_enter(Phase::Playing) { |_w, _c| entered << Phase::Playing }
+    app.add_on_exit(Phase::Menu) { |_w, _c| exited << Phase::Menu }
+    app.add_system(Flock::Schedule::Update) do |world, _c|
+      world.set_state(Phase::Playing) if world.state(Phase) == Phase::Menu
+    end
+
+    app.run_headless(3)
+    # startup -> OnEnter(Menu); frame 2 First applies -> OnExit(Menu) + OnEnter(Playing).
+    entered.should eq([Phase::Menu, Phase::Playing])
+    exited.should eq([Phase::Menu])
+  end
 end

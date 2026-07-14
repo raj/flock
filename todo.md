@@ -38,8 +38,9 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
 - [x] **Events / states** Bevy-style: `Events(T)` per-type frame queue (`send_event`/
       `each_event`, `App#add_event` clears each frame) + `State(S)` machine (`add_state`,
       `set_state` deferred to next frame, `add_system_in_state`). Verified
-      (`spec/events_state_spec.cr`); Space Invaders gained an Escape pause state. Remaining:
-      OnEnter/OnExit transition schedules; per-reader event cursors.
+      (`spec/events_state_spec.cr`); Space Invaders gained an Escape pause state with an
+      OnEnter/OnExit "PAUSED" overlay. `add_on_enter`/`add_on_exit` run once per transition
+      (OnEnter(initial) at startup). Remaining: per-reader event cursors.
 - [ ] **Audio**: `play` creates a stream per playback and reclaims it at `queued==0`, which can
       cut off the tail of the sound; add volume (`SDL_SetAudioStreamGain`), looping music, `stop`.
 

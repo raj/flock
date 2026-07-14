@@ -13,6 +13,11 @@ enum GameState
   Paused
 end
 
+# Marker for the "PAUSED" overlay (spawned/removed by OnEnter/OnExit).
+struct PauseText
+  include Flock::Component
+end
+
 # --- Game components ---
 struct Player
   include Flock::Component
@@ -65,6 +70,23 @@ app.add_system(Flock::Schedule::First) do |world, _cmd|
     running = world.state(GameState).running?
     world.set_state(running ? GameState::Paused : GameState::Running)
   end
+end
+
+# On entering Paused, show a "PAUSED" overlay; on leaving, remove it (OnEnter/OnExit).
+app.add_on_enter(GameState::Paused) do |world, cmd|
+  gpu = world.resource(Flock::GpuContext)
+  assets = world.resource(Flock::Assets)
+  font = assets.font("/System/Library/Fonts/Supplemental/Arial.ttf", 48)
+  tex = font.render_texture(gpu, "PAUSED")
+  cmd.spawn(PauseText.new,
+    Flock::Transform2D.at(0, 0),
+    Flock::Sprite.new(Flock::Vec2.new(tex.width, tex.height), Flock::Color.new(1.0, 0.9, 0.3), tex, z: 20.0f32))
+rescue
+  # font unavailable: skip the overlay
+end
+
+app.add_on_exit(GameState::Paused) do |world, cmd|
+  world.query(PauseText) { |e, _p| cmd.despawn(e) }
 end
 
 # --- Startup: camera, player, invader grid ---
