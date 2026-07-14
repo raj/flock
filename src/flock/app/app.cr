@@ -75,10 +75,11 @@ module Flock
       self
     end
 
-    # Registers an event type T: creates its queue and clears it each frame (Last).
+    # Registers an event type T: creates its queue and advances it each frame (Last),
+    # so events remain readable for one extra frame (see Events(T)/EventReader).
     def add_event(type : T.class) : self forall T
       @world.events(T)
-      @systems[Schedule::Last] << ->(w : World, _c : Commands) { w.events(T).clear; nil }
+      @systems[Schedule::Last] << ->(w : World, _c : Commands) { w.events(T).update; nil }
       self
     end
 

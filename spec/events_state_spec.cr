@@ -34,7 +34,46 @@ describe "Events" do
     app.add_system(Flock::Schedule::Render) { |world, _c| world.each_event(PingEvent) { |e| got << e.n } }
 
     app.run_headless(2)
-    got.should eq([42, 42]) # sent in Update, read in Render, cleared in Last — one per frame
+    got.should eq([42, 42]) # sent in Update, read in Render, advanced in Last — one per frame
+  end
+
+  it "EventReader yields each event exactly once across frames (persistent cursor)" do
+    app = Flock::App.new
+    app.add_event(PingEvent)
+    reader = Flock::EventReader(PingEvent).new
+    seen = [] of Int32
+    frame = 0
+    app.add_system(Flock::Schedule::Update) do |world, _c|
+      frame += 1
+      world.send_event(PingEvent.new(frame))
+    end
+    app.add_system(Flock::Schedule::Render) do |world, _c|
+      reader.read(world.events(PingEvent)) { |e| seen << e.n }
+    end
+
+    app.run_headless(3)
+    seen.should eq([1, 2, 3]) # each event once, in order, no duplicates
+  end
+
+  it "EventReader catches an event even when it read before the sender (next frame)" do
+    app = Flock::App.new
+    app.add_event(PingEvent)
+    reader = Flock::EventReader(PingEvent).new
+    seen = [] of Int32
+    # Reader runs in First (before the Update sender): misses this frame, gets it next.
+    app.add_system(Flock::Schedule::First) do |world, _c|
+      reader.read(world.events(PingEvent)) { |e| seen << e.n }
+    end
+    sent = false
+    app.add_system(Flock::Schedule::Update) do |world, _c|
+      unless sent
+        world.send_event(PingEvent.new(7))
+        sent = true
+      end
+    end
+
+    app.run_headless(3)
+    seen.should eq([7]) # caught once, on the frame after it was sent
   end
 end
 
