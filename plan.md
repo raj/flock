@@ -290,7 +290,8 @@ audio.play(shoot)                        # optional volume
 
 Logical device via `SDL_OpenAudioDeviceStream`; simultaneous playback via **native SDL3
 mixing** (multiple `SDL_AudioStream`s bound to the same device). `Sound` = pre-decoded PCM (a single
-decompression per file). WAV in phase 1; OGG/MP3 (music) via SDL3_mixer later.
+decompression per file). `play(sound, volume:, loop:)` returns a `Playback` handle: per-playback
+gain + `master_volume`, seamless looping, `stop`/`stop_all`. WAV now; OGG/MP3 via SDL3_mixer later.
 
 ### 6. Cameras & viewports (`render/camera.cr`)
 

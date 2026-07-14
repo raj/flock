@@ -11,7 +11,7 @@ A **data-oriented (ECS)** game engine in Crystal, inspired by Bevy, built on top
 - **wgpu-style shaders**: `Shader` (WGSL) + `Material` (pipeline + uniform), raw handles accessible.
 - **Input**: keyboard, **mouse** (position/buttons + `Camera2D#screen_to_world`),
   **gamepads** (SDL_Gamepad, hotplug, dead zone).
-- **Audio**: WAV + procedural sounds, native SDL3 mixing.
+- **Audio**: WAV + procedural sounds, native SDL3 mixing, per-playback volume/loop/stop.
 
 See [`plan.md`](plan.md) for the detailed design.
 

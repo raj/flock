@@ -36,14 +36,29 @@ module Flock
     end
   end
 
-  # Audio playback via SDL3. An output device is opened; each `play` creates a
-  # stream bound to the device — SDL natively mixes simultaneous streams. Finished
-  # streams are reclaimed each frame (schedule Last).
+  # A handle to a running (or looping) playback, returned by `Audio#play`. Pass it
+  # to `Audio#stop`. `loop?` playbacks keep going until stopped.
+  class Playback
+    getter stream : LibSDL::AudioStream
+    getter sound : Sound
+    property? loop : Bool
+    property volume : Float32
+    property? active : Bool = true
+
+    def initialize(@stream : LibSDL::AudioStream, @sound : Sound, @loop : Bool, @volume : Float32)
+    end
+  end
+
+  # Audio playback via SDL3. An output device is opened; each `play` creates a stream
+  # bound to the device — SDL natively mixes simultaneous streams. One-shot playbacks
+  # are reclaimed when finished; looping ones are re-queued; all react to `master_volume`.
   class Audio < Resource
+    getter master_volume : Float32 = 1.0f32
+
     @spec : LibSDL::AudioSpec
     @device : LibSDL::AudioDeviceID
     @main : LibSDL::AudioStream
-    @playing : Array(LibSDL::AudioStream) = [] of LibSDL::AudioStream
+    @playing : Array(Playback) = [] of Playback
 
     def initialize
       @spec = LibSDL::AudioSpec.new(format: LibSDL::AUDIO_F32LE, channels: 2, freq: 48_000)
@@ -57,22 +72,61 @@ module Flock
       Sound.load(path)
     end
 
-    def play(sound : Sound) : Nil
+    # Plays `sound`. `volume` (0..1) scales this playback; `loop` repeats it until
+    # stopped. Returns a Playback handle (for `stop`).
+    def play(sound : Sound, volume : Number = 1.0, loop : Bool = false) : Playback
+      vol = volume.to_f32
       src = sound.spec
-      dst = @spec
-      stream = LibSDL.create_audio_stream(pointerof(src), pointerof(dst))
-      return if stream.null?
-      LibSDL.bind_audio_stream(@device, stream)
+      stream = LibSDL.create_audio_stream(pointerof(src), pointerof(@spec))
+      pb = Playback.new(stream, sound, loop, vol)
+      return pb if stream.null?
+
+      LibSDL.set_audio_stream_gain(stream, vol * @master_volume)
       LibSDL.put_audio_stream_data(stream, sound.data.to_unsafe.as(Void*), sound.data.size)
+      LibSDL.bind_audio_stream(@device, stream)
       LibSDL.resume_audio_stream_device(stream)
-      @playing << stream
+      @playing << pb
+      pb
     end
 
-    # Reclaims the streams whose playback has finished.
+    # Stops (and frees) a playback.
+    def stop(pb : Playback) : Nil
+      return unless pb.active?
+      pb.active = false
+      LibSDL.destroy_audio_stream(pb.stream)
+      @playing.delete(pb)
+    end
+
+    def stop_all : Nil
+      @playing.each do |pb|
+        pb.active = false
+        LibSDL.destroy_audio_stream(pb.stream)
+      end
+      @playing.clear
+    end
+
+    # Master gain (0..1) applied on top of each playback's own volume.
+    def master_volume=(v : Number) : Nil
+      @master_volume = v.to_f32
+      @playing.each { |pb| LibSDL.set_audio_stream_gain(pb.stream, pb.volume * @master_volume) }
+    end
+
+    def playing_count : Int32
+      @playing.size
+    end
+
+    # Per-frame: re-queue looping playbacks, reclaim finished one-shots.
     def reap : Nil
-      @playing.reject! do |s|
-        if LibSDL.get_audio_stream_queued(s) <= 0
-          LibSDL.destroy_audio_stream(s)
+      @playing.reject! do |pb|
+        if pb.loop?
+          # keep at least one copy queued for a seamless loop.
+          if LibSDL.get_audio_stream_queued(pb.stream) < pb.sound.data.size
+            LibSDL.put_audio_stream_data(pb.stream, pb.sound.data.to_unsafe.as(Void*), pb.sound.data.size)
+          end
+          false
+        elsif LibSDL.get_audio_stream_queued(pb.stream) <= 0
+          LibSDL.destroy_audio_stream(pb.stream)
+          pb.active = false
           true
         else
           false

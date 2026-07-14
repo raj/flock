@@ -42,8 +42,10 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       OnEnter/OnExit "PAUSED" overlay. `add_on_enter`/`add_on_exit` run once per transition
       (OnEnter(initial) at startup). Events are double-buffered with per-reader cursors
       (`EventReader(T)`): each event read exactly once, across frames.
-- [ ] **Audio**: `play` creates a stream per playback and reclaims it at `queued==0`, which can
-      cut off the tail of the sound; add volume (`SDL_SetAudioStreamGain`), looping music, `stop`.
+- [x] **Audio** volume/loop/stop: `play(sound, volume:, loop:)` returns a `Playback` handle;
+      per-playback `volume` (`SDL_SetAudioStreamGain`) + `Audio#master_volume=`, `loop:` re-queues
+      seamlessly, `stop(pb)`/`stop_all`. Verified (`examples/audio_test.cr`). Minor nuance left:
+      one-shots are reclaimed at `queued==0` (input side), which can clip the very tail.
 
 ### Convenience / architecture
 - [ ] **System ordering** within a schedule (labels, `before`/`after`, `run_if` conditions).
