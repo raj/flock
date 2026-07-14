@@ -1,0 +1,28 @@
+name: flock
+version: 0.1.0
+
+authors:
+  - Raj Deenoo
+
+description: |
+  Un moteur de jeu orienté données (ECS) en Crystal, inspiré de Bevy, au-dessus de
+  wgpu-cr (rendu) et SDL3 (fenêtre, entrées, manettes, audio). Voir plan.md.
+
+crystal: ">= 1.16.0"
+
+license: MIT
+
+# Dépendances natives ajoutées aux phases plateforme/rendu (voir plan.md §10) :
+#   wgpu: { path: ../wgpu-cr }
+#   sdl-crystal-bindings: { github: Hadeweka/SDL-Crystal-Bindings, version: ~> 0.5.0 }
+# Le cœur ECS + math (phases 1-2) ne dépend d'aucune lib native. La couche
+# plateforme/rendu (src/flock/gpu.cr) requiert wgpu-cr (chemin relatif) et SDL3
+# (binding maison, lié à /opt/homebrew SDL3). Voir README.md.
+
+targets:
+  space_invaders:
+    main: examples/space_invaders.cr
+  window_app:
+    main: examples/window_app.cr
+  custom_shader:
+    main: examples/custom_shader.cr

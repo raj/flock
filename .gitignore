@@ -1,0 +1,9 @@
+# Crystal build
+/bin/
+/lib/
+*.dwarf
+.crystal/
+/docs/
+
+# Misc
+.DS_Store
