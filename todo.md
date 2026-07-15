@@ -87,8 +87,10 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       (`Mesh.load_obj`, `examples/obj_test.cr`); **instanced meshes** (draws grouped by
       (mesh, material), one instanced `draw_indexed` per group, `examples/instancing_test.cr`);
       **unified 2D+3D in one frame** (`Render2D3DPlugin`: 3D scene then 2D overlay, one present;
-      `Renderer2D#render_into load_previous:`, `examples/render_2d3d_test.cr`). Remaining:
-      glTF loading (only OBJ so far); per-instance color/material params; frustum culling.
+      `Renderer2D#render_into load_previous:`, `examples/render_2d3d_test.cr`); **glTF loading**
+      (`Mesh.load_gltf` — `.gltf` with `.bin`/base64 data-URI buffers and binary `.glb`;
+      POSITION/NORMAL/indices via accessors/bufferViews, `examples/gltf_test.cr`). Remaining:
+      per-instance color/material params; frustum culling; glTF node transforms/materials/textures.
 
 ## sdl3-cr
 
