@@ -89,6 +89,74 @@ module Flock
       build(gpu, verts, indices)
     end
 
+    # Loads a Wavefront OBJ file. Supports `v`/`vn`/`f` (polygons are fan-triangulated;
+    # vertex refs may be `v`, `v/vt`, `v//vn`, `v/vt/vn`, with negative/relative indices).
+    # If a face has no normals, a flat per-face normal is computed. Texture coords are
+    # ignored; every vertex gets the given `color` (OBJ carries no vertex color).
+    def self.load_obj(gpu : GpuContext, path : String, color : Color = Color::WHITE) : Mesh
+      r, g, b = color.r, color.g, color.b
+      positions = [] of Tuple(Float32, Float32, Float32)
+      normals = [] of Tuple(Float32, Float32, Float32)
+      verts = [] of Float32
+      indices = [] of UInt32
+      cache = {} of Tuple(Int32, Int32) => UInt32 # (posIdx, normIdx) -> output index
+
+      resolve = ->(token : String, count : Int32) do
+        n = token.to_i
+        n > 0 ? n - 1 : count + n # 1-based; negatives are relative to the end
+      end
+
+      File.each_line(path) do |line|
+        line = line.strip
+        next if line.empty? || line.starts_with?('#')
+        parts = line.split(/\s+/)
+        case parts[0]
+        when "v"
+          positions << {parts[1].to_f32, parts[2].to_f32, parts[3].to_f32}
+        when "vn"
+          normals << {parts[1].to_f32, parts[2].to_f32, parts[3].to_f32}
+        when "f"
+          # Each face vertex: "p", "p/t", "p//n" or "p/t/n" (1-based / negative).
+          refs = parts[1..].map do |tok|
+            f = tok.split('/')
+            pi = resolve.call(f[0], positions.size)
+            ni = (f.size >= 3 && !f[2].empty?) ? resolve.call(f[2], normals.size) : -1
+            {pi, ni}
+          end
+          # Fan-triangulate.
+          (1...(refs.size - 1)).each do |k|
+            tri = {refs[0], refs[k], refs[k + 1]}
+            # Flat normal if any corner lacks one.
+            flat = nil.as(Tuple(Float32, Float32, Float32)?)
+            if tri[0][1] < 0 || tri[1][1] < 0 || tri[2][1] < 0
+              p0 = positions[tri[0][0]]; p1 = positions[tri[1][0]]; p2 = positions[tri[2][0]]
+              ux, uy, uz = p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]
+              vx, vy, vz = p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]
+              nx = uy * vz - uz * vy; ny = uz * vx - ux * vz; nz = ux * vy - uy * vx
+              len = Math.sqrt(nx * nx + ny * ny + nz * nz)
+              len = 1.0f32 if len == 0
+              flat = {(nx / len).to_f32, (ny / len).to_f32, (nz / len).to_f32}
+            end
+            tri.each do |(pi, ni)|
+              key = {pi, ni}
+              idx = cache[key]?
+              unless idx
+                pos = positions[pi]
+                nrm = ni >= 0 ? normals[ni] : flat.not_nil!
+                verts.push(pos[0], pos[1], pos[2], nrm[0], nrm[1], nrm[2], r, g, b)
+                idx = (verts.size // 9 - 1).to_u32
+                # Don't cache flat-normal verts (normal is face-specific, key ni=-1 collides).
+                cache[key] = idx if ni >= 0
+              end
+              indices << idx
+            end
+          end
+        end
+      end
+      raise "OBJ #{path}: no faces" if indices.empty?
+      build(gpu, verts, indices)
+    end
+
     def release : Nil
       LibWGPU.buffer_release(@vertex_buf)
       LibWGPU.buffer_release(@index_buf)
