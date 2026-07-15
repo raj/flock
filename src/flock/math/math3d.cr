@@ -174,6 +174,37 @@ module Flock
       Mat4.new(a)
     end
 
+    # Normal matrix: the inverse-transpose of the upper-left 3x3, embedded in a
+    # Mat4 (3x3 in the upper-left, [3,3]=1, rest 0). Transforms normals correctly
+    # under non-uniform scale (equals the rotation part for rigid transforms).
+    def normal_matrix : Mat4
+      # Upper-left 3x3 (column-major access [col, row]).
+      a = self[0, 0]; b = self[1, 0]; c = self[2, 0]
+      d = self[0, 1]; e = self[1, 1]; f = self[2, 1]
+      g = self[0, 2]; h = self[1, 2]; i = self[2, 2]
+
+      det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+      # The normal matrix is cofactor(M)/det = transpose(inverse(M)).
+      res = StaticArray(Float32, 16).new(0.0f32)
+      res[15] = 1.0f32
+      if det.abs < 1e-8f32
+        res[0] = res[5] = res[10] = 1.0f32 # degenerate: fall back to identity
+        return Mat4.new(res)
+      end
+      inv = 1.0f32 / det
+      # N[row][col] stored column-major: res[col*4 + row].
+      res[0] = (e * i - f * h) * inv   # N00
+      res[1] = -(b * i - c * h) * inv  # N10
+      res[2] = (b * f - c * e) * inv   # N20
+      res[4] = -(d * i - f * g) * inv  # N01
+      res[5] = (a * i - c * g) * inv   # N11
+      res[6] = -(a * f - c * d) * inv  # N21
+      res[8] = (d * h - e * g) * inv   # N02
+      res[9] = -(a * h - b * g) * inv  # N12
+      res[10] = (a * e - b * d) * inv  # N22
+      Mat4.new(res)
+    end
+
     # Flat view for uploading into a wgpu uniform buffer.
     def to_slice : Slice(Float32)
       @m.to_slice

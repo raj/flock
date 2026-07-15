@@ -35,6 +35,7 @@ module Flock
     @group(0) @binding(0) var<uniform> cam : Camera;
     @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
     @group(0) @binding(2) var<uniform> globals : Globals;
+    @group(0) @binding(3) var<storage, read> normals : array<mat4x4<f32>>;
 
     struct VSOut {
       @builtin(position) clip : vec4<f32>,
@@ -45,10 +46,10 @@ module Flock
     @vertex
     fn vs_main(@location(0) pos : vec3<f32>, @location(1) nrm : vec3<f32>,
                @location(2) col : vec3<f32>, @builtin(instance_index) ii : u32) -> VSOut {
-      let model = models[ii];
       var out : VSOut;
-      out.clip = cam.view_proj * model * vec4<f32>(pos, 1.0);
-      out.normal = normalize((model * vec4<f32>(nrm, 0.0)).xyz);
+      out.clip = cam.view_proj * models[ii] * vec4<f32>(pos, 1.0);
+      // Normal matrix (inverse-transpose) -> correct under non-uniform scale.
+      out.normal = normalize((normals[ii] * vec4<f32>(nrm, 0.0)).xyz);
       out.color = col;
       return out;
     }
@@ -64,6 +65,7 @@ module Flock
 
     @model_capacity : Int32 = 64
     @scratch : Array(Float32) = [] of Float32
+    @scratch_n : Array(Float32) = [] of Float32
     @depth_w : UInt32 = 0
     @depth_h : UInt32 = 0
 
@@ -73,6 +75,7 @@ module Flock
     @pipeline_layout : LibWGPU::PipelineLayout
     @uniform_buf : LibWGPU::Buffer
     @model_buf : LibWGPU::Buffer
+    @normal_buf : LibWGPU::Buffer
     @globals_buf : LibWGPU::Buffer
     @group0 : LibWGPU::BindGroup
     @materials : Array(Material3D) = [] of Material3D
@@ -90,6 +93,8 @@ module Flock
 
       @uniform_buf = make_buffer(64_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
       @model_buf = make_buffer((@model_capacity * MODEL_BYTES).to_u64,
+        LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
+      @normal_buf = make_buffer((@model_capacity * MODEL_BYTES).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       @globals_buf = make_buffer(GLOBALS_BYTES.to_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
       @group0 = build_group0
@@ -115,6 +120,7 @@ module Flock
       @materials.each &.release
       LibWGPU.bind_group_release(@group0)
       LibWGPU.buffer_release(@globals_buf)
+      LibWGPU.buffer_release(@normal_buf)
       LibWGPU.buffer_release(@model_buf)
       LibWGPU.buffer_release(@uniform_buf)
       LibWGPU.pipeline_layout_release(@pipeline_layout)
@@ -156,13 +162,21 @@ module Flock
       e2.visibility = LibWGPU::ShaderStage::Vertex | LibWGPU::ShaderStage::Fragment
       e2.buffer = gbuf
 
-      entries = uninitialized LibWGPU::BindGroupLayoutEntry[3]
+      nbuf = LibWGPU::BufferBindingLayout.new
+      nbuf.type_ = LibWGPU::BufferBindingType::ReadOnlyStorage
+      e3 = LibWGPU::BindGroupLayoutEntry.new
+      e3.binding = 3_u32
+      e3.visibility = LibWGPU::ShaderStage::Vertex
+      e3.buffer = nbuf
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[4]
       entries[0] = e0
       entries[1] = e1
       entries[2] = e2
+      entries[3] = e3
       d = LibWGPU::BindGroupLayoutDescriptor.new
       d.label = WGPU.empty_string_view
-      d.entry_count = 3_u64
+      d.entry_count = 4_u64
       d.entries = entries.to_unsafe
       LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
     end
@@ -268,14 +282,20 @@ module Flock
       e2.buffer = @globals_buf
       e2.offset = 0_u64
       e2.size = GLOBALS_BYTES.to_u64
-      entries = uninitialized LibWGPU::BindGroupEntry[3]
+      e3 = LibWGPU::BindGroupEntry.new
+      e3.binding = 3_u32
+      e3.buffer = @normal_buf
+      e3.offset = 0_u64
+      e3.size = (@model_capacity * MODEL_BYTES).to_u64
+      entries = uninitialized LibWGPU::BindGroupEntry[4]
       entries[0] = e0
       entries[1] = e1
       entries[2] = e2
+      entries[3] = e3
       d = LibWGPU::BindGroupDescriptor.new
       d.label = WGPU.empty_string_view
       d.layout = @group0_layout
-      d.entry_count = 3_u64
+      d.entry_count = 4_u64
       d.entries = entries.to_unsafe
       LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
     end
@@ -289,6 +309,9 @@ module Flock
       @model_capacity = cap
       LibWGPU.buffer_release(@model_buf)
       @model_buf = make_buffer((cap * MODEL_BYTES).to_u64,
+        LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
+      LibWGPU.buffer_release(@normal_buf)
+      @normal_buf = make_buffer((cap * MODEL_BYTES).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       LibWGPU.bind_group_release(@group0)
       @group0 = build_group0
@@ -356,9 +379,15 @@ module Flock
       ensure_capacity(meshes.size)
 
       @scratch.clear
-      meshes.each { |(_m, model, _mat)| @scratch.concat(model.m) }
+      @scratch_n.clear
+      meshes.each do |(_m, model, _mat)|
+        @scratch.concat(model.m)
+        @scratch_n.concat(model.normal_matrix.m)
+      end
       LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
         @scratch.to_unsafe.as(Void*), (@scratch.size * 4).to_u64)
+      LibWGPU.queue_write_buffer(@gpu.queue, @normal_buf, 0_u64,
+        @scratch_n.to_unsafe.as(Void*), (@scratch_n.size * 4).to_u64)
 
       color_att = LibWGPU::RenderPassColorAttachment.new
       color_att.view = target

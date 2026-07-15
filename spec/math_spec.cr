@@ -30,6 +30,23 @@ describe Flock::Mat4 do
     v[1, 1].should be_close(1.0f32, 1e-6)
     v[2, 2].should be_close(1.0f32, 1e-6)
   end
+
+  it "normal_matrix of a non-uniform scale is the inverse scale (inverse-transpose)" do
+    n = Flock::Mat4.scale(Flock::Vec3.new(2, 4, 0.5)).normal_matrix
+    n[0, 0].should be_close(0.5f32, 1e-6)  # 1/2
+    n[1, 1].should be_close(0.25f32, 1e-6) # 1/4
+    n[2, 2].should be_close(2.0f32, 1e-6)  # 1/0.5
+  end
+
+  it "normal_matrix of a rotation equals the rotation (orthogonal)" do
+    r = Flock::Mat4.rotation_z(0.7)
+    n = r.normal_matrix
+    {0, 1, 2}.each do |c|
+      {0, 1, 2}.each do |row|
+        n[c, row].should be_close(r[c, row], 1e-5)
+      end
+    end
+  end
 end
 
 describe Flock::Vec3 do

@@ -73,6 +73,7 @@ struct Globals { time : f32 };
 @group(0) @binding(0) var<uniform> cam : Camera;
 @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
 @group(0) @binding(2) var<uniform> globals : Globals;
+@group(0) @binding(3) var<storage, read> normals : array<mat4x4<f32>>;
 
 struct VSOut {
   @builtin(position) clip : vec4<f32>,
@@ -84,11 +85,10 @@ struct VSOut {
 @vertex
 fn vs_main(@location(0) pos : vec3<f32>, @location(1) nrm : vec3<f32>,
            @location(2) col : vec3<f32>, @builtin(instance_index) ii : u32) -> VSOut {
-  let model = models[ii];
   var out : VSOut;
-  out.clip = cam.view_proj * model * vec4<f32>(pos, 1.0);
+  out.clip = cam.view_proj * models[ii] * vec4<f32>(pos, 1.0);
   out.lpos = pos;
-  out.normal = normalize((model * vec4<f32>(nrm, 0.0)).xyz);
+  out.normal = normalize((normals[ii] * vec4<f32>(nrm, 0.0)).xyz);
   out.color = col;
   return out;
 }
