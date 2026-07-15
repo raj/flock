@@ -159,6 +159,19 @@ module Flock
       Mat4.new(a)
     end
 
+    # Rotation from a quaternion (x, y, z, w) — e.g. a glTF node rotation.
+    def self.rotation_quaternion(x : Number, y : Number, z : Number, w : Number) : Mat4
+      xf, yf, zf, wf = x.to_f32, y.to_f32, z.to_f32, w.to_f32
+      xx = xf * xf; yy = yf * yf; zz = zf * zf
+      xy = xf * yf; xz = xf * zf; yz = yf * zf
+      wx = wf * xf; wy = wf * yf; wz = wf * zf
+      a = identity.m
+      a[0] = 1 - 2*(yy + zz); a[1] = 2*(xy + wz);     a[2] = 2*(xz - wy)
+      a[4] = 2*(xy - wz);     a[5] = 1 - 2*(xx + zz); a[6] = 2*(yz + wx)
+      a[8] = 2*(xz + wy);     a[9] = 2*(yz - wx);     a[10] = 1 - 2*(xx + yy)
+      Mat4.new(a)
+    end
+
     # Matrix product (column-major): self * other.
     def *(o : Mat4) : Mat4
       a = StaticArray(Float32, 16).new(0.0f32)

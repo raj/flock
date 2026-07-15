@@ -185,43 +185,35 @@ module Flock
     end
 
     # glTF 2.0 loader (`.gltf` with a `.bin`/data-URI buffer, or binary `.glb`).
-    # Merges every primitive of every mesh into one Mesh: reads POSITION and NORMAL
-    # (computed flat if absent) and the indices (drawn sequentially if absent). Node
-    # transforms, materials, textures and animation are ignored; every vertex gets
-    # `color` unless the file carries COLOR_0.
+    # Walks the scene graph, baking each node's world transform into the geometry it
+    # references (translation/rotation-quaternion/scale or an explicit matrix; nodes
+    # may reuse a mesh at several transforms). Reads POSITION and NORMAL (computed flat
+    # if absent) and the indices (sequential if absent). Vertex color per primitive =
+    # its material's `baseColorFactor`, else COLOR_0, else the `color` argument.
     #
-    # Component/type coverage: POSITION/NORMAL as FLOAT VEC3 (other component types
-    # are converted); indices as (UNSIGNED_)BYTE/SHORT/INT SCALAR.
+    # Everything is merged/baked into one Mesh. Textures and animation are not applied
+    # here (see `load_gltf_textured` for base-color textures).
     def self.load_gltf(gpu : GpuContext, path : String, color : Color = Color::WHITE) : Mesh
       json_text, glb_bin = read_gltf_container(path)
       doc = JSON.parse(json_text)
       buffers = gltf_buffers(doc, File.dirname(path), glb_bin)
 
-      dr, dg, db = color.r, color.g, color.b
       verts = [] of Float32
       indices = [] of UInt32
-
       accessors = doc["accessors"].as_a
       views = doc["bufferViews"].as_a
+      meshes = doc["meshes"]?.try(&.as_a) || [] of JSON::Any
 
-      (doc["meshes"]?.try(&.as_a) || [] of JSON::Any).each do |mesh|
-        mesh["primitives"].as_a.each do |prim|
+      gltf_instances(doc).each do |(mesh_idx, world)|
+        nmat = world.normal_matrix
+        meshes[mesh_idx]["primitives"].as_a.each do |prim|
           attrs = prim["attributes"]
           pos, _ = gltf_read_floats(accessors, views, buffers, attrs["POSITION"].as_i)
           vcount = pos.size // 3
+          nrm = (ni = attrs["NORMAL"]?) ? gltf_read_floats(accessors, views, buffers, ni.as_i)[0] : nil
+          colf, cn = (ci = attrs["COLOR_0"]?) ? gltf_read_floats(accessors, views, buffers, ci.as_i) : {nil, 0}
+          mr, mg, mb = gltf_material_rgb(doc, prim, color)
 
-          if ni = attrs["NORMAL"]?
-            nrm, _ = gltf_read_floats(accessors, views, buffers, ni.as_i)
-          else
-            nrm = nil
-          end
-          if ci = attrs["COLOR_0"]?
-            colf, cn = gltf_read_floats(accessors, views, buffers, ci.as_i)
-          else
-            colf, cn = nil, 0
-          end
-
-          # Indices (or sequential fan if the primitive has none).
           prim_indices =
             if idx = prim["indices"]?
               gltf_read_indices(accessors, views, buffers, idx.as_i)
@@ -231,22 +223,23 @@ module Flock
 
           base = (verts.size // 9).to_u32
           vcount.times do |v|
-            px, py, pz = pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]
+            # Bake the node's world transform into positions (point) and normals (dir).
+            p = world.transform_point(Vec3.new(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]))
             if nrm
-              nx, ny, nz = nrm[v * 3], nrm[v * 3 + 1], nrm[v * 3 + 2]
+              n = nmat.transform_point(Vec3.new(nrm[v * 3], nrm[v * 3 + 1], nrm[v * 3 + 2])).normalize
+              nx, ny, nz = n.x, n.y, n.z
             else
-              nx, ny, nz = 0.0f32, 0.0f32, 0.0f32 # filled below if still zero
+              nx, ny, nz = 0.0f32, 0.0f32, 0.0f32 # filled below
             end
             if colf
               r = colf[v * cn]; g = colf[v * cn + 1]; b = colf[v * cn + 2]
             else
-              r, g, b = dr, dg, db
+              r, g, b = mr, mg, mb
             end
-            verts.push(px, py, pz, nx, ny, nz, r, g, b)
+            verts.push(p.x, p.y, p.z, nx, ny, nz, r, g, b)
           end
           prim_indices.each { |i| indices << base + i }
 
-          # If normals were absent, compute a flat normal per triangle.
           unless nrm
             t = 0
             while t + 2 < prim_indices.size
@@ -259,6 +252,65 @@ module Flock
 
       raise "glTF #{path}: no geometry" if indices.empty?
       build(gpu, verts, indices)
+    end
+
+    # Flattens the scene graph to {mesh index, world matrix} pairs. Falls back to every
+    # mesh at identity when the file has no nodes/scene.
+    private def self.gltf_instances(doc : JSON::Any) : Array({Int32, Mat4})
+      acc = [] of {Int32, Mat4}
+      nodes = doc["nodes"]?.try(&.as_a)
+      unless nodes
+        (doc["meshes"]?.try(&.as_a) || [] of JSON::Any).each_index { |i| acc << {i, Mat4.identity} }
+        return acc
+      end
+
+      roots =
+        if (scene = doc["scene"]?) && (scenes = doc["scenes"]?)
+          scenes.as_a[scene.as_i]["nodes"].as_a.map(&.as_i)
+        else
+          (0...nodes.size).to_a
+        end
+      roots.each { |r| gltf_visit_node(nodes, r, Mat4.identity, acc) }
+      acc
+    end
+
+    # Recursively accumulates {mesh index, world matrix} for a node and its children.
+    private def self.gltf_visit_node(nodes : Array(JSON::Any), idx : Int32, parent : Mat4,
+                                     acc : Array({Int32, Mat4})) : Nil
+      node = nodes[idx]
+      world = parent * gltf_node_matrix(node)
+      if mi = node["mesh"]?
+        acc << {mi.as_i, world}
+      end
+      node["children"]?.try &.as_a.each { |c| gltf_visit_node(nodes, c.as_i, world, acc) }
+    end
+
+    private def self.gltf_node_matrix(node : JSON::Any) : Mat4
+      if m = node["matrix"]?
+        a = StaticArray(Float32, 16).new(0.0f32)
+        m.as_a.each_with_index { |v, i| a[i] = v.as_f.to_f32 } # glTF matrices are column-major
+        return Mat4.new(a)
+      end
+      t = (tr = node["translation"]?) ? Vec3.new(tr[0].as_f, tr[1].as_f, tr[2].as_f) : Vec3.new
+      s = (sc = node["scale"]?) ? Vec3.new(sc[0].as_f, sc[1].as_f, sc[2].as_f) : Vec3.new(1, 1, 1)
+      rot =
+        if r = node["rotation"]?
+          Mat4.rotation_quaternion(r[0].as_f, r[1].as_f, r[2].as_f, r[3].as_f)
+        else
+          Mat4.identity
+        end
+      Mat4.translation(t) * rot * Mat4.scale(s)
+    end
+
+    private def self.gltf_material_rgb(doc : JSON::Any, prim : JSON::Any, fallback : Color) : {Float32, Float32, Float32}
+      if (mi = prim["material"]?) && (mats = doc["materials"]?)
+        pbr = mats.as_a[mi.as_i]["pbrMetallicRoughness"]?
+        if pbr && (bcf = pbr["baseColorFactor"]?)
+          a = bcf.as_a
+          return {a[0].as_f.to_f32, a[1].as_f.to_f32, a[2].as_f.to_f32}
+        end
+      end
+      {fallback.r, fallback.g, fallback.b}
     end
 
     # Returns {json, glb_binary_chunk?}. For .glb, splits the container; for .gltf,
