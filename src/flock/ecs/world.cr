@@ -72,7 +72,20 @@ module Flock
     end
 
     def add(entity : Entity, component : T) : Nil forall T
-      storage(T).insert(entity, component)
+      {% if T < Flock::Bundle %}
+        # A bundle expands into its individual components (each keeps its concrete
+        # type, so it reaches the right storage). Bundles nest recursively.
+        expand_bundle(entity, component.components)
+      {% else %}
+        storage(T).insert(entity, component)
+      {% end %}
+    end
+
+    # Adds each component of a bundle's tuple, one storage insert per element.
+    private def expand_bundle(entity : Entity, comps : T) : Nil forall T
+      {% for i in 0...T.type_vars.size %}
+        add(entity, comps[{{i}}])
+      {% end %}
     end
 
     def get(entity : Entity, type : T.class) : T? forall T

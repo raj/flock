@@ -44,6 +44,53 @@ struct Velocity
   end
 end
 
+# --- Bundles: group the components spawned together (Bevy-style) ---
+struct PlayerBundle
+  include Flock::Bundle
+
+  def initialize(@x : Float64, @y : Float64, @speed : Float32)
+  end
+
+  def components
+    {
+      Player.new(@speed),
+      Flock::Transform2D.at(@x, @y),
+      Flock::Sprite.new(Flock::Vec2.new(60, 20), Flock::Color.new(0.3, 0.9, 0.45)),
+    }
+  end
+end
+
+struct InvaderBundle
+  include Flock::Bundle
+
+  def initialize(@x : Float64, @y : Float64)
+  end
+
+  def components
+    {
+      Invader.new,
+      Flock::Transform2D.at(@x, @y),
+      Flock::Sprite.new(Flock::Vec2.new(40, 28), Flock::Color.new(0.9, 0.4, 0.55)),
+    }
+  end
+end
+
+struct BulletBundle
+  include Flock::Bundle
+
+  def initialize(@x : Float64, @y : Float64)
+  end
+
+  def components
+    {
+      Bullet.new,
+      Flock::Transform2D.at(@x, @y),
+      Flock::Sprite.new(Flock::Vec2.new(6, 16), Flock::Color.new(1.0, 1.0, 0.4)),
+      Velocity.new(Flock::Vec2.new(0, 480)),
+    }
+  end
+end
+
 # --- Resources ---
 class InvaderState < Flock::Resource
   property dir : Float32 = 1.0f32
@@ -111,19 +158,11 @@ app.add_startup do |world, cmd|
     puts "title skipped (font unavailable): #{ex.message}"
   end
 
-  cmd.spawn(
-    Player.new(360.0f32),
-    Flock::Transform2D.at(0, -250),
-    Flock::Sprite.new(Flock::Vec2.new(60, 20), Flock::Color.new(0.3, 0.9, 0.45)),
-  )
+  cmd.spawn(PlayerBundle.new(0, -250, 360.0f32))
 
   8.times do |c|
     5.times do |r|
-      cmd.spawn(
-        Invader.new,
-        Flock::Transform2D.at(-245.0 + c * 70.0, 220.0 - r * 46.0),
-        Flock::Sprite.new(Flock::Vec2.new(40, 28), Flock::Color.new(0.9, 0.4, 0.55)),
-      )
+      cmd.spawn(InvaderBundle.new(-245.0 + c * 70.0, 220.0 - r * 46.0))
     end
   end
 end
@@ -150,12 +189,7 @@ app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, 
 
     if fire && time.elapsed >= pl.value.next_shot
       pl.value.next_shot = time.elapsed + 0.35
-      cmd.spawn(
-        Bullet.new,
-        Flock::Transform2D.at(nx, tf.value.position.y + 20.0),
-        Flock::Sprite.new(Flock::Vec2.new(6, 16), Flock::Color.new(1.0, 1.0, 0.4)),
-        Velocity.new(Flock::Vec2.new(0, 480)),
-      )
+      cmd.spawn(BulletBundle.new(nx, tf.value.position.y + 20.0))
       world.resource(Flock::Audio).play(world.resource(Sfx).shoot)
       input.gamepad?.try &.rumble(0.4, 0.4, 80) # haptic feedback if a gamepad is connected
     end

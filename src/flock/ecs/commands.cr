@@ -13,8 +13,13 @@ module Flock
 
     # Immediately reserves an entity (the id is valid right away) and queues
     # the addition of its components. Usable without a component: `cmd.spawn`.
-    # (One method overload per arity, 0 to 8 components — macros cannot be
+    # (One method overload per arity, 0 to 8 arguments — macros cannot be
     # invoked on an instance in Crystal.)
+    #
+    # Any argument may be a plain component OR a `Flock::Bundle` (a group of
+    # components); bundles are expanded — and mixed with plain components — when
+    # the queue is applied. So `cmd.spawn(PlayerBundle.new(...), Velocity.new)`
+    # counts as 2 arguments regardless of how many components the bundle holds.
     {% for n in 0..8 %}
       def spawn(
         {% for i in 1..n %}c{{i}} : C{{i}}{% if i < n %},{% end %}{% end %}

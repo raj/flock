@@ -54,6 +54,13 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       route paths through `Assets`; crossfade between tracks.
 
 ### Convenience / architecture
+- [x] **Bundles** (Bevy-style component groups): `include Flock::Bundle` + a `components`
+      tuple; `spawn`/`add` expand it into the individual `SparseSet`s (bundles nest, and mix
+      with plain components — `cmd.spawn(PlayerBundle.new(...), Velocity.new)`). Compile-time
+      expansion (`{% if T < Flock::Bundle %}` in `World#add`), no runtime `Bundle` storage.
+      Verified (`spec/bundle_spec.cr`); Space Invaders' player/invader/bullet spawns refactored
+      into bundles. (Plugins already group systems/resources/asset-loading — the other half of
+      the Bevy split.)
 - [x] **System ordering** within a schedule: `add_system(schedule, label:, before:, after:,
       run_if:)` — stable topological sort by before/after labels, `run_if` gates a system
       (`add_system_in_state` now builds on it). Verified (`spec/system_order_spec.cr`).
