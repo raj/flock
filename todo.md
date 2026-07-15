@@ -46,6 +46,12 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       per-playback `volume` (`SDL_SetAudioStreamGain`) + `Audio#master_volume=`, `loop:` re-queues
       seamlessly, `stop(pb)`/`stop_all`. Verified (`examples/audio_test.cr`). Minor nuance left:
       one-shots are reclaimed at `queued==0` (input side), which can clip the very tail.
+- [x] **Compressed music (OGG/MP3/FLAC/Opus)** via SDL3_mixer 3.x: `Flock::Music` resource
+      (`MusicPlugin`, in DefaultPlugins) — `play(path, loop:, volume:)`/`pause`/`resume`/`stop`/
+      `playing?`/`volume=`. Streams on the fly (`MIX_LoadAudio predecode=false`) on its own logical
+      device; SDL mixes it with the SFX streams. Bound in sdl3-cr as `lib LibMIX`. Verified
+      (`examples/music_test.cr`: plays an MP3 headless, asserts the track is playing). Remaining:
+      route paths through `Assets`; crossfade between tracks.
 
 ### Convenience / architecture
 - [x] **System ordering** within a schedule: `add_system(schedule, label:, before:, after:,
@@ -122,9 +128,23 @@ Ship a Flock game as HTML/WebAssembly. Feasible but a real project, deferred.
       state to `console.log`); (2) minimal canvas-2D/WebGL2 sprite backend for Space Invaders;
       (3) then WebGPU for parity with the native backend.
 
-## Suggested next steps
+## Remaining work (open)
 
-- **Reliability track**: (1) resource release + wgpu error callback, (2) pixel-readback
-  rendering test, (3) mouse.
-- **Expansion track**: (1) sdl3-cr linking portability (Linux/Windows), (2) text
-  rendering, (3) per-sprite materials.
+All the big-ticket items above are done. What's left, gathered from the `Remaining:`
+notes buried in the completed entries plus the two open sections:
+
+### Standalone (own sections above)
+- [ ] **Forward wgpu-native detailed logs** (Diagnostics) — bind `wgpuSetLogCallback`/
+      `wgpuSetLogLevel`, opt-in via `FLOCK_WGPU_LOG`.
+- [ ] **Web / WASM export** — deferred; real project (see the section above).
+
+### Polish left on shipped features
+- [ ] **Mouse**: cursor control (hide/capture/relative mode).
+- [ ] **Text**: per-string texture cache + glyph atlas (currently one texture per render).
+- [ ] **Sampler**: mipmap generation (needs level downsampling on upload).
+- [ ] **3D**: normal matrix for non-uniform scale; mesh loading (glTF/OBJ); instanced meshes.
+- [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
+
+### Cross-platform validation
+- [ ] **sdl3-cr surface setup**: X11/Wayland/HWND are cross-compile-verified only; validate
+      at runtime on real Linux/Windows machines.

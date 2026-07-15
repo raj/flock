@@ -10,6 +10,7 @@ require "./platform/gpu_context"
 require "./platform/window"
 require "./platform/input"
 require "./platform/audio"
+require "./platform/music"
 
 require "./render/color"
 require "./render/texture"
