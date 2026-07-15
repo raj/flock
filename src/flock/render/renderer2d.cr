@@ -466,7 +466,11 @@ module Flock
     # Renders the world into an arbitrary target (surface OR offscreen texture). Separates
     # the rendering logic from surface acquisition → reusable for readback-based
     # rendering tests.
-    def render_into(target : LibWGPU::TextureView, width : UInt32, height : UInt32, world : World) : Nil
+    # `load_previous` keeps whatever is already in `target` (LoadOp::Load) instead of
+    # clearing — used to draw sprites/HUD ON TOP of a prior pass (e.g. the 3D scene),
+    # so 2D and 3D can share one frame (see Render2D3DPlugin).
+    def render_into(target : LibWGPU::TextureView, width : UInt32, height : UInt32, world : World,
+                    load_previous : Bool = false) : Nil
       @last_draw_calls = 0
       cameras = [] of Camera2D
       world.query(Camera2D) { |_e, cam| cameras << cam.value if cam.value.active }
@@ -512,7 +516,8 @@ module Flock
         color_att.store_op = LibWGPU::StoreOp::Store
         # 1st camera defines the whole attachment (LoadOp::Clear): its own color if
         # fullscreen, else black. Later cameras load and only paint their region.
-        if ci == 0
+        # In overlay mode (load_previous) nothing is cleared — sprites draw on top.
+        if ci == 0 && !load_previous
           base = cam.viewport ? Color::BLACK : (cam.clear_color || Color::BLACK)
           color_att.load_op = LibWGPU::LoadOp::Clear
           color_att.clear_value = LibWGPU::Color.new(r: base.r.to_f64, g: base.g.to_f64, b: base.b.to_f64, a: base.a.to_f64)

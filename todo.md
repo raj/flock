@@ -82,8 +82,13 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       to `MeshRenderer#material`), sharing an explicit `group0` = camera + models + `globals`
       (exposes `time` for animation); draws grouped by material. Wired via `Render3DPlugin`.
       Verified (`examples/cube3d.cr`/`cube3d_test.cr`; `examples/solar_system/` — animated
-      emissive sun + lit planets, with `readback_test.cr`). Remaining: normal matrix for
-      non-uniform scale, mesh loading (glTF/OBJ), instanced meshes, unify 2D+3D in one frame.
+      emissive sun + lit planets + a 2D HUD overlay). Also done: **normal matrix** for
+      non-uniform scale (`Mat4#normal_matrix`, group0 binding 3); **OBJ loading**
+      (`Mesh.load_obj`, `examples/obj_test.cr`); **instanced meshes** (draws grouped by
+      (mesh, material), one instanced `draw_indexed` per group, `examples/instancing_test.cr`);
+      **unified 2D+3D in one frame** (`Render2D3DPlugin`: 3D scene then 2D overlay, one present;
+      `Renderer2D#render_into load_previous:`, `examples/render_2d3d_test.cr`). Remaining:
+      glTF loading (only OBJ so far); per-instance color/material params; frustum culling.
 
 ## sdl3-cr
 

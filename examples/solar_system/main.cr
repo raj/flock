@@ -107,9 +107,9 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 WGSL
 
 app = Flock::App.new
-# 3D stack: window + the 3D renderer (owns the frame). No DefaultPlugins (that's 2D).
+# Window + unified 3D-then-2D renderer: the 3D scene with a 2D HUD overlay on top.
 app.add_plugin(Flock::WindowPlugin.new("Flock — Solar System", 900, 650))
-app.add_plugin(Flock::Render3DPlugin.new)
+app.add_plugin(Flock::Render2D3DPlugin.new)
 
 app.add_startup do |world, cmd|
   gpu = world.resource(Flock::GpuContext)
@@ -127,6 +127,13 @@ app.add_startup do |world, cmd|
       fov_y: 0.75f32,
       clear_color: Flock::Color.new(0.02, 0.02, 0.05)),
   )
+
+  # 2D HUD overlay (drawn on top of the 3D scene by Render2D3DPlugin): a 2D camera
+  # that does NOT clear, plus a translucent banner across the top of the window.
+  cmd.spawn(Flock::Camera2D.new(clear_color: nil))
+  cmd.spawn(
+    Flock::Transform2D.at(0, 300),
+    Flock::Sprite.new(Flock::Vec2.new(900, 44), Flock::Color.new(0.2, 0.6, 1.0, 0.28), z: 100.0f32))
 
   # The sun: a big emissive sphere at the origin (radius 0 orbit = stays put).
   sun_mesh = Flock::Mesh.sphere(gpu, radius: 2.4, segments: 48, rings: 24, color: Flock::Color.new(1.0, 0.8, 0.3))

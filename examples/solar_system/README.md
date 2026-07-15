@@ -10,8 +10,9 @@ crystal run examples/solar_system/readback_test.cr          # offscreen pixel ch
 
 ## What it shows
 
-- **3D rendering** via `Render3DPlugin` (`Renderer3D` + `Camera3D`), which owns the
-  frame — used instead of `DefaultPlugins` (that stack is 2D).
+- **Unified 2D + 3D** via `Render2D3DPlugin`: the 3D scene (`Renderer3D` + `Camera3D`)
+  is drawn first, then a 2D HUD overlay (`Renderer2D` + `Camera2D`, a translucent banner)
+  on top, presented as one frame.
 - **Sphere meshes** (`Mesh.sphere`) for the sun and planets.
 - **Custom shaders** (`Renderer3D#build_material` → `Material3D`, assigned to
   `MeshRenderer#material`):
