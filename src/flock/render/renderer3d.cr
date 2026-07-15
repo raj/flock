@@ -371,18 +371,34 @@ module Flock
       globals[0] = t
       LibWGPU.queue_write_buffer(@gpu.queue, @globals_buf, 0_u64, globals.to_unsafe.as(Void*), GLOBALS_BYTES.to_u64)
 
-      meshes = [] of {Mesh, Mat4, Material3D?}
+      # Group entities by (mesh, material) so identical bodies are drawn in ONE
+      # instanced draw call. Model matrices are laid out grouped; each group's
+      # instances index the storage buffer via first_instance (= @builtin(instance_index)).
+      groups = [] of {Mesh, Material3D?, Array(Mat4)}
+      slot = {} of Tuple(UInt64, UInt64) => Int32
+      total = 0
       world.query(Transform3D, MeshRenderer) do |_e, tf, mr|
-        meshes << {mr.value.mesh, tf.value.matrix, mr.value.material}
+        mesh = mr.value.mesh
+        material = mr.value.material
+        key = {mesh.object_id, material ? material.object_id : 0_u64}
+        if gi = slot[key]?
+          groups[gi][2] << tf.value.matrix
+        else
+          slot[key] = groups.size
+          groups << {mesh, material, [tf.value.matrix]}
+        end
+        total += 1
       end
-      return if meshes.empty?
-      ensure_capacity(meshes.size)
+      return if total == 0
+      ensure_capacity(total)
 
       @scratch.clear
       @scratch_n.clear
-      meshes.each do |(_m, model, _mat)|
-        @scratch.concat(model.m)
-        @scratch_n.concat(model.normal_matrix.m)
+      groups.each do |(_m, _mat, models)|
+        models.each do |model|
+          @scratch.concat(model.m)
+          @scratch_n.concat(model.normal_matrix.m)
+        end
       end
       LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
         @scratch.to_unsafe.as(Void*), (@scratch.size * 4).to_u64)
@@ -418,7 +434,9 @@ module Flock
       LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
       current = Pointer(Void).null.as(LibWGPU::RenderPipeline)
 
-      meshes.each_with_index do |(mesh, _model, material), i|
+      base = 0_u32
+      groups.each do |(mesh, material, models)|
+        count = models.size.to_u32
         pipeline = material ? material.pipeline : @pipeline
         if pipeline != current
           LibWGPU.render_pass_encoder_set_pipeline(pass, pipeline)
@@ -426,7 +444,9 @@ module Flock
         end
         LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, mesh.vertex_buf, 0_u64, mesh.vertex_bytes)
         LibWGPU.render_pass_encoder_set_index_buffer(pass, mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, mesh.index_bytes)
-        LibWGPU.render_pass_encoder_draw_indexed(pass, mesh.index_count, 1_u32, 0_u32, 0, i.to_u32)
+        # One instanced draw for the whole group; first_instance = base offset.
+        LibWGPU.render_pass_encoder_draw_indexed(pass, mesh.index_count, count, 0_u32, 0, base)
+        base += count
       end
 
       LibWGPU.render_pass_encoder_end(pass)
