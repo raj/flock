@@ -76,10 +76,14 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       Verified (`examples/sampler_test.cr`: linear blends a 2×2 checker). Remaining: mipmap
       generation (needs level downsampling on upload).
 - [x] **3D rendering** of meshes consuming `Camera3D`: `Mesh` (vertex/index buffers,
-      `Mesh.cube`) + `MeshRenderer`/`Transform3D` components + `Renderer3D` (per-mesh draw via a
-      model storage buffer, depth buffer, directional lighting). Verified (`examples/cube3d.cr`,
-      `cube3d_test.cr` readback). Remaining: normal matrix for non-uniform scale, mesh loading
-      (glTF/OBJ), instanced meshes.
+      `Mesh.cube`, `Mesh.sphere`) + `MeshRenderer`/`Transform3D` components + `Renderer3D`
+      (per-mesh draw via a model storage buffer, depth buffer, directional lighting).
+      **Per-mesh custom shaders** via `Renderer3D#build_material(wgsl)` → `Material3D` (assigned
+      to `MeshRenderer#material`), sharing an explicit `group0` = camera + models + `globals`
+      (exposes `time` for animation); draws grouped by material. Wired via `Render3DPlugin`.
+      Verified (`examples/cube3d.cr`/`cube3d_test.cr`; `examples/solar_system/` — animated
+      emissive sun + lit planets, with `readback_test.cr`). Remaining: normal matrix for
+      non-uniform scale, mesh loading (glTF/OBJ), instanced meshes, unify 2D+3D in one frame.
 
 ## sdl3-cr
 

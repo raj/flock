@@ -54,6 +54,41 @@ module Flock
       build(gpu, verts, indices)
     end
 
+    # UV sphere of the given radius, centered at the origin. `segments` = longitude
+    # divisions, `rings` = latitude divisions. Smooth normals (= normalized position).
+    def self.sphere(gpu : GpuContext, radius : Float64 = 0.5, segments : Int32 = 32,
+                    rings : Int32 = 16, color : Color = Color::WHITE) : Mesh
+      r, g, b = color.r, color.g, color.b
+      verts = [] of Float32
+      indices = [] of UInt32
+
+      (0..rings).each do |y|
+        v = y.to_f / rings
+        phi = v * Math::PI # 0..pi (pole to pole)
+        (0..segments).each do |x|
+          u = x.to_f / segments
+          theta = u * 2.0 * Math::PI # 0..2pi (around)
+          nx = Math.sin(phi) * Math.cos(theta)
+          ny = Math.cos(phi)
+          nz = Math.sin(phi) * Math.sin(theta)
+          verts.push((nx * radius).to_f32, (ny * radius).to_f32, (nz * radius).to_f32,
+            nx.to_f32, ny.to_f32, nz.to_f32, r, g, b)
+        end
+      end
+
+      row = segments + 1
+      (0...rings).each do |y|
+        (0...segments).each do |x|
+          i0 = (y * row + x).to_u32
+          i1 = (y * row + x + 1).to_u32
+          i2 = ((y + 1) * row + x).to_u32
+          i3 = ((y + 1) * row + x + 1).to_u32
+          indices.push(i0, i2, i1, i1, i2, i3)
+        end
+      end
+      build(gpu, verts, indices)
+    end
+
     def release : Nil
       LibWGPU.buffer_release(@vertex_buf)
       LibWGPU.buffer_release(@index_buf)

@@ -42,12 +42,14 @@ module Flock
   end
 
   # Attaches a Mesh to an entity for 3D rendering (with Transform3D), consumed by
-  # Renderer3D + Camera3D.
+  # Renderer3D + Camera3D. `material` swaps the shader (built via
+  # `Renderer3D#build_material`); nil uses the renderer's built-in lit shader.
   struct MeshRenderer
     include Component
     property mesh : Mesh
+    property material : Material3D?
 
-    def initialize(@mesh : Mesh)
+    def initialize(@mesh : Mesh, @material : Material3D? = nil)
     end
   end
 

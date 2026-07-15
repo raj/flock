@@ -1,19 +1,40 @@
 module Flock
+  # A custom 3D material: a render pipeline built from user WGSL by
+  # `Renderer3D#build_material`, sharing the renderer's pipeline layout (group0 =
+  # camera + models + globals) and vertex layout (pos/normal/color). Assign to
+  # `MeshRenderer#material` to draw that mesh with it.
+  class Material3D
+    getter pipeline : LibWGPU::RenderPipeline
+
+    def initialize(@pipeline : LibWGPU::RenderPipeline, @shader : LibWGPU::ShaderModule)
+    end
+
+    def release : Nil
+      LibWGPU.render_pipeline_release(@pipeline)
+      LibWGPU.shader_module_release(@shader)
+    end
+  end
+
   # 3D mesh renderer consuming Camera3D. Draws entities with (Transform3D, MeshRenderer)
   # using per-mesh vertex/index buffers, a shared view-projection uniform + a storage
   # buffer of model matrices (indexed by @builtin(instance_index)), a depth buffer for
   # correct occlusion, and simple directional lighting.
   #
-  # Self-contained: `render(world)` acquires the surface, clears color + depth, and
-  # presents. Use it in a Schedule::Render system (not together with RenderPlugin,
-  # which owns the 2D frame).
+  # Custom shaders: `build_material(wgsl)` returns a Material3D that reuses the shared
+  # group0 (camera/models/globals). Globals exposes `time` (seconds) for animation.
+  #
+  # Wire it with `Render3DPlugin` (inserts the renderer + a Schedule::Render system).
+  # Not to be combined with the 2D RenderPlugin (each owns the whole frame).
   class Renderer3D < Resource
-    MODEL_BYTES = 64 # mat4 (16 f32)
+    MODEL_BYTES   = 64 # mat4 (16 f32)
+    GLOBALS_BYTES = 16 # time f32 + padding (uniform 16-byte alignment)
 
     WGSL = <<-SHADER
     struct Camera { view_proj : mat4x4<f32> };
+    struct Globals { time : f32 };
     @group(0) @binding(0) var<uniform> cam : Camera;
     @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
+    @group(0) @binding(2) var<uniform> globals : Globals;
 
     struct VSOut {
       @builtin(position) clip : vec4<f32>,
@@ -49,28 +70,28 @@ module Flock
     @shader : LibWGPU::ShaderModule
     @pipeline : LibWGPU::RenderPipeline
     @group0_layout : LibWGPU::BindGroupLayout
+    @pipeline_layout : LibWGPU::PipelineLayout
     @uniform_buf : LibWGPU::Buffer
     @model_buf : LibWGPU::Buffer
+    @globals_buf : LibWGPU::Buffer
     @group0 : LibWGPU::BindGroup
+    @materials : Array(Material3D) = [] of Material3D
     @depth_tex : LibWGPU::Texture
     @depth_view : LibWGPU::TextureView
 
     def initialize(@gpu : GpuContext)
-      code = WGPU.string_view(WGSL)
-      src = LibWGPU::ShaderSourceWGSL.new
-      src.chain.s_type = LibWGPU::SType::ShaderSourceWGSL
-      src.code = code
-      sdesc = LibWGPU::ShaderModuleDescriptor.new
-      sdesc.label = WGPU.empty_string_view
-      sdesc.next_in_chain = pointerof(src).as(Pointer(LibWGPU::ChainedStruct))
-      @shader = LibWGPU.device_create_shader_module(@gpu.device, pointerof(sdesc))
+      # Explicit group0 layout (camera uniform + model storage + globals uniform) so
+      # custom materials share the exact same bind group.
+      @group0_layout = build_group0_layout
+      @pipeline_layout = build_pipeline_layout
 
-      @pipeline = build_pipeline
-      @group0_layout = LibWGPU.render_pipeline_get_bind_group_layout(@pipeline, 0_u32)
+      @shader = build_shader(WGSL)
+      @pipeline = build_pipeline(@shader)
 
       @uniform_buf = make_buffer(64_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
       @model_buf = make_buffer((@model_capacity * MODEL_BYTES).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
+      @globals_buf = make_buffer(GLOBALS_BYTES.to_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
       @group0 = build_group0
 
       # Depth texture (lazily sized to the surface on first render).
@@ -78,15 +99,82 @@ module Flock
       @depth_view = Pointer(Void).null.as(LibWGPU::TextureView)
     end
 
+    # Builds a custom material from WGSL. It must declare the shared group0
+    # (bindings 0=camera, 1=models, 2=globals) and the pos/normal/color vertex
+    # inputs, with `vs_main`/`fs_main` entry points. See examples/solar_system.
+    def build_material(wgsl : String) : Material3D
+      mod = build_shader(wgsl)
+      material = Material3D.new(build_pipeline(mod), mod)
+      @materials << material
+      material
+    end
+
     def release : Nil
       LibWGPU.texture_view_release(@depth_view) unless @depth_view.null?
       LibWGPU.texture_release(@depth_tex) unless @depth_tex.null?
+      @materials.each &.release
       LibWGPU.bind_group_release(@group0)
+      LibWGPU.buffer_release(@globals_buf)
       LibWGPU.buffer_release(@model_buf)
       LibWGPU.buffer_release(@uniform_buf)
-      LibWGPU.bind_group_layout_release(@group0_layout)
+      LibWGPU.pipeline_layout_release(@pipeline_layout)
       LibWGPU.render_pipeline_release(@pipeline)
       LibWGPU.shader_module_release(@shader)
+      LibWGPU.bind_group_layout_release(@group0_layout)
+    end
+
+    private def build_shader(wgsl : String) : LibWGPU::ShaderModule
+      code = WGPU.string_view(wgsl)
+      src = LibWGPU::ShaderSourceWGSL.new
+      src.chain.s_type = LibWGPU::SType::ShaderSourceWGSL
+      src.code = code
+      sdesc = LibWGPU::ShaderModuleDescriptor.new
+      sdesc.label = WGPU.empty_string_view
+      sdesc.next_in_chain = pointerof(src).as(Pointer(LibWGPU::ChainedStruct))
+      LibWGPU.device_create_shader_module(@gpu.device, pointerof(sdesc))
+    end
+
+    private def build_group0_layout : LibWGPU::BindGroupLayout
+      ubuf = LibWGPU::BufferBindingLayout.new
+      ubuf.type_ = LibWGPU::BufferBindingType::Uniform
+      e0 = LibWGPU::BindGroupLayoutEntry.new
+      e0.binding = 0_u32
+      e0.visibility = LibWGPU::ShaderStage::Vertex | LibWGPU::ShaderStage::Fragment
+      e0.buffer = ubuf
+
+      sbuf = LibWGPU::BufferBindingLayout.new
+      sbuf.type_ = LibWGPU::BufferBindingType::ReadOnlyStorage
+      e1 = LibWGPU::BindGroupLayoutEntry.new
+      e1.binding = 1_u32
+      e1.visibility = LibWGPU::ShaderStage::Vertex
+      e1.buffer = sbuf
+
+      gbuf = LibWGPU::BufferBindingLayout.new
+      gbuf.type_ = LibWGPU::BufferBindingType::Uniform
+      e2 = LibWGPU::BindGroupLayoutEntry.new
+      e2.binding = 2_u32
+      e2.visibility = LibWGPU::ShaderStage::Vertex | LibWGPU::ShaderStage::Fragment
+      e2.buffer = gbuf
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[3]
+      entries[0] = e0
+      entries[1] = e1
+      entries[2] = e2
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 3_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
+    private def build_pipeline_layout : LibWGPU::PipelineLayout
+      layouts = uninitialized LibWGPU::BindGroupLayout[1]
+      layouts[0] = @group0_layout
+      d = LibWGPU::PipelineLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.bind_group_layout_count = 1_u64
+      d.bind_group_layouts = layouts.to_unsafe
+      LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(d))
     end
 
     private def make_buffer(size : UInt64, usage : LibWGPU::BufferUsage) : LibWGPU::Buffer
@@ -98,7 +186,7 @@ module Flock
       LibWGPU.device_create_buffer(@gpu.device, pointerof(d))
     end
 
-    private def build_pipeline : LibWGPU::RenderPipeline
+    private def build_pipeline(shader : LibWGPU::ShaderModule) : LibWGPU::RenderPipeline
       vs = WGPU.string_view("vs_main")
       fs = WGPU.string_view("fs_main")
 
@@ -116,7 +204,7 @@ module Flock
       vlayout.attributes = attrs.to_unsafe
 
       vertex = LibWGPU::VertexState.new
-      vertex.module_ = @shader
+      vertex.module_ = shader
       vertex.entry_point = vs
       vertex.buffer_count = 1_u64
       vertex.buffers = pointerof(vlayout)
@@ -126,7 +214,7 @@ module Flock
       target.write_mask = LibWGPU::ColorWriteMask::All
 
       fragment = LibWGPU::FragmentState.new
-      fragment.module_ = @shader
+      fragment.module_ = shader
       fragment.entry_point = fs
       fragment.target_count = 1_u64
       fragment.targets = pointerof(target)
@@ -155,7 +243,7 @@ module Flock
 
       desc = LibWGPU::RenderPipelineDescriptor.new
       desc.label = WGPU.empty_string_view
-      desc.layout = WGPU.null(LibWGPU::PipelineLayout)
+      desc.layout = @pipeline_layout
       desc.vertex = vertex
       desc.primitive = primitive
       desc.depth_stencil = pointerof(depth)
@@ -175,13 +263,19 @@ module Flock
       e1.buffer = @model_buf
       e1.offset = 0_u64
       e1.size = (@model_capacity * MODEL_BYTES).to_u64
-      entries = uninitialized LibWGPU::BindGroupEntry[2]
+      e2 = LibWGPU::BindGroupEntry.new
+      e2.binding = 2_u32
+      e2.buffer = @globals_buf
+      e2.offset = 0_u64
+      e2.size = GLOBALS_BYTES.to_u64
+      entries = uninitialized LibWGPU::BindGroupEntry[3]
       entries[0] = e0
       entries[1] = e1
+      entries[2] = e2
       d = LibWGPU::BindGroupDescriptor.new
       d.label = WGPU.empty_string_view
       d.layout = @group0_layout
-      d.entry_count = 2_u64
+      d.entry_count = 3_u64
       d.entries = entries.to_unsafe
       LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
     end
@@ -248,15 +342,21 @@ module Flock
       vp = cam.view_projection(@gpu.aspect)
       LibWGPU.queue_write_buffer(@gpu.queue, @uniform_buf, 0_u64, vp.m.to_unsafe.as(Void*), 64_u64)
 
-      meshes = [] of {Mesh, Mat4}
+      # Globals: elapsed time (seconds), for animated materials.
+      t = world.resource?(Time).try(&.elapsed.to_f32) || 0.0f32
+      globals = StaticArray(Float32, 4).new(0.0f32)
+      globals[0] = t
+      LibWGPU.queue_write_buffer(@gpu.queue, @globals_buf, 0_u64, globals.to_unsafe.as(Void*), GLOBALS_BYTES.to_u64)
+
+      meshes = [] of {Mesh, Mat4, Material3D?}
       world.query(Transform3D, MeshRenderer) do |_e, tf, mr|
-        meshes << {mr.value.mesh, tf.value.matrix}
+        meshes << {mr.value.mesh, tf.value.matrix, mr.value.material}
       end
       return if meshes.empty?
       ensure_capacity(meshes.size)
 
       @scratch.clear
-      meshes.each { |(_m, model)| @scratch.concat(model.m) }
+      meshes.each { |(_m, model, _mat)| @scratch.concat(model.m) }
       LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
         @scratch.to_unsafe.as(Void*), (@scratch.size * 4).to_u64)
 
@@ -284,10 +384,17 @@ module Flock
       enc_desc.label = WGPU.empty_string_view
       encoder = LibWGPU.device_create_command_encoder(@gpu.device, pointerof(enc_desc))
       pass = LibWGPU.command_encoder_begin_render_pass(encoder, pointerof(pass_desc))
-      LibWGPU.render_pass_encoder_set_pipeline(pass, @pipeline)
+      # group0 (camera/models/globals) is shared by every material's pipeline
+      # (same explicit layout), so it stays bound across pipeline switches.
       LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
+      current = Pointer(Void).null.as(LibWGPU::RenderPipeline)
 
-      meshes.each_with_index do |(mesh, _model), i|
+      meshes.each_with_index do |(mesh, _model, material), i|
+        pipeline = material ? material.pipeline : @pipeline
+        if pipeline != current
+          LibWGPU.render_pass_encoder_set_pipeline(pass, pipeline)
+          current = pipeline
+        end
         LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, mesh.vertex_buf, 0_u64, mesh.vertex_bytes)
         LibWGPU.render_pass_encoder_set_index_buffer(pass, mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, mesh.index_bytes)
         LibWGPU.render_pass_encoder_draw_indexed(pass, mesh.index_count, 1_u32, 0_u32, 0, i.to_u32)
@@ -303,6 +410,21 @@ module Flock
       LibWGPU.command_buffer_release(cmd)
       LibWGPU.render_pass_encoder_release(pass)
       LibWGPU.command_encoder_release(encoder)
+    end
+  end
+
+  # Wires the 3D renderer: inserts Renderer3D at startup (from the GpuContext) and
+  # runs it each frame in Schedule::Render. Use it INSTEAD of RenderPlugin (each
+  # owns the whole frame): pair WindowPlugin + Render3DPlugin (+ Input/Audio) rather
+  # than DefaultPlugins.
+  class Render3DPlugin < Plugin
+    def build(app : App) : Nil
+      app.add_startup do |world, _cmd|
+        world.insert_resource(Renderer3D.new(world.resource(GpuContext)))
+      end
+      app.add_system(Schedule::Render) do |world, _cmd|
+        world.resource?(Renderer3D).try &.render(world)
+      end
     end
   end
 end
