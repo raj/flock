@@ -49,6 +49,25 @@ describe Flock::Mat4 do
   end
 end
 
+describe Flock::Frustum do
+  it "accepts spheres in front of the camera and rejects those outside" do
+    vp = Flock::Mat4.perspective(0.9, 1.0, 0.1, 100.0) *
+         Flock::Mat4.look_at(Flock::Vec3.new(0, 0, 5), Flock::Vec3.new(0, 0, 0), Flock::Vec3.new(0, 1, 0))
+    f = Flock::Frustum.from(vp)
+    f.intersects_sphere?(Flock::Vec3.new(0, 0, 0), 1.0f32).should be_true     # in front
+    f.intersects_sphere?(Flock::Vec3.new(0, 0, 50), 1.0f32).should be_false   # behind camera
+    f.intersects_sphere?(Flock::Vec3.new(100, 0, 0), 1.0f32).should be_false  # far to the side
+  end
+
+  it "keeps a just-off-screen sphere whose radius crosses the plane" do
+    vp = Flock::Mat4.perspective(0.9, 1.0, 0.1, 100.0) *
+         Flock::Mat4.look_at(Flock::Vec3.new(0, 0, 5), Flock::Vec3.new(0, 0, 0), Flock::Vec3.new(0, 1, 0))
+    f = Flock::Frustum.from(vp)
+    # A huge sphere centered off to the side still intersects the frustum.
+    f.intersects_sphere?(Flock::Vec3.new(100, 0, 0), 200.0f32).should be_true
+  end
+end
+
 describe Flock::Vec3 do
   it "cross and dot" do
     x = Flock::Vec3.new(1, 0, 0)

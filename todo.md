@@ -89,8 +89,11 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       **unified 2D+3D in one frame** (`Render2D3DPlugin`: 3D scene then 2D overlay, one present;
       `Renderer2D#render_into load_previous:`, `examples/render_2d3d_test.cr`); **glTF loading**
       (`Mesh.load_gltf` — `.gltf` with `.bin`/base64 data-URI buffers and binary `.glb`;
-      POSITION/NORMAL/indices via accessors/bufferViews, `examples/gltf_test.cr`). Remaining:
-      per-instance color/material params; frustum culling; glTF node transforms/materials/textures.
+      POSITION/NORMAL/indices via accessors/bufferViews, `examples/gltf_test.cr`);
+      **frustum culling** (per-mesh bounding sphere via `Mesh.build`; `Flock::Frustum` extracts
+      6 planes from the view-projection and drops off-screen instances; `Renderer3D#last_drawn`/
+      `last_culled`, toggle via `#cull`; `examples/culling_test.cr`, `spec/math_spec`). Remaining:
+      per-instance color/material params; glTF node transforms/materials/textures.
 
 ## sdl3-cr
 

@@ -68,6 +68,11 @@ module Flock
     @scratch_n : Array(Float32) = [] of Float32
     @depth_w : UInt32 = 0
     @depth_h : UInt32 = 0
+    # Frustum-culling stats from the last render_into (drawn vs. culled instances).
+    getter last_drawn : Int32 = 0
+    getter last_culled : Int32 = 0
+    # Set false to disable frustum culling (e.g. for debugging).
+    property cull : Bool = true
 
     @shader : LibWGPU::ShaderModule
     @pipeline : LibWGPU::RenderPipeline
@@ -374,36 +379,56 @@ module Flock
       # Group entities by (mesh, material) so identical bodies are drawn in ONE
       # instanced draw call. Model matrices are laid out grouped; each group's
       # instances index the storage buffer via first_instance (= @builtin(instance_index)).
+      # Frustum culling drops instances whose world bounding sphere is off-screen.
+      frustum = Frustum.from(vp)
       groups = [] of {Mesh, Material3D?, Array(Mat4)}
       slot = {} of Tuple(UInt64, UInt64) => Int32
       total = 0
+      culled = 0
       world.query(Transform3D, MeshRenderer) do |_e, tf, mr|
         mesh = mr.value.mesh
+        model = tf.value.matrix
+
+        if @cull && mesh.bounds_radius != Float32::MAX
+          center = model.transform_point(mesh.bounds_center)
+          s = model.scale_factors
+          radius = mesh.bounds_radius * Math.max(s.x, Math.max(s.y, s.z))
+          unless frustum.intersects_sphere?(center, radius)
+            culled += 1
+            next
+          end
+        end
+
         material = mr.value.material
         key = {mesh.object_id, material ? material.object_id : 0_u64}
         if gi = slot[key]?
-          groups[gi][2] << tf.value.matrix
+          groups[gi][2] << model
         else
           slot[key] = groups.size
-          groups << {mesh, material, [tf.value.matrix]}
+          groups << {mesh, material, [model]}
         end
         total += 1
       end
-      return if total == 0
-      ensure_capacity(total)
+      @last_drawn = total
+      @last_culled = culled
 
-      @scratch.clear
-      @scratch_n.clear
-      groups.each do |(_m, _mat, models)|
-        models.each do |model|
-          @scratch.concat(model.m)
-          @scratch_n.concat(model.normal_matrix.m)
+      # Even with nothing to draw (empty scene or everything culled) we still run the
+      # pass below so the frame is cleared; only the buffer uploads are skipped.
+      if total > 0
+        ensure_capacity(total)
+        @scratch.clear
+        @scratch_n.clear
+        groups.each do |(_m, _mat, models)|
+          models.each do |model|
+            @scratch.concat(model.m)
+            @scratch_n.concat(model.normal_matrix.m)
+          end
         end
+        LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
+          @scratch.to_unsafe.as(Void*), (@scratch.size * 4).to_u64)
+        LibWGPU.queue_write_buffer(@gpu.queue, @normal_buf, 0_u64,
+          @scratch_n.to_unsafe.as(Void*), (@scratch_n.size * 4).to_u64)
       end
-      LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
-        @scratch.to_unsafe.as(Void*), (@scratch.size * 4).to_u64)
-      LibWGPU.queue_write_buffer(@gpu.queue, @normal_buf, 0_u64,
-        @scratch_n.to_unsafe.as(Void*), (@scratch_n.size * 4).to_u64)
 
       color_att = LibWGPU::RenderPassColorAttachment.new
       color_att.view = target

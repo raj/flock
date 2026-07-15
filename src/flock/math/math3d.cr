@@ -205,9 +205,64 @@ module Flock
       Mat4.new(res)
     end
 
+    # Transforms a point (w=1) by this matrix.
+    def transform_point(p : Vec3) : Vec3
+      Vec3.new(
+        self[0, 0] * p.x + self[1, 0] * p.y + self[2, 0] * p.z + self[3, 0],
+        self[0, 1] * p.x + self[1, 1] * p.y + self[2, 1] * p.z + self[3, 1],
+        self[0, 2] * p.x + self[1, 2] * p.y + self[2, 2] * p.z + self[3, 2])
+    end
+
+    # Per-axis scale factors = lengths of the upper-3x3 basis columns (rotation-invariant).
+    def scale_factors : Vec3
+      sx = Math.sqrt(self[0, 0]**2 + self[0, 1]**2 + self[0, 2]**2)
+      sy = Math.sqrt(self[1, 0]**2 + self[1, 1]**2 + self[1, 2]**2)
+      sz = Math.sqrt(self[2, 0]**2 + self[2, 1]**2 + self[2, 2]**2)
+      Vec3.new(sx, sy, sz)
+    end
+
     # Flat view for uploading into a wgpu uniform buffer.
     def to_slice : Slice(Float32)
       @m.to_slice
+    end
+  end
+
+  # View frustum as 6 normalized planes (a,b,c,d), extracted from a view-projection
+  # matrix (Gribb-Hartmann). Used for culling: a point/sphere is inside when it lies
+  # on the inner side of every plane. Assumes WebGPU/Metal/D3D clip depth [0, w].
+  struct Frustum
+    getter planes : Array(StaticArray(Float32, 4))
+
+    def initialize(@planes : Array(StaticArray(Float32, 4)))
+    end
+
+    def self.from(vp : Mat4) : Frustum
+      # Rows of the view-projection matrix (row i · world = i-th clip component).
+      row = ->(i : Int32) { {vp[0, i], vp[1, i], vp[2, i], vp[3, i]} }
+      r0 = row.call(0); r1 = row.call(1); r2 = row.call(2); r3 = row.call(3)
+      raw = [
+        {r3[0] + r0[0], r3[1] + r0[1], r3[2] + r0[2], r3[3] + r0[3]}, # left   (X + W >= 0)
+        {r3[0] - r0[0], r3[1] - r0[1], r3[2] - r0[2], r3[3] - r0[3]}, # right  (W - X >= 0)
+        {r3[0] + r1[0], r3[1] + r1[1], r3[2] + r1[2], r3[3] + r1[3]}, # bottom (Y + W >= 0)
+        {r3[0] - r1[0], r3[1] - r1[1], r3[2] - r1[2], r3[3] - r1[3]}, # top    (W - Y >= 0)
+        {r2[0], r2[1], r2[2], r2[3]},                                 # near   (Z >= 0)
+        {r3[0] - r2[0], r3[1] - r2[1], r3[2] - r2[2], r3[3] - r2[3]}, # far    (W - Z >= 0)
+      ]
+      planes = raw.map do |(a, b, c, d)|
+        len = Math.sqrt(a * a + b * b + c * c)
+        len = 1.0f32 if len == 0
+        StaticArray[a / len, b / len, c / len, d / len]
+      end
+      Frustum.new(planes)
+    end
+
+    # True if the world-space sphere is at least partially inside the frustum.
+    def intersects_sphere?(center : Vec3, radius : Float32) : Bool
+      @planes.each do |p|
+        dist = p[0] * center.x + p[1] * center.y + p[2] * center.z + p[3]
+        return false if dist < -radius
+      end
+      true
     end
   end
 end

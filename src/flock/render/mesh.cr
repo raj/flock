@@ -13,9 +13,14 @@ module Flock
     getter index_count : UInt32
     getter vertex_bytes : UInt64
     getter index_bytes : UInt64
+    # Local-space bounding sphere (for frustum culling). Default radius Float32::MAX
+    # means "unknown" -> never culled.
+    getter bounds_center : Vec3
+    getter bounds_radius : Float32
 
     def initialize(@vertex_buf : LibWGPU::Buffer, @index_buf : LibWGPU::Buffer,
-                   @index_count : UInt32, @vertex_bytes : UInt64, @index_bytes : UInt64)
+                   @index_count : UInt32, @vertex_bytes : UInt64, @index_bytes : UInt64,
+                   @bounds_center : Vec3 = Vec3.new, @bounds_radius : Float32 = Float32::MAX)
     end
 
     # Uploads interleaved vertices (pos.xyz, normal.xyz, color.rgb per vertex) + indices.
@@ -28,7 +33,26 @@ module Flock
         LibWGPU::BufferUsage::Index | LibWGPU::BufferUsage::CopyDst)
       LibWGPU.queue_write_buffer(gpu.queue, ibuf, 0_u64, indices.to_unsafe.as(Void*), (indices.size * 4).to_u64)
 
-      new(vbuf, ibuf, indices.size.to_u32, (vertices.size * 4).to_u64, (indices.size * 4).to_u64)
+      center, radius = bounding_sphere(vertices)
+      new(vbuf, ibuf, indices.size.to_u32, (vertices.size * 4).to_u64, (indices.size * 4).to_u64, center, radius)
+    end
+
+    # AABB-derived bounding sphere from interleaved vertices (pos = first 3 floats,
+    # stride 9). Center = AABB midpoint, radius = half the diagonal (conservative).
+    private def self.bounding_sphere(vertices : Array(Float32)) : {Vec3, Float32}
+      return {Vec3.new, 0.0f32} if vertices.size < 9
+      minx = miny = minz = Float32::MAX
+      maxx = maxy = maxz = -Float32::MAX
+      i = 0
+      while i + 2 < vertices.size
+        x = vertices[i]; y = vertices[i + 1]; z = vertices[i + 2]
+        minx = x if x < minx; miny = y if y < miny; minz = z if z < minz
+        maxx = x if x > maxx; maxy = y if y > maxy; maxz = z if z > maxz
+        i += 9
+      end
+      cx = (minx + maxx) * 0.5f32; cy = (miny + maxy) * 0.5f32; cz = (minz + maxz) * 0.5f32
+      dx = maxx - cx; dy = maxy - cy; dz = maxz - cz
+      {Vec3.new(cx, cy, cz), Math.sqrt(dx * dx + dy * dy + dz * dz).to_f32}
     end
 
     # Unit cube centered at the origin, with per-face normals for flat shading.
