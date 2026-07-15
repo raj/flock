@@ -98,8 +98,11 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       textures** — vertices carry UVs (STRIDE 44), Renderer3D has a group1 texture/sampler +
       white default, `MeshRenderer#texture`, `Mesh.load_gltf_textured` extracts the image
       (external / data-URI / bufferView) via `Texture.from_encoded` (sdl3-cr `IMG_Load_IO`).
-      Verified (`examples/texture3d_test.cr`, `gltf_texture_test.cr`). Remaining:
-      per-instance color/material params; glTF metallic-roughness/normal maps; animation.
+      Verified (`examples/texture3d_test.cr`, `gltf_texture_test.cr`). **Per-instance params**:
+      `MeshRenderer#tint` (rgba) feeds a per-instance storage buffer (group0 binding 4); many
+      entities share one mesh/material/texture yet render in different colors within a single
+      instanced draw (`examples/instance_tint_test.cr`; solar-system planets now share one
+      sphere, tinted per planet). Remaining: glTF metallic-roughness/normal maps; animation.
 
 ## sdl3-cr
 

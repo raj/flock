@@ -74,6 +74,7 @@ struct Globals { time : f32 };
 @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
 @group(0) @binding(2) var<uniform> globals : Globals;
 @group(0) @binding(3) var<storage, read> normals : array<mat4x4<f32>>;
+@group(0) @binding(4) var<storage, read> params : array<vec4<f32>>; // per-instance tint
 
 struct VSOut {
   @builtin(position) clip : vec4<f32>,
@@ -89,7 +90,7 @@ fn vs_main(@location(0) pos : vec3<f32>, @location(1) nrm : vec3<f32>,
   out.clip = cam.view_proj * models[ii] * vec4<f32>(pos, 1.0);
   out.lpos = pos;
   out.normal = normalize((normals[ii] * vec4<f32>(nrm, 0.0)).xyz);
-  out.color = col;
+  out.color = col * params[ii].rgb; // each planet tinted from its instance param
   return out;
 }
 
@@ -153,11 +154,13 @@ app.add_startup do |world, cmd|
     {20.0, 1.2, 0.26, 0.7, Flock::Color.new(0.85, 0.8, 0.6)},   # saturn-ish
   ]
 
+  # One shared unit sphere for every planet: same mesh + material, per-instance size
+  # (Transform3D scale) and color (MeshRenderer#tint) -> all planets in ONE instanced draw.
+  planet_sphere = Flock::Mesh.sphere(gpu, radius: 1.0, segments: 32, rings: 16, color: Flock::Color::WHITE)
   planets.each_with_index do |(radius, size, speed, spin, color), i|
-    mesh = Flock::Mesh.sphere(gpu, radius: size, segments: 32, rings: 16, color: color)
     cmd.spawn(
-      Flock::Transform3D.new(Flock::Vec3.new(radius, 0, 0)),
-      Flock::MeshRenderer.new(mesh, planet_mat),
+      Flock::Transform3D.new(Flock::Vec3.new(radius, 0, 0), scale: Flock::Vec3.new(size, size, size)),
+      Flock::MeshRenderer.new(planet_sphere, planet_mat, tint: color),
       Orbit.new(radius: radius, speed: speed, angle: i.to_f * 1.1, spin: spin),
     )
   end

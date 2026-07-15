@@ -28,6 +28,7 @@ module Flock
   class Renderer3D < Resource
     MODEL_BYTES   = 64 # mat4 (16 f32)
     GLOBALS_BYTES = 16 # time f32 + padding (uniform 16-byte alignment)
+    PARAM_BYTES   = 16 # per-instance vec4 (tint rgba)
 
     WGSL = <<-SHADER
     struct Camera { view_proj : mat4x4<f32> };
@@ -36,6 +37,7 @@ module Flock
     @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
     @group(0) @binding(2) var<uniform> globals : Globals;
     @group(0) @binding(3) var<storage, read> normals : array<mat4x4<f32>>;
+    @group(0) @binding(4) var<storage, read> params : array<vec4<f32>>; // per-instance tint (rgba)
     @group(1) @binding(0) var base_tex : texture_2d<f32>;
     @group(1) @binding(1) var base_smp : sampler;
 
@@ -44,6 +46,7 @@ module Flock
       @location(0) normal : vec3<f32>,
       @location(1) color : vec3<f32>,
       @location(2) uv : vec2<f32>,
+      @location(3) alpha : f32,
     };
 
     @vertex
@@ -54,8 +57,9 @@ module Flock
       out.clip = cam.view_proj * models[ii] * vec4<f32>(pos, 1.0);
       // Normal matrix (inverse-transpose) -> correct under non-uniform scale.
       out.normal = normalize((normals[ii] * vec4<f32>(nrm, 0.0)).xyz);
-      out.color = col;
+      out.color = col * params[ii].rgb; // per-instance tint
       out.uv = uv;
+      out.alpha = params[ii].a;
       return out;
     }
 
@@ -64,15 +68,16 @@ module Flock
       let light = normalize(vec3<f32>(0.4, 0.8, 0.6));
       let diff = max(dot(normalize(in.normal), light), 0.0);
       let shade = 0.25 + 0.75 * diff; // ambient + diffuse
-      // Base-color texture (white 1x1 by default) modulated by the vertex color.
+      // Base-color texture (white 1x1 by default) modulated by the (tinted) vertex color.
       let tex = textureSample(base_tex, base_smp, in.uv);
-      return vec4<f32>(in.color * tex.rgb * shade, tex.a);
+      return vec4<f32>(in.color * tex.rgb * shade, tex.a * in.alpha);
     }
     SHADER
 
     @model_capacity : Int32 = 64
     @scratch : Array(Float32) = [] of Float32
     @scratch_n : Array(Float32) = [] of Float32
+    @scratch_p : Array(Float32) = [] of Float32
     @depth_w : UInt32 = 0
     @depth_h : UInt32 = 0
     # Frustum-culling stats from the last render_into (drawn vs. culled instances).
@@ -92,6 +97,7 @@ module Flock
     @uniform_buf : LibWGPU::Buffer
     @model_buf : LibWGPU::Buffer
     @normal_buf : LibWGPU::Buffer
+    @param_buf : LibWGPU::Buffer
     @globals_buf : LibWGPU::Buffer
     @group0 : LibWGPU::BindGroup
     @materials : Array(Material3D) = [] of Material3D
@@ -113,6 +119,8 @@ module Flock
       @model_buf = make_buffer((@model_capacity * MODEL_BYTES).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       @normal_buf = make_buffer((@model_capacity * MODEL_BYTES).to_u64,
+        LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
+      @param_buf = make_buffer((@model_capacity * PARAM_BYTES).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       @globals_buf = make_buffer(GLOBALS_BYTES.to_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
       @group0 = build_group0
@@ -143,6 +151,7 @@ module Flock
       @white.release
       LibWGPU.bind_group_release(@group0)
       LibWGPU.buffer_release(@globals_buf)
+      LibWGPU.buffer_release(@param_buf)
       LibWGPU.buffer_release(@normal_buf)
       LibWGPU.buffer_release(@model_buf)
       LibWGPU.buffer_release(@uniform_buf)
@@ -193,14 +202,22 @@ module Flock
       e3.visibility = LibWGPU::ShaderStage::Vertex
       e3.buffer = nbuf
 
-      entries = uninitialized LibWGPU::BindGroupLayoutEntry[4]
+      pbuf = LibWGPU::BufferBindingLayout.new
+      pbuf.type_ = LibWGPU::BufferBindingType::ReadOnlyStorage
+      e4 = LibWGPU::BindGroupLayoutEntry.new
+      e4.binding = 4_u32
+      e4.visibility = LibWGPU::ShaderStage::Vertex
+      e4.buffer = pbuf
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[5]
       entries[0] = e0
       entries[1] = e1
       entries[2] = e2
       entries[3] = e3
+      entries[4] = e4
       d = LibWGPU::BindGroupLayoutDescriptor.new
       d.label = WGPU.empty_string_view
-      d.entry_count = 4_u64
+      d.entry_count = 5_u64
       d.entries = entries.to_unsafe
       LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
     end
@@ -378,15 +395,21 @@ module Flock
       e3.buffer = @normal_buf
       e3.offset = 0_u64
       e3.size = (@model_capacity * MODEL_BYTES).to_u64
-      entries = uninitialized LibWGPU::BindGroupEntry[4]
+      e4 = LibWGPU::BindGroupEntry.new
+      e4.binding = 4_u32
+      e4.buffer = @param_buf
+      e4.offset = 0_u64
+      e4.size = (@model_capacity * PARAM_BYTES).to_u64
+      entries = uninitialized LibWGPU::BindGroupEntry[5]
       entries[0] = e0
       entries[1] = e1
       entries[2] = e2
       entries[3] = e3
+      entries[4] = e4
       d = LibWGPU::BindGroupDescriptor.new
       d.label = WGPU.empty_string_view
       d.layout = @group0_layout
-      d.entry_count = 4_u64
+      d.entry_count = 5_u64
       d.entries = entries.to_unsafe
       LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
     end
@@ -403,6 +426,9 @@ module Flock
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       LibWGPU.buffer_release(@normal_buf)
       @normal_buf = make_buffer((cap * MODEL_BYTES).to_u64,
+        LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
+      LibWGPU.buffer_release(@param_buf)
+      @param_buf = make_buffer((cap * PARAM_BYTES).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       LibWGPU.bind_group_release(@group0)
       @group0 = build_group0
@@ -467,7 +493,7 @@ module Flock
       # instances index the storage buffer via first_instance (= @builtin(instance_index)).
       # Frustum culling drops instances whose world bounding sphere is off-screen.
       frustum = Frustum.from(vp)
-      groups = [] of {Mesh, Material3D?, Texture, Array(Mat4)}
+      groups = [] of {Mesh, Material3D?, Texture, Array({Mat4, Color})}
       slot = {} of Tuple(UInt64, UInt64, UInt64) => Int32
       total = 0
       culled = 0
@@ -487,12 +513,13 @@ module Flock
 
         material = mr.value.material
         texture = mr.value.texture || @white
+        inst = {model, mr.value.tint} # per-instance transform + tint
         key = {mesh.object_id, material ? material.object_id : 0_u64, texture.object_id}
         if gi = slot[key]?
-          groups[gi][3] << model
+          groups[gi][3] << inst
         else
           slot[key] = groups.size
-          groups << {mesh, material, texture, [model]}
+          groups << {mesh, material, texture, [inst]}
         end
         total += 1
       end
@@ -505,16 +532,20 @@ module Flock
         ensure_capacity(total)
         @scratch.clear
         @scratch_n.clear
-        groups.each do |(_m, _mat, _tex, models)|
-          models.each do |model|
+        @scratch_p.clear
+        groups.each do |(_m, _mat, _tex, insts)|
+          insts.each do |(model, tint)|
             @scratch.concat(model.m)
             @scratch_n.concat(model.normal_matrix.m)
+            @scratch_p.push(tint.r, tint.g, tint.b, tint.a)
           end
         end
         LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
           @scratch.to_unsafe.as(Void*), (@scratch.size * 4).to_u64)
         LibWGPU.queue_write_buffer(@gpu.queue, @normal_buf, 0_u64,
           @scratch_n.to_unsafe.as(Void*), (@scratch_n.size * 4).to_u64)
+        LibWGPU.queue_write_buffer(@gpu.queue, @param_buf, 0_u64,
+          @scratch_p.to_unsafe.as(Void*), (@scratch_p.size * 4).to_u64)
       end
 
       color_att = LibWGPU::RenderPassColorAttachment.new
@@ -547,8 +578,8 @@ module Flock
       current = Pointer(Void).null.as(LibWGPU::RenderPipeline)
 
       base = 0_u32
-      groups.each do |(mesh, material, texture, models)|
-        count = models.size.to_u32
+      groups.each do |(mesh, material, texture, insts)|
+        count = insts.size.to_u32
         pipeline = material ? material.pipeline : @pipeline
         if pipeline != current
           LibWGPU.render_pass_encoder_set_pipeline(pass, pipeline)

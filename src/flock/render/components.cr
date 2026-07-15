@@ -49,8 +49,12 @@ module Flock
     property mesh : Mesh
     property material : Material3D?
     property texture : Texture?
+    # Per-instance tint (multiplied into the mesh's vertex color) + alpha. Lets many
+    # entities share one mesh yet render in different colors within a single draw.
+    property tint : Color
 
-    def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil)
+    def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil,
+                   @tint : Color = Color::WHITE)
     end
   end
 

@@ -21,5 +21,8 @@ crystal run examples/solar_system/readback_test.cr          # offscreen pixel ch
   Every material shares the renderer's `group0` (camera + model matrices + `globals`),
   so custom WGSL only has to declare those three bindings and the pos/normal/color
   vertex inputs.
+- **Instancing + per-instance tint**: all planets share ONE sphere mesh and one material;
+  each gets its size from `Transform3D` scale and its color from `MeshRenderer#tint`, so the
+  whole planet set draws in a single instanced call.
 - **ECS-driven motion**: an `Orbit` component holds each body's orbit radius/speed and
   self-spin; an Update system advances them; the camera slowly circles the scene.
