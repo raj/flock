@@ -36,21 +36,26 @@ module Flock
     @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
     @group(0) @binding(2) var<uniform> globals : Globals;
     @group(0) @binding(3) var<storage, read> normals : array<mat4x4<f32>>;
+    @group(1) @binding(0) var base_tex : texture_2d<f32>;
+    @group(1) @binding(1) var base_smp : sampler;
 
     struct VSOut {
       @builtin(position) clip : vec4<f32>,
       @location(0) normal : vec3<f32>,
       @location(1) color : vec3<f32>,
+      @location(2) uv : vec2<f32>,
     };
 
     @vertex
     fn vs_main(@location(0) pos : vec3<f32>, @location(1) nrm : vec3<f32>,
-               @location(2) col : vec3<f32>, @builtin(instance_index) ii : u32) -> VSOut {
+               @location(2) col : vec3<f32>, @location(3) uv : vec2<f32>,
+               @builtin(instance_index) ii : u32) -> VSOut {
       var out : VSOut;
       out.clip = cam.view_proj * models[ii] * vec4<f32>(pos, 1.0);
       // Normal matrix (inverse-transpose) -> correct under non-uniform scale.
       out.normal = normalize((normals[ii] * vec4<f32>(nrm, 0.0)).xyz);
       out.color = col;
+      out.uv = uv;
       return out;
     }
 
@@ -59,7 +64,9 @@ module Flock
       let light = normalize(vec3<f32>(0.4, 0.8, 0.6));
       let diff = max(dot(normalize(in.normal), light), 0.0);
       let shade = 0.25 + 0.75 * diff; // ambient + diffuse
-      return vec4<f32>(in.color * shade, 1.0);
+      // Base-color texture (white 1x1 by default) modulated by the vertex color.
+      let tex = textureSample(base_tex, base_smp, in.uv);
+      return vec4<f32>(in.color * tex.rgb * shade, tex.a);
     }
     SHADER
 
@@ -77,7 +84,11 @@ module Flock
     @shader : LibWGPU::ShaderModule
     @pipeline : LibWGPU::RenderPipeline
     @group0_layout : LibWGPU::BindGroupLayout
+    @group1_layout : LibWGPU::BindGroupLayout # texture + sampler
     @pipeline_layout : LibWGPU::PipelineLayout
+    @white : Texture
+    @samplers : Hash(Tuple(SamplerFilter, SamplerWrap), LibWGPU::Sampler) = {} of Tuple(SamplerFilter, SamplerWrap) => LibWGPU::Sampler
+    @tex_groups : Hash(UInt64, LibWGPU::BindGroup) = {} of UInt64 => LibWGPU::BindGroup
     @uniform_buf : LibWGPU::Buffer
     @model_buf : LibWGPU::Buffer
     @normal_buf : LibWGPU::Buffer
@@ -88,10 +99,12 @@ module Flock
     @depth_view : LibWGPU::TextureView
 
     def initialize(@gpu : GpuContext)
-      # Explicit group0 layout (camera uniform + model storage + globals uniform) so
-      # custom materials share the exact same bind group.
+      # Explicit group0 layout (camera uniform + model storage + globals uniform) +
+      # group1 (base-color texture + sampler) so custom materials share both.
       @group0_layout = build_group0_layout
+      @group1_layout = build_group1_layout
       @pipeline_layout = build_pipeline_layout
+      @white = Texture.white(@gpu)
 
       @shader = build_shader(WGSL)
       @pipeline = build_pipeline(@shader)
@@ -123,6 +136,11 @@ module Flock
       LibWGPU.texture_view_release(@depth_view) unless @depth_view.null?
       LibWGPU.texture_release(@depth_tex) unless @depth_tex.null?
       @materials.each &.release
+      @tex_groups.each_value { |bg| LibWGPU.bind_group_release(bg) }
+      @tex_groups.clear
+      @samplers.each_value { |s| LibWGPU.sampler_release(s) }
+      @samplers.clear
+      @white.release
       LibWGPU.bind_group_release(@group0)
       LibWGPU.buffer_release(@globals_buf)
       LibWGPU.buffer_release(@normal_buf)
@@ -131,6 +149,7 @@ module Flock
       LibWGPU.pipeline_layout_release(@pipeline_layout)
       LibWGPU.render_pipeline_release(@pipeline)
       LibWGPU.shader_module_release(@shader)
+      LibWGPU.bind_group_layout_release(@group1_layout)
       LibWGPU.bind_group_layout_release(@group0_layout)
     end
 
@@ -186,14 +205,80 @@ module Flock
       LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
     end
 
+    # group1: base-color texture (binding 0) + sampler (binding 1), fragment stage.
+    private def build_group1_layout : LibWGPU::BindGroupLayout
+      tex = LibWGPU::TextureBindingLayout.new
+      tex.sample_type = LibWGPU::TextureSampleType::Float
+      tex.view_dimension = LibWGPU::TextureViewDimension::N2D
+      e0 = LibWGPU::BindGroupLayoutEntry.new
+      e0.binding = 0_u32
+      e0.visibility = LibWGPU::ShaderStage::Fragment
+      e0.texture = tex
+
+      smp = LibWGPU::SamplerBindingLayout.new
+      smp.type_ = LibWGPU::SamplerBindingType::Filtering
+      e1 = LibWGPU::BindGroupLayoutEntry.new
+      e1.binding = 1_u32
+      e1.visibility = LibWGPU::ShaderStage::Fragment
+      e1.sampler = smp
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[2]
+      entries[0] = e0
+      entries[1] = e1
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 2_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
     private def build_pipeline_layout : LibWGPU::PipelineLayout
-      layouts = uninitialized LibWGPU::BindGroupLayout[1]
+      layouts = uninitialized LibWGPU::BindGroupLayout[2]
       layouts[0] = @group0_layout
+      layouts[1] = @group1_layout
       d = LibWGPU::PipelineLayoutDescriptor.new
       d.label = WGPU.empty_string_view
-      d.bind_group_layout_count = 1_u64
+      d.bind_group_layout_count = 2_u64
       d.bind_group_layouts = layouts.to_unsafe
       LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(d))
+    end
+
+    private def sampler_for(filter : SamplerFilter, wrap : SamplerWrap) : LibWGPU::Sampler
+      @samplers[{filter, wrap}] ||= build_sampler(filter, wrap)
+    end
+
+    private def build_sampler(filter : SamplerFilter, wrap : SamplerWrap) : LibWGPU::Sampler
+      addr = wrap.repeat? ? LibWGPU::AddressMode::Repeat : LibWGPU::AddressMode::ClampToEdge
+      fmode = filter.linear? ? LibWGPU::FilterMode::Linear : LibWGPU::FilterMode::Nearest
+      mmode = filter.linear? ? LibWGPU::MipmapFilterMode::Linear : LibWGPU::MipmapFilterMode::Nearest
+      d = LibWGPU::SamplerDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.address_mode_u = addr; d.address_mode_v = addr; d.address_mode_w = addr
+      d.mag_filter = fmode; d.min_filter = fmode; d.mipmap_filter = mmode
+      d.lod_min_clamp = 0.0f32; d.lod_max_clamp = 1.0f32; d.max_anisotropy = 1_u16
+      LibWGPU.device_create_sampler(@gpu.device, pointerof(d))
+    end
+
+    private def tex_group(texture : Texture) : LibWGPU::BindGroup
+      @tex_groups.fetch(texture.view.address) do
+        e0 = LibWGPU::BindGroupEntry.new
+        e0.binding = 0_u32
+        e0.texture_view = texture.view
+        e1 = LibWGPU::BindGroupEntry.new
+        e1.binding = 1_u32
+        e1.sampler = sampler_for(texture.filter, texture.wrap)
+        entries = uninitialized LibWGPU::BindGroupEntry[2]
+        entries[0] = e0
+        entries[1] = e1
+        d = LibWGPU::BindGroupDescriptor.new
+        d.label = WGPU.empty_string_view
+        d.layout = @group1_layout
+        d.entry_count = 2_u64
+        d.entries = entries.to_unsafe
+        bg = LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
+        @tex_groups[texture.view.address] = bg
+        bg
+      end
     end
 
     private def make_buffer(size : UInt64, usage : LibWGPU::BufferUsage) : LibWGPU::Buffer
@@ -209,17 +294,18 @@ module Flock
       vs = WGPU.string_view("vs_main")
       fs = WGPU.string_view("fs_main")
 
-      # Vertex layout: pos(loc0), normal(loc1), color(loc2), all Float32x3.
+      # Vertex layout: pos(loc0), normal(loc1), color(loc2) Float32x3; uv(loc3) Float32x2.
       a0 = LibWGPU::VertexAttribute.new; a0.format = LibWGPU::VertexFormat::Float32x3; a0.offset = 0_u64; a0.shader_location = 0_u32
       a1 = LibWGPU::VertexAttribute.new; a1.format = LibWGPU::VertexFormat::Float32x3; a1.offset = 12_u64; a1.shader_location = 1_u32
       a2 = LibWGPU::VertexAttribute.new; a2.format = LibWGPU::VertexFormat::Float32x3; a2.offset = 24_u64; a2.shader_location = 2_u32
-      attrs = uninitialized LibWGPU::VertexAttribute[3]
-      attrs[0] = a0; attrs[1] = a1; attrs[2] = a2
+      a3 = LibWGPU::VertexAttribute.new; a3.format = LibWGPU::VertexFormat::Float32x2; a3.offset = 36_u64; a3.shader_location = 3_u32
+      attrs = uninitialized LibWGPU::VertexAttribute[4]
+      attrs[0] = a0; attrs[1] = a1; attrs[2] = a2; attrs[3] = a3
 
       vlayout = LibWGPU::VertexBufferLayout.new
       vlayout.step_mode = LibWGPU::VertexStepMode::Vertex
       vlayout.array_stride = Mesh::STRIDE
-      vlayout.attribute_count = 3_u64
+      vlayout.attribute_count = 4_u64
       vlayout.attributes = attrs.to_unsafe
 
       vertex = LibWGPU::VertexState.new
@@ -381,8 +467,8 @@ module Flock
       # instances index the storage buffer via first_instance (= @builtin(instance_index)).
       # Frustum culling drops instances whose world bounding sphere is off-screen.
       frustum = Frustum.from(vp)
-      groups = [] of {Mesh, Material3D?, Array(Mat4)}
-      slot = {} of Tuple(UInt64, UInt64) => Int32
+      groups = [] of {Mesh, Material3D?, Texture, Array(Mat4)}
+      slot = {} of Tuple(UInt64, UInt64, UInt64) => Int32
       total = 0
       culled = 0
       world.query(Transform3D, MeshRenderer) do |_e, tf, mr|
@@ -400,12 +486,13 @@ module Flock
         end
 
         material = mr.value.material
-        key = {mesh.object_id, material ? material.object_id : 0_u64}
+        texture = mr.value.texture || @white
+        key = {mesh.object_id, material ? material.object_id : 0_u64, texture.object_id}
         if gi = slot[key]?
-          groups[gi][2] << model
+          groups[gi][3] << model
         else
           slot[key] = groups.size
-          groups << {mesh, material, [model]}
+          groups << {mesh, material, texture, [model]}
         end
         total += 1
       end
@@ -418,7 +505,7 @@ module Flock
         ensure_capacity(total)
         @scratch.clear
         @scratch_n.clear
-        groups.each do |(_m, _mat, models)|
+        groups.each do |(_m, _mat, _tex, models)|
           models.each do |model|
             @scratch.concat(model.m)
             @scratch_n.concat(model.normal_matrix.m)
@@ -460,13 +547,14 @@ module Flock
       current = Pointer(Void).null.as(LibWGPU::RenderPipeline)
 
       base = 0_u32
-      groups.each do |(mesh, material, models)|
+      groups.each do |(mesh, material, texture, models)|
         count = models.size.to_u32
         pipeline = material ? material.pipeline : @pipeline
         if pipeline != current
           LibWGPU.render_pass_encoder_set_pipeline(pass, pipeline)
           current = pipeline
         end
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(texture), 0_u64, Pointer(UInt32).null)
         LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, mesh.vertex_buf, 0_u64, mesh.vertex_bytes)
         LibWGPU.render_pass_encoder_set_index_buffer(pass, mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, mesh.index_bytes)
         # One instanced draw for the whole group; first_instance = base offset.

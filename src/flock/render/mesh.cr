@@ -2,11 +2,12 @@ require "json"
 require "base64"
 
 module Flock
-  # A GPU mesh: interleaved vertex buffer (position + normal + color, 9 floats /
-  # 36 bytes per vertex) + a UInt32 index buffer. Consumed by Renderer3D through a
+  # A GPU mesh: interleaved vertex buffer (position + normal + color + uv, 11 floats /
+  # 44 bytes per vertex) + a UInt32 index buffer. Consumed by Renderer3D through a
   # `MeshRenderer` component.
   class Mesh
-    STRIDE = 36_u64 # 9 f32 (pos3 + normal3 + color3)
+    STRIDE  = 44_u64 # 11 f32 (pos3 + normal3 + color3 + uv2)
+    FLOATS  =    11  # floats per vertex
 
     getter vertex_buf : LibWGPU::Buffer
     getter index_buf : LibWGPU::Buffer
@@ -40,7 +41,7 @@ module Flock
     # AABB-derived bounding sphere from interleaved vertices (pos = first 3 floats,
     # stride 9). Center = AABB midpoint, radius = half the diagonal (conservative).
     private def self.bounding_sphere(vertices : Array(Float32)) : {Vec3, Float32}
-      return {Vec3.new, 0.0f32} if vertices.size < 9
+      return {Vec3.new, 0.0f32} if vertices.size < FLOATS
       minx = miny = minz = Float32::MAX
       maxx = maxy = maxz = -Float32::MAX
       i = 0
@@ -48,7 +49,7 @@ module Flock
         x = vertices[i]; y = vertices[i + 1]; z = vertices[i + 2]
         minx = x if x < minx; miny = y if y < miny; minz = z if z < minz
         maxx = x if x > maxx; maxy = y if y > maxy; maxz = z if z > maxz
-        i += 9
+        i += FLOATS
       end
       cx = (minx + maxx) * 0.5f32; cy = (miny + maxy) * 0.5f32; cz = (minz + maxz) * 0.5f32
       dx = maxx - cx; dy = maxy - cy; dz = maxz - cz
@@ -68,13 +69,15 @@ module Flock
         { {0.0, -1.0, 0.0}, [{-0.5, -0.5, -0.5}, {0.5, -0.5, -0.5}, {0.5, -0.5, 0.5}, {-0.5, -0.5, 0.5}] },
       ]
 
+      # Per-face quad UVs (0,0)-(1,1) matching the 4 corners.
+      uvs = [{0.0f32, 1.0f32}, {1.0f32, 1.0f32}, {1.0f32, 0.0f32}, {0.0f32, 0.0f32}]
       verts = [] of Float32
       indices = [] of UInt32
       faces.each do |(normal, corners)|
-        base = (verts.size // 9).to_u32
-        corners.each do |c|
+        base = (verts.size // FLOATS).to_u32
+        corners.each_with_index do |c, k|
           verts.push(c[0].to_f32, c[1].to_f32, c[2].to_f32,
-            normal[0].to_f32, normal[1].to_f32, normal[2].to_f32, r, g, b)
+            normal[0].to_f32, normal[1].to_f32, normal[2].to_f32, r, g, b, uvs[k][0], uvs[k][1])
         end
         indices.push(base, base + 1, base + 2, base, base + 2, base + 3)
       end
@@ -99,7 +102,7 @@ module Flock
           ny = Math.cos(phi)
           nz = Math.sin(phi) * Math.sin(theta)
           verts.push((nx * radius).to_f32, (ny * radius).to_f32, (nz * radius).to_f32,
-            nx.to_f32, ny.to_f32, nz.to_f32, r, g, b)
+            nx.to_f32, ny.to_f32, nz.to_f32, r, g, b, u.to_f32, v.to_f32)
         end
       end
 
@@ -124,9 +127,10 @@ module Flock
       r, g, b = color.r, color.g, color.b
       positions = [] of Tuple(Float32, Float32, Float32)
       normals = [] of Tuple(Float32, Float32, Float32)
+      texcoords = [] of Tuple(Float32, Float32)
       verts = [] of Float32
       indices = [] of UInt32
-      cache = {} of Tuple(Int32, Int32) => UInt32 # (posIdx, normIdx) -> output index
+      cache = {} of Tuple(Int32, Int32, Int32) => UInt32 # (posIdx, uvIdx, normIdx) -> output index
 
       resolve = ->(token : String, count : Int32) do
         n = token.to_i
@@ -142,20 +146,24 @@ module Flock
           positions << {parts[1].to_f32, parts[2].to_f32, parts[3].to_f32}
         when "vn"
           normals << {parts[1].to_f32, parts[2].to_f32, parts[3].to_f32}
+        when "vt"
+          # OBJ texture v is bottom-up; flip to top-down (image space).
+          texcoords << {parts[1].to_f32, 1.0f32 - parts[2].to_f32}
         when "f"
           # Each face vertex: "p", "p/t", "p//n" or "p/t/n" (1-based / negative).
           refs = parts[1..].map do |tok|
             f = tok.split('/')
             pi = resolve.call(f[0], positions.size)
+            ti = (f.size >= 2 && !f[1].empty?) ? resolve.call(f[1], texcoords.size) : -1
             ni = (f.size >= 3 && !f[2].empty?) ? resolve.call(f[2], normals.size) : -1
-            {pi, ni}
+            {pi, ti, ni}
           end
           # Fan-triangulate.
           (1...(refs.size - 1)).each do |k|
             tri = {refs[0], refs[k], refs[k + 1]}
             # Flat normal if any corner lacks one.
             flat = nil.as(Tuple(Float32, Float32, Float32)?)
-            if tri[0][1] < 0 || tri[1][1] < 0 || tri[2][1] < 0
+            if tri[0][2] < 0 || tri[1][2] < 0 || tri[2][2] < 0
               p0 = positions[tri[0][0]]; p1 = positions[tri[1][0]]; p2 = positions[tri[2][0]]
               ux, uy, uz = p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]
               vx, vy, vz = p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]
@@ -164,14 +172,15 @@ module Flock
               len = 1.0f32 if len == 0
               flat = {(nx / len).to_f32, (ny / len).to_f32, (nz / len).to_f32}
             end
-            tri.each do |(pi, ni)|
-              key = {pi, ni}
+            tri.each do |(pi, ti, ni)|
+              key = {pi, ti, ni}
               idx = cache[key]?
               unless idx
                 pos = positions[pi]
                 nrm = ni >= 0 ? normals[ni] : flat.not_nil!
-                verts.push(pos[0], pos[1], pos[2], nrm[0], nrm[1], nrm[2], r, g, b)
-                idx = (verts.size // 9 - 1).to_u32
+                uv = ti >= 0 ? texcoords[ti] : {0.0f32, 0.0f32}
+                verts.push(pos[0], pos[1], pos[2], nrm[0], nrm[1], nrm[2], r, g, b, uv[0], uv[1])
+                idx = (verts.size // FLOATS - 1).to_u32
                 # Don't cache flat-normal verts (normal is face-specific, key ni=-1 collides).
                 cache[key] = idx if ni >= 0
               end
@@ -212,6 +221,7 @@ module Flock
           vcount = pos.size // 3
           nrm = (ni = attrs["NORMAL"]?) ? gltf_read_floats(accessors, views, buffers, ni.as_i)[0] : nil
           colf, cn = (ci = attrs["COLOR_0"]?) ? gltf_read_floats(accessors, views, buffers, ci.as_i) : {nil, 0}
+          uvf = (ti = attrs["TEXCOORD_0"]?) ? gltf_read_floats(accessors, views, buffers, ti.as_i)[0] : nil
           mr, mg, mb = gltf_material_rgb(doc, prim, color)
 
           prim_indices =
@@ -221,7 +231,7 @@ module Flock
               Array(UInt32).new(vcount) { |k| k.to_u32 }
             end
 
-          base = (verts.size // 9).to_u32
+          base = (verts.size // FLOATS).to_u32
           vcount.times do |v|
             # Bake the node's world transform into positions (point) and normals (dir).
             p = world.transform_point(Vec3.new(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]))
@@ -236,7 +246,9 @@ module Flock
             else
               r, g, b = mr, mg, mb
             end
-            verts.push(p.x, p.y, p.z, nx, ny, nz, r, g, b)
+            u = uvf ? uvf[v * 2] : 0.0f32
+            vv = uvf ? uvf[v * 2 + 1] : 0.0f32
+            verts.push(p.x, p.y, p.z, nx, ny, nz, r, g, b, u, vv)
           end
           prim_indices.each { |i| indices << base + i }
 
@@ -252,6 +264,47 @@ module Flock
 
       raise "glTF #{path}: no geometry" if indices.empty?
       build(gpu, verts, indices)
+    end
+
+    # Like `load_gltf`, but also loads the first material's base-color texture (from an
+    # external image file, a base64 data-URI, or an embedded bufferView). Returns
+    # {mesh, texture?}; assign the texture to `MeshRenderer#texture`.
+    def self.load_gltf_textured(gpu : GpuContext, path : String, color : Color = Color::WHITE) : {Mesh, Texture?}
+      mesh = load_gltf(gpu, path, color)
+      json_text, glb_bin = read_gltf_container(path)
+      doc = JSON.parse(json_text)
+      buffers = gltf_buffers(doc, File.dirname(path), glb_bin)
+      {mesh, gltf_base_color_texture(gpu, doc, buffers, File.dirname(path))}
+    end
+
+    # Finds the first material's base-color texture and decodes it (or nil if none).
+    private def self.gltf_base_color_texture(gpu : GpuContext, doc : JSON::Any,
+                                             buffers : Array(Bytes), dir : String) : Texture?
+      mats = doc["materials"]?.try(&.as_a) || return nil
+      mats.each do |m|
+        bct = m["pbrMetallicRoughness"]?.try(&.["baseColorTexture"]?)
+        next unless bct
+        tex = doc["textures"].as_a[bct["index"].as_i]
+        img = doc["images"].as_a[tex["source"].as_i]
+        return gltf_load_image(gpu, doc, img, buffers, dir)
+      end
+      nil
+    end
+
+    private def self.gltf_load_image(gpu : GpuContext, doc : JSON::Any, img : JSON::Any,
+                                     buffers : Array(Bytes), dir : String) : Texture
+      if uri = img["uri"]?.try(&.as_s)
+        if uri.starts_with?("data:")
+          Texture.from_encoded(gpu, Base64.decode(uri.split(",", 2)[1]))
+        else
+          Texture.load(gpu, File.join(dir, uri), SamplerFilter::Linear, SamplerWrap::Repeat)
+        end
+      else
+        bv = doc["bufferViews"].as_a[img["bufferView"].as_i]
+        off = bv["byteOffset"]?.try(&.as_i) || 0
+        len = bv["byteLength"].as_i
+        Texture.from_encoded(gpu, buffers[bv["buffer"].as_i][off, len])
+      end
     end
 
     # Flattens the scene graph to {mesh index, world matrix} pairs. Falls back to every
@@ -309,6 +362,9 @@ module Flock
           a = bcf.as_a
           return {a[0].as_f.to_f32, a[1].as_f.to_f32, a[2].as_f.to_f32}
         end
+        # A material with no baseColorFactor defaults to white (glTF spec); this also
+        # keeps a base-color texture unmodulated (white * texture = texture).
+        return {1.0f32, 1.0f32, 1.0f32}
       end
       {fallback.r, fallback.g, fallback.b}
     end
@@ -418,7 +474,7 @@ module Flock
 
     # Writes a flat per-triangle normal into the three vertices' normal slots.
     private def self.gltf_flat_normal(verts : Array(Float32), base : UInt32, ia : UInt32, ib : UInt32, ic : UInt32) : Nil
-      a = ((base + ia) * 9).to_i; b = ((base + ib) * 9).to_i; c = ((base + ic) * 9).to_i
+      a = ((base + ia) * FLOATS).to_i; b = ((base + ib) * FLOATS).to_i; c = ((base + ic) * FLOATS).to_i
       ux = verts[b] - verts[a]; uy = verts[b + 1] - verts[a + 1]; uz = verts[b + 2] - verts[a + 2]
       vx = verts[c] - verts[a]; vy = verts[c + 1] - verts[a + 1]; vz = verts[c + 2] - verts[a + 2]
       nx = uy * vz - uz * vy; ny = uz * vx - ux * vz; nz = ux * vy - uy * vx

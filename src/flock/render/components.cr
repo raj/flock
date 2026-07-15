@@ -48,8 +48,9 @@ module Flock
     include Component
     property mesh : Mesh
     property material : Material3D?
+    property texture : Texture?
 
-    def initialize(@mesh : Mesh, @material : Material3D? = nil)
+    def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil)
     end
   end
 

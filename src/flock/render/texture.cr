@@ -108,5 +108,19 @@ module Flock
       LibSDL.destroy_surface(raw)
       tex
     end
+
+    # Decodes an image held in memory (PNG/JPG… bytes, e.g. an embedded glTF texture)
+    # via SDL_image, converted to RGBA8.
+    def self.from_encoded(gpu : GpuContext, data : Bytes,
+                          filter : SamplerFilter = SamplerFilter::Linear,
+                          wrap : SamplerWrap = SamplerWrap::Repeat) : Texture
+      io = LibSDL.io_from_const_mem(data.to_unsafe.as(Void*), data.size)
+      raise "SDL_IOFromConstMem: #{String.new(LibSDL.get_error)}" if io.null?
+      raw = LibSDL.img_load_io(io, true) # closeio: frees the stream
+      raise "IMG_Load_IO: #{String.new(LibSDL.get_error)}" if raw.null?
+      tex = from_surface(gpu, raw, filter, wrap)
+      LibSDL.destroy_surface(raw)
+      tex
+    end
   end
 end

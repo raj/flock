@@ -92,8 +92,14 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       POSITION/NORMAL/indices via accessors/bufferViews, `examples/gltf_test.cr`);
       **frustum culling** (per-mesh bounding sphere via `Mesh.build`; `Flock::Frustum` extracts
       6 planes from the view-projection and drops off-screen instances; `Renderer3D#last_drawn`/
-      `last_culled`, toggle via `#cull`; `examples/culling_test.cr`, `spec/math_spec`). Remaining:
-      per-instance color/material params; glTF node transforms/materials/textures.
+      `last_culled`, toggle via `#cull`; `examples/culling_test.cr`, `spec/math_spec`).
+      **glTF enrichment**: node transforms baked (TRS/matrix hierarchy), material
+      `baseColorFactor` per primitive (`examples/gltf_nodes_test.cr`), and **base-color
+      textures** — vertices carry UVs (STRIDE 44), Renderer3D has a group1 texture/sampler +
+      white default, `MeshRenderer#texture`, `Mesh.load_gltf_textured` extracts the image
+      (external / data-URI / bufferView) via `Texture.from_encoded` (sdl3-cr `IMG_Load_IO`).
+      Verified (`examples/texture3d_test.cr`, `gltf_texture_test.cr`). Remaining:
+      per-instance color/material params; glTF metallic-roughness/normal maps; animation.
 
 ## sdl3-cr
 
