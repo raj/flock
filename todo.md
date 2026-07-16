@@ -124,7 +124,12 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       skinned pipeline (2nd vertex buffer for joints/weights, joint matrices in group2) skin
       pos/normal in the vertex shader; only joint matrices upload per frame. Additive — the
       rigid path is untouched. Matches CPU skinning pixel-for-pixel (`examples/skinning_gpu_test.cr`).
-      Remaining (nice-to-have): full IBL (prefiltered environment + BRDF LUT).
+      **Prefiltered IBL**: `Renderer3D#build_ibl` CPU-precomputes an irradiance cubemap
+      (diffuse), a roughness-mip prefiltered specular cubemap and a BRDF LUT from a
+      sky/horizon/ground environment; the PBR shader samples them (split-sum) via group2 when
+      an `IblEnvironment` resource is present (flagged in globals; hemisphere ambient otherwise
+      → no regression). Verified (`examples/ibl_test.cr`: a metallic sphere reflects the env).
+      **3D feature set complete.**
 
 ## sdl3-cr
 

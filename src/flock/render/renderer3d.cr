@@ -75,6 +75,11 @@ module Flock
     @group(1) @binding(1) var samp : sampler;
     @group(1) @binding(2) var mr_tex : texture_2d<f32>;   // metallic-roughness (G=rough, B=metal)
     @group(1) @binding(3) var nrm_tex : texture_2d<f32>;  // tangent-space normal map
+    // group2: image-based lighting (used when globals.a.y > 0.5).
+    @group(2) @binding(0) var irr_cube : texture_cube<f32>;    // diffuse irradiance
+    @group(2) @binding(1) var pref_cube : texture_cube<f32>;   // prefiltered specular (mips)
+    @group(2) @binding(2) var brdf_lut : texture_2d<f32>;      // split-sum BRDF LUT
+    @group(2) @binding(3) var ibl_samp : sampler;
 
     struct VSOut {
       @builtin(position) clip : vec4<f32>,
@@ -148,9 +153,24 @@ module Flock
 
       let diffuse = base * (1.0 - metal);
       let lit = (diffuse + spec) * NdotL;
-      // Hemisphere ambient probe: sky when facing up, ground when facing down.
-      let up = N.y * 0.5 + 0.5;
-      let ambient = base * mix(globals.d.rgb, globals.c.rgb, up);
+
+      var ambient : vec3<f32>;
+      if (globals.a.y > 0.5) {
+        // Prefiltered image-based lighting (split-sum).
+        let fr = F0 + (max(vec3<f32>(1.0 - rough), F0) - F0) * pow(1.0 - NdotV, 5.0);
+        let kd = (vec3<f32>(1.0) - fr) * (1.0 - metal);
+        let irr = textureSampleLevel(irr_cube, ibl_samp, N, 0.0).rgb;
+        let diff_ibl = irr * base * kd;
+        let R = reflect(-V, N);
+        let maxlod = f32(textureNumLevels(pref_cube) - 1u);
+        let pref = textureSampleLevel(pref_cube, ibl_samp, R, rough * maxlod).rgb;
+        let ab = textureSampleLevel(brdf_lut, ibl_samp, vec2<f32>(NdotV, rough), 0.0).rg;
+        let spec_ibl = pref * (F0 * ab.x + ab.y);
+        ambient = diff_ibl + spec_ibl;
+      } else {
+        // Hemisphere ambient probe: sky when facing up, ground when facing down.
+        ambient = base * mix(globals.d.rgb, globals.c.rgb, N.y * 0.5 + 0.5);
+      }
       return vec4<f32>(ambient + lit, btex.a * in.alpha);
     }
     SHADER
@@ -219,6 +239,9 @@ module Flock
     @joint_layout : LibWGPU::BindGroupLayout
     @skinned_shader : LibWGPU::ShaderModule
     @skinned_pipeline : LibWGPU::RenderPipeline
+    # IBL: group2 layout (2 cubemaps + LUT + sampler) + a default (unused) environment.
+    @ibl_layout : LibWGPU::BindGroupLayout
+    @default_ibl : IblEnvironment
     @white : Texture
     @flat_normal : Texture # 1x1 (0,0,1) tangent-space normal (no perturbation)
     @samplers : Hash(Tuple(SamplerFilter, SamplerWrap), LibWGPU::Sampler) = {} of Tuple(SamplerFilter, SamplerWrap) => LibWGPU::Sampler
@@ -234,16 +257,18 @@ module Flock
     @depth_view : LibWGPU::TextureView
 
     def initialize(@gpu : GpuContext)
-      # Explicit group0 layout (camera uniform + model storage + globals uniform) +
-      # group1 (base-color texture + sampler) so custom materials share both.
+      # Explicit group0 (camera/models/globals/normals/params), group1 (textures) and
+      # group2 (IBL) layouts so custom materials share the rigid pipeline layout.
       @group0_layout = build_group0_layout
       @group1_layout = build_group1_layout
+      @ibl_layout = build_ibl_layout
       @pipeline_layout = build_pipeline_layout
       @white = Texture.white(@gpu)
       @flat_normal = Texture.from_pixels(@gpu, 1, 1, Bytes[128_u8, 128_u8, 255_u8, 255_u8])
 
       @shader = build_shader(WGSL)
       @pipeline = build_pipeline(@shader)
+      @default_ibl = build_ibl_default
 
       # Skinned pipeline (group0 + group1 + joint matrices in group2).
       @joint_layout = build_joint_layout
@@ -291,6 +316,8 @@ module Flock
       LibWGPU.buffer_release(@normal_buf)
       LibWGPU.buffer_release(@model_buf)
       LibWGPU.buffer_release(@uniform_buf)
+      @default_ibl.release
+      LibWGPU.bind_group_layout_release(@ibl_layout)
       LibWGPU.render_pipeline_release(@skinned_pipeline)
       LibWGPU.shader_module_release(@skinned_shader)
       LibWGPU.bind_group_layout_release(@joint_layout)
@@ -393,14 +420,151 @@ module Flock
     end
 
     private def build_pipeline_layout : LibWGPU::PipelineLayout
-      layouts = uninitialized LibWGPU::BindGroupLayout[2]
+      layouts = uninitialized LibWGPU::BindGroupLayout[3]
       layouts[0] = @group0_layout
       layouts[1] = @group1_layout
+      layouts[2] = @ibl_layout
       d = LibWGPU::PipelineLayoutDescriptor.new
       d.label = WGPU.empty_string_view
-      d.bind_group_layout_count = 2_u64
+      d.bind_group_layout_count = 3_u64
       d.bind_group_layouts = layouts.to_unsafe
       LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(d))
+    end
+
+    # group2 (rigid pipeline): irradiance cube + prefiltered cube + BRDF LUT + sampler.
+    private def build_ibl_layout : LibWGPU::BindGroupLayout
+      cube = ->(binding : UInt32) do
+        t = LibWGPU::TextureBindingLayout.new
+        t.sample_type = LibWGPU::TextureSampleType::Float
+        t.view_dimension = LibWGPU::TextureViewDimension::Cube
+        e = LibWGPU::BindGroupLayoutEntry.new
+        e.binding = binding; e.visibility = LibWGPU::ShaderStage::Fragment; e.texture = t
+        e
+      end
+      lut = LibWGPU::TextureBindingLayout.new
+      lut.sample_type = LibWGPU::TextureSampleType::Float
+      lut.view_dimension = LibWGPU::TextureViewDimension::N2D
+      e2 = LibWGPU::BindGroupLayoutEntry.new
+      e2.binding = 2_u32; e2.visibility = LibWGPU::ShaderStage::Fragment; e2.texture = lut
+      smp = LibWGPU::SamplerBindingLayout.new
+      smp.type_ = LibWGPU::SamplerBindingType::Filtering
+      e3 = LibWGPU::BindGroupLayoutEntry.new
+      e3.binding = 3_u32; e3.visibility = LibWGPU::ShaderStage::Fragment; e3.sampler = smp
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[4]
+      entries[0] = cube.call(0_u32); entries[1] = cube.call(1_u32); entries[2] = e2; entries[3] = e3
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 4_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
+    # Builds an IBL environment (sky/horizon/ground gradient): CPU-precomputes the
+    # irradiance + prefiltered-specular cubemaps and the BRDF LUT, uploads them, and
+    # assembles the group2 bind group. Insert the result as an `IblEnvironment` resource.
+    def build_ibl(sky : Color, horizon : Color, ground : Color) : IblEnvironment
+      env = IblEnvironment.gen_env(sky, horizon, ground)
+      irr = make_cube(IblEnvironment::IRR_SIZE, [IblEnvironment.gen_irradiance(env)])
+      pref_mips = Array(Array(Bytes)).new(IblEnvironment::PREF_MIPS) do |m|
+        size = IblEnvironment::PREF_SIZE >> m
+        rough = m.to_f64 / (IblEnvironment::PREF_MIPS - 1)
+        IblEnvironment.gen_prefilter(env, size, rough)
+      end
+      pref = make_cube(IblEnvironment::PREF_SIZE, pref_mips)
+      brdf = make_2d(IblEnvironment::LUT_SIZE, IblEnvironment.gen_brdf_lut)
+      sampler = build_sampler(SamplerFilter::Linear, SamplerWrap::Clamp)
+      group = build_ibl_group(irr[1], pref[1], brdf[1], sampler)
+      IblEnvironment.new(irr[0], irr[1], pref[0], pref[1], brdf[0], brdf[1], sampler, group)
+    end
+
+    private def build_ibl_default : IblEnvironment
+      black = Bytes.new(4, 0_u8)
+      faces = Array(Bytes).new(6) { black.dup }
+      irr = make_cube(1, [faces])
+      pref = make_cube(1, [Array(Bytes).new(6) { black.dup }])
+      brdf = make_2d(1, black.dup)
+      sampler = build_sampler(SamplerFilter::Linear, SamplerWrap::Clamp)
+      group = build_ibl_group(irr[1], pref[1], brdf[1], sampler)
+      IblEnvironment.new(irr[0], irr[1], pref[0], pref[1], brdf[0], brdf[1], sampler, group)
+    end
+
+    # Creates a cubemap (6 layers) from mip levels of face data (mips[m][face] = RGBA8).
+    private def make_cube(base : Int32, mips : Array(Array(Bytes))) : {LibWGPU::Texture, LibWGPU::TextureView}
+      desc = LibWGPU::TextureDescriptor.new
+      desc.label = WGPU.empty_string_view
+      desc.usage = LibWGPU::TextureUsage::TextureBinding | LibWGPU::TextureUsage::CopyDst
+      desc.dimension = LibWGPU::TextureDimension::N2D
+      desc.size = LibWGPU::Extent3D.new(width: base.to_u32, height: base.to_u32, depth_or_array_layers: 6_u32)
+      desc.format = LibWGPU::TextureFormat::RGBA8Unorm
+      desc.mip_level_count = mips.size.to_u32
+      desc.sample_count = 1_u32
+      tex = LibWGPU.device_create_texture(@gpu.device, pointerof(desc))
+
+      mips.each_with_index do |faces, m|
+        size = (base >> m).to_u32
+        faces.each_with_index do |data, f|
+          dest = LibWGPU::TexelCopyTextureInfo.new
+          dest.texture = tex
+          dest.mip_level = m.to_u32
+          dest.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: f.to_u32)
+          dest.aspect = LibWGPU::TextureAspect::All
+          layout = LibWGPU::TexelCopyBufferLayout.new
+          layout.offset = 0_u64
+          layout.bytes_per_row = size * 4_u32
+          layout.rows_per_image = size
+          ext = LibWGPU::Extent3D.new(width: size, height: size, depth_or_array_layers: 1_u32)
+          LibWGPU.queue_write_texture(@gpu.queue, pointerof(dest),
+            data.to_unsafe.as(Void*), data.size.to_u64, pointerof(layout), pointerof(ext))
+        end
+      end
+
+      vd = LibWGPU::TextureViewDescriptor.new
+      vd.label = WGPU.empty_string_view
+      vd.format = LibWGPU::TextureFormat::RGBA8Unorm
+      vd.dimension = LibWGPU::TextureViewDimension::Cube
+      vd.base_mip_level = 0_u32
+      vd.mip_level_count = mips.size.to_u32
+      vd.base_array_layer = 0_u32
+      vd.array_layer_count = 6_u32
+      vd.aspect = LibWGPU::TextureAspect::All
+      {tex, LibWGPU.texture_create_view(tex, pointerof(vd))}
+    end
+
+    private def make_2d(size : Int32, data : Bytes) : {LibWGPU::Texture, LibWGPU::TextureView}
+      desc = LibWGPU::TextureDescriptor.new
+      desc.label = WGPU.empty_string_view
+      desc.usage = LibWGPU::TextureUsage::TextureBinding | LibWGPU::TextureUsage::CopyDst
+      desc.dimension = LibWGPU::TextureDimension::N2D
+      desc.size = LibWGPU::Extent3D.new(width: size.to_u32, height: size.to_u32, depth_or_array_layers: 1_u32)
+      desc.format = LibWGPU::TextureFormat::RGBA8Unorm
+      desc.mip_level_count = 1_u32
+      desc.sample_count = 1_u32
+      tex = LibWGPU.device_create_texture(@gpu.device, pointerof(desc))
+      dest = LibWGPU::TexelCopyTextureInfo.new
+      dest.texture = tex; dest.mip_level = 0_u32
+      dest.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: 0_u32); dest.aspect = LibWGPU::TextureAspect::All
+      layout = LibWGPU::TexelCopyBufferLayout.new
+      layout.offset = 0_u64; layout.bytes_per_row = size.to_u32 * 4_u32; layout.rows_per_image = size.to_u32
+      ext = LibWGPU::Extent3D.new(width: size.to_u32, height: size.to_u32, depth_or_array_layers: 1_u32)
+      LibWGPU.queue_write_texture(@gpu.queue, pointerof(dest), data.to_unsafe.as(Void*), data.size.to_u64, pointerof(layout), pointerof(ext))
+      {tex, LibWGPU.texture_create_view(tex, Pointer(LibWGPU::TextureViewDescriptor).null)}
+    end
+
+    private def build_ibl_group(irr : LibWGPU::TextureView, pref : LibWGPU::TextureView,
+                                brdf : LibWGPU::TextureView, sampler : LibWGPU::Sampler) : LibWGPU::BindGroup
+      e0 = LibWGPU::BindGroupEntry.new; e0.binding = 0_u32; e0.texture_view = irr
+      e1 = LibWGPU::BindGroupEntry.new; e1.binding = 1_u32; e1.texture_view = pref
+      e2 = LibWGPU::BindGroupEntry.new; e2.binding = 2_u32; e2.texture_view = brdf
+      e3 = LibWGPU::BindGroupEntry.new; e3.binding = 3_u32; e3.sampler = sampler
+      entries = uninitialized LibWGPU::BindGroupEntry[4]
+      entries[0] = e0; entries[1] = e1; entries[2] = e2; entries[3] = e3
+      d = LibWGPU::BindGroupDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.layout = @ibl_layout
+      d.entry_count = 4_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
     end
 
     private def sampler_for(filter : SamplerFilter, wrap : SamplerWrap) : LibWGPU::Sampler
@@ -762,11 +926,14 @@ module Flock
       vp = cam.view_projection(@gpu.aspect)
       LibWGPU.queue_write_buffer(@gpu.queue, @uniform_buf, 0_u64, vp.m.to_unsafe.as(Void*), 64_u64)
 
-      # Globals: time (a.x), camera position (b.xyz), ambient sky (c.rgb) / ground (d.rgb).
+      # Globals: time (a.x), IBL flag (a.y), camera position (b.xyz), ambient sky/ground.
       t = world.resource?(Time).try(&.elapsed.to_f32) || 0.0f32
       amb = world.resource?(AmbientLight) || AmbientLight.new
+      ibl = world.resource?(IblEnvironment)
+      ibl_group = ibl ? ibl.group : @default_ibl.group
       globals = StaticArray(Float32, 16).new(0.0f32)
       globals[0] = t
+      globals[1] = ibl ? 1.0f32 : 0.0f32
       globals[4] = cam.position.x; globals[5] = cam.position.y; globals[6] = cam.position.z
       globals[8] = amb.sky.r; globals[9] = amb.sky.g; globals[10] = amb.sky.b
       globals[12] = amb.ground.r; globals[13] = amb.ground.g; globals[14] = amb.ground.b
@@ -862,6 +1029,8 @@ module Flock
       # group0 (camera/models/globals) is shared by every material's pipeline
       # (same explicit layout), so it stays bound across pipeline switches.
       LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
+      # group2 = IBL (rigid pipeline); default (unused) environment when none is set.
+      LibWGPU.render_pass_encoder_set_bind_group(pass, 2_u32, ibl_group, 0_u64, Pointer(UInt32).null)
       current = Pointer(Void).null.as(LibWGPU::RenderPipeline)
 
       base = 0_u32
