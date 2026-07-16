@@ -214,56 +214,126 @@ module Flock
       meshes = doc["meshes"]?.try(&.as_a) || [] of JSON::Any
 
       gltf_instances(doc).each do |(mesh_idx, world)|
-        nmat = world.normal_matrix
         meshes[mesh_idx]["primitives"].as_a.each do |prim|
-          attrs = prim["attributes"]
-          pos, _ = gltf_read_floats(accessors, views, buffers, attrs["POSITION"].as_i)
-          vcount = pos.size // 3
-          nrm = (ni = attrs["NORMAL"]?) ? gltf_read_floats(accessors, views, buffers, ni.as_i)[0] : nil
-          colf, cn = (ci = attrs["COLOR_0"]?) ? gltf_read_floats(accessors, views, buffers, ci.as_i) : {nil, 0}
-          uvf = (ti = attrs["TEXCOORD_0"]?) ? gltf_read_floats(accessors, views, buffers, ti.as_i)[0] : nil
-          mr, mg, mb = gltf_material_rgb(doc, prim, color)
-
-          prim_indices =
-            if idx = prim["indices"]?
-              gltf_read_indices(accessors, views, buffers, idx.as_i)
-            else
-              Array(UInt32).new(vcount) { |k| k.to_u32 }
-            end
-
-          base = (verts.size // FLOATS).to_u32
-          vcount.times do |v|
-            # Bake the node's world transform into positions (point) and normals (dir).
-            p = world.transform_point(Vec3.new(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]))
-            if nrm
-              n = nmat.transform_point(Vec3.new(nrm[v * 3], nrm[v * 3 + 1], nrm[v * 3 + 2])).normalize
-              nx, ny, nz = n.x, n.y, n.z
-            else
-              nx, ny, nz = 0.0f32, 0.0f32, 0.0f32 # filled below
-            end
-            if colf
-              r = colf[v * cn]; g = colf[v * cn + 1]; b = colf[v * cn + 2]
-            else
-              r, g, b = mr, mg, mb
-            end
-            u = uvf ? uvf[v * 2] : 0.0f32
-            vv = uvf ? uvf[v * 2 + 1] : 0.0f32
-            verts.push(p.x, p.y, p.z, nx, ny, nz, r, g, b, u, vv)
-          end
-          prim_indices.each { |i| indices << base + i }
-
-          unless nrm
-            t = 0
-            while t + 2 < prim_indices.size
-              gltf_flat_normal(verts, base, prim_indices[t], prim_indices[t + 1], prim_indices[t + 2])
-              t += 3
-            end
-          end
+          gltf_append_primitive(prim, world, doc, accessors, views, buffers, color, verts, indices)
         end
       end
 
       raise "glTF #{path}: no geometry" if indices.empty?
       build(gpu, verts, indices)
+    end
+
+    # Appends one primitive's vertices/indices (baked by `world`) into the buffers.
+    private def self.gltf_append_primitive(prim : JSON::Any, world : Mat4, doc : JSON::Any,
+                                           accessors, views, buffers : Array(Bytes), color : Color,
+                                           verts : Array(Float32), indices : Array(UInt32)) : Nil
+      nmat = world.normal_matrix
+      attrs = prim["attributes"]
+      pos, _ = gltf_read_floats(accessors, views, buffers, attrs["POSITION"].as_i)
+      vcount = pos.size // 3
+      nrm = (ni = attrs["NORMAL"]?) ? gltf_read_floats(accessors, views, buffers, ni.as_i)[0] : nil
+      colf, cn = (ci = attrs["COLOR_0"]?) ? gltf_read_floats(accessors, views, buffers, ci.as_i) : {nil, 0}
+      uvf = (ti = attrs["TEXCOORD_0"]?) ? gltf_read_floats(accessors, views, buffers, ti.as_i)[0] : nil
+      mr, mg, mb = gltf_material_rgb(doc, prim, color)
+
+      prim_indices =
+        if idx = prim["indices"]?
+          gltf_read_indices(accessors, views, buffers, idx.as_i)
+        else
+          Array(UInt32).new(vcount) { |k| k.to_u32 }
+        end
+
+      base = (verts.size // FLOATS).to_u32
+      vcount.times do |v|
+        p = world.transform_point(Vec3.new(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]))
+        if nrm
+          n = nmat.transform_point(Vec3.new(nrm[v * 3], nrm[v * 3 + 1], nrm[v * 3 + 2])).normalize
+          nx, ny, nz = n.x, n.y, n.z
+        else
+          nx, ny, nz = 0.0f32, 0.0f32, 0.0f32
+        end
+        if colf
+          r = colf[v * cn]; g = colf[v * cn + 1]; b = colf[v * cn + 2]
+        else
+          r, g, b = mr, mg, mb
+        end
+        u = uvf ? uvf[v * 2] : 0.0f32
+        vv = uvf ? uvf[v * 2 + 1] : 0.0f32
+        verts.push(p.x, p.y, p.z, nx, ny, nz, r, g, b, u, vv)
+      end
+      prim_indices.each { |i| indices << base + i }
+
+      unless nrm
+        t = 0
+        while t + 2 < prim_indices.size
+          gltf_flat_normal(verts, base, prim_indices[t], prim_indices[t + 1], prim_indices[t + 2])
+          t += 3
+        end
+      end
+    end
+
+    # Loads a glTF as an animatable scene: builds a Mesh per mesh-bearing node (geometry
+    # in node-LOCAL space, i.e. transforms are NOT baked), keeps the node hierarchy, and
+    # parses node (TRS) animations. Drive it with `Flock::AnimatedModel`.
+    def self.load_gltf_scene(gpu : GpuContext, path : String, color : Color = Color::WHITE) : GltfScene
+      json_text, glb_bin = read_gltf_container(path)
+      doc = JSON.parse(json_text)
+      buffers = gltf_buffers(doc, File.dirname(path), glb_bin)
+      accessors = doc["accessors"].as_a
+      views = doc["bufferViews"].as_a
+      gltf_meshes = doc["meshes"]?.try(&.as_a) || [] of JSON::Any
+      json_nodes = doc["nodes"]?.try(&.as_a) || [] of JSON::Any
+
+      # One Flock Mesh per glTF mesh index (local space), built lazily.
+      built = {} of Int32 => Mesh
+      local_mesh = ->(mi : Int32) do
+        built[mi] ||= begin
+          verts = [] of Float32
+          indices = [] of UInt32
+          gltf_meshes[mi]["primitives"].as_a.each do |prim|
+            gltf_append_primitive(prim, Mat4.identity, doc, accessors, views, buffers, color, verts, indices)
+          end
+          build(gpu, verts, indices)
+        end
+      end
+
+      nodes = json_nodes.map do |n|
+        t = (tr = n["translation"]?) ? Vec3.new(tr[0].as_f, tr[1].as_f, tr[2].as_f) : Vec3.new
+        s = (sc = n["scale"]?) ? Vec3.new(sc[0].as_f, sc[1].as_f, sc[2].as_f) : Vec3.new(1, 1, 1)
+        rot =
+          if r = n["rotation"]?
+            StaticArray[r[0].as_f.to_f32, r[1].as_f.to_f32, r[2].as_f.to_f32, r[3].as_f.to_f32]
+          else
+            StaticArray[0.0f32, 0.0f32, 0.0f32, 1.0f32]
+          end
+        mesh = (mi = n["mesh"]?) ? local_mesh.call(mi.as_i) : nil
+        children = n["children"]?.try(&.as_a.map(&.as_i)) || [] of Int32
+        GltfNode.new(t, rot, s, mesh, children)
+      end
+
+      roots =
+        if (scene = doc["scene"]?) && (scenes = doc["scenes"]?)
+          scenes.as_a[scene.as_i]["nodes"].as_a.map(&.as_i)
+        else
+          (0...nodes.size).to_a
+        end
+
+      animations = (doc["animations"]?.try(&.as_a) || [] of JSON::Any).map do |anim|
+        samplers = anim["samplers"].as_a
+        channels = anim["channels"].as_a.compact_map do |ch|
+          target = ch["target"]
+          node = target["node"]?.try(&.as_i)
+          next nil unless node
+          smp = samplers[ch["sampler"].as_i]
+          times = gltf_read_floats(accessors, views, buffers, smp["input"].as_i)[0]
+          values = gltf_read_floats(accessors, views, buffers, smp["output"].as_i)[0]
+          step = (smp["interpolation"]?.try(&.as_s) == "STEP")
+          GltfChannel.new(node, target["path"].as_s, times, values, step)
+        end
+        GltfAnimation.new(anim["name"]?.try(&.as_s) || "", channels)
+      end
+
+      GltfScene.new(nodes, roots, animations)
     end
 
     # Like `load_gltf`, but also loads the first material's base-color texture (from an

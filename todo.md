@@ -107,7 +107,12 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       and a tangent-space normal map (derivative TBN — no stored tangents); `MeshRenderer`
       carries the maps + `metallic`/`roughness` factors (per-instance). `Mesh.load_gltf_pbr`
       extracts all three maps + factors from a glTF material. Verified (`examples/pbr_test.cr`,
-      `gltf_pbr_test.cr`). Remaining: glTF animation (skins/keyframes); IBL/ambient probes.
+      `gltf_pbr_test.cr`). **glTF node animation**: `Mesh.load_gltf_scene` keeps the node
+      hierarchy (geometry unbaked, one Mesh per mesh-node) and parses TRS keyframe animations
+      (LINEAR/STEP, quaternion nlerp); `Flock::AnimatedModel` spawns an entity per node and
+      `update`/`apply` writes each node's world matrix into a `Transform3D#matrix_override`.
+      Verified (`examples/anim_test.cr`). Remaining: skinning (skeletal/JOINTS+WEIGHTS);
+      CUBICSPLINE interpolation; IBL/ambient probes.
 
 ## sdl3-cr
 

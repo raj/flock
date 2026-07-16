@@ -22,19 +22,25 @@ module Flock
     end
   end
 
-  # 3D transform. `rotation` is Euler angles (radians, applied Z*Y*X).
+  # 3D transform. `rotation` is Euler angles (radians, applied Z*Y*X). When
+  # `matrix_override` is set (e.g. by an animation player computing a world matrix
+  # from a node hierarchy / quaternions), `matrix` returns it verbatim.
   struct Transform3D
     include Component
     property position : Vec3
     property rotation : Vec3
     property scale : Vec3
+    property matrix_override : Mat4?
 
     def initialize(@position : Vec3 = Vec3.new, @rotation : Vec3 = Vec3.new,
-                   @scale : Vec3 = Vec3.new(1, 1, 1))
+                   @scale : Vec3 = Vec3.new(1, 1, 1), @matrix_override : Mat4? = nil)
     end
 
-    # Model matrix: translate * rotate(Z*Y*X) * scale.
+    # Model matrix: the override if present, else translate * rotate(Z*Y*X) * scale.
     def matrix : Mat4
+      if mo = @matrix_override
+        return mo
+      end
       Mat4.translation(@position) *
         Mat4.rotation_z(@rotation.z) * Mat4.rotation_y(@rotation.y) * Mat4.rotation_x(@rotation.x) *
         Mat4.scale(@scale)
