@@ -1,4 +1,16 @@
 module Flock
+  # Hemisphere ambient light ("ambient probe"): surfaces facing up receive `sky`,
+  # facing down receive `ground`, blended by the world normal. Insert it as a resource
+  # to tint the 3D ambient term; absent, Renderer3D uses a neutral gray (~the old flat
+  # ambient). A cheap stand-in for image-based lighting.
+  class AmbientLight < Resource
+    property sky : Color
+    property ground : Color
+
+    def initialize(@sky : Color = Color.new(0.2, 0.2, 0.2), @ground : Color = Color.new(0.2, 0.2, 0.2))
+    end
+  end
+
   # A custom 3D material: a render pipeline built from user WGSL by
   # `Renderer3D#build_material`, sharing the renderer's pipeline layout (group0 =
   # camera + models + globals) and vertex layout (pos/normal/color). Assign to
@@ -27,13 +39,13 @@ module Flock
   # Not to be combined with the 2D RenderPlugin (each owns the whole frame).
   class Renderer3D < Resource
     MODEL_BYTES   = 64 # mat4 (16 f32)
-    GLOBALS_BYTES = 32 # time + padding + camera position (uniform 16-byte alignment)
+    GLOBALS_BYTES = 64 # time / camera position / ambient sky / ambient ground (4 vec4)
     PARAM_BYTES   = 32 # per-instance: tint vec4 + {metallic, roughness, _, _} vec4
 
     WGSL = <<-SHADER
     struct Camera { view_proj : mat4x4<f32> };
-    // Two vec4 (std uniform layout): a.x = time, b.xyz = camera position.
-    struct Globals { a : vec4<f32>, b : vec4<f32> };
+    // std uniform layout: a.x=time, b.xyz=camera pos, c.rgb=ambient sky, d.rgb=ambient ground.
+    struct Globals { a : vec4<f32>, b : vec4<f32>, c : vec4<f32>, d : vec4<f32> };
     struct Inst { tint : vec4<f32>, mr : vec4<f32> }; // mr.x=metallic, mr.y=roughness
     @group(0) @binding(0) var<uniform> cam : Camera;
     @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
@@ -117,7 +129,9 @@ module Flock
 
       let diffuse = base * (1.0 - metal);
       let lit = (diffuse + spec) * NdotL;
-      let ambient = base * 0.2;
+      // Hemisphere ambient probe: sky when facing up, ground when facing down.
+      let up = N.y * 0.5 + 0.5;
+      let ambient = base * mix(globals.d.rgb, globals.c.rgb, up);
       return vec4<f32>(ambient + lit, btex.a * in.alpha);
     }
     SHADER
@@ -535,11 +549,14 @@ module Flock
       vp = cam.view_projection(@gpu.aspect)
       LibWGPU.queue_write_buffer(@gpu.queue, @uniform_buf, 0_u64, vp.m.to_unsafe.as(Void*), 64_u64)
 
-      # Globals: elapsed time (a.x) + camera position (b.xyz, for specular view vector).
+      # Globals: time (a.x), camera position (b.xyz), ambient sky (c.rgb) / ground (d.rgb).
       t = world.resource?(Time).try(&.elapsed.to_f32) || 0.0f32
-      globals = StaticArray(Float32, 8).new(0.0f32)
+      amb = world.resource?(AmbientLight) || AmbientLight.new
+      globals = StaticArray(Float32, 16).new(0.0f32)
       globals[0] = t
       globals[4] = cam.position.x; globals[5] = cam.position.y; globals[6] = cam.position.z
+      globals[8] = amb.sky.r; globals[9] = amb.sky.g; globals[10] = amb.sky.b
+      globals[12] = amb.ground.r; globals[13] = amb.ground.g; globals[14] = amb.ground.b
       LibWGPU.queue_write_buffer(@gpu.queue, @globals_buf, 0_u64, globals.to_unsafe.as(Void*), GLOBALS_BYTES.to_u64)
 
       # Group entities by (mesh, material) so identical bodies are drawn in ONE

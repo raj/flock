@@ -118,7 +118,10 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       pipeline (no skinned shader). Verified (`examples/skinning_test.cr`). Animation
       interpolation covers STEP, LINEAR (quaternion nlerp along the shorter arc) and
       **CUBICSPLINE** (Hermite with in/out tangents; `examples/cubicspline_test.cr`).
-      Remaining: GPU skinning (joint-matrix buffer + shader); IBL/ambient probes.
+      **Ambient probe**: `Flock::AmbientLight` (hemisphere sky/ground by world normal) tints
+      the PBR ambient term — a cheap IBL stand-in; neutral gray when absent
+      (`examples/ambient_test.cr`). Remaining: GPU skinning (joint-matrix buffer + shader);
+      full IBL (prefiltered environment + BRDF LUT).
 
 ## sdl3-cr
 
