@@ -1,5 +1,5 @@
 require "./spec_helper"
-require "../src/flock/render/color"
+require "../src/flock/color"
 require "../src/flock/render/camera"
 
 # Camera2D#screen_to_world is pure math (no GPU): testable headless.

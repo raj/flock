@@ -30,9 +30,9 @@ app.add_startup do |_world, cmd|
   120.times do
     s = 16.0f32 + rand.to_f32 * 30.0f32
     cmd.spawn(
-      Flock::Web::Transform2D.new(Flock::Vec2.new(rand.to_f32 * WIDTH, rand.to_f32 * HEIGHT)),
+      Flock::Transform2D.at(rand.to_f32 * WIDTH, rand.to_f32 * HEIGHT),
       Flock::Web::Sprite.new(Flock::Vec2.new(s, s),
-        Flock::Vec3.new(0.4f32 + rand.to_f32 * 0.6f32, 0.4f32 + rand.to_f32 * 0.6f32, 0.4f32 + rand.to_f32 * 0.6f32),
+        Flock::Color.new(0.4f32 + rand.to_f32 * 0.6f32, 0.4f32 + rand.to_f32 * 0.6f32, 0.4f32 + rand.to_f32 * 0.6f32),
         checker),
       Velocity.new(Flock::Vec2.new((rand.to_f32 - 0.5f32) * 280.0f32, (rand.to_f32 - 0.5f32) * 280.0f32)))
   end
@@ -40,19 +40,19 @@ app.add_startup do |_world, cmd|
   # Text rasterized to a texture, drawn as a (tinted) sprite.
   title = Flock::Web.make_text("FLOCK · WEB")
   cmd.spawn(
-    Flock::Web::Transform2D.new(Flock::Vec2.new(WIDTH * 0.5f32 - 150.0f32, 24.0f32)),
-    Flock::Web::Sprite.new(Flock::Vec2.new(300, 60), Flock::Vec3.new(0.6, 0.9, 1.0), title))
+    Flock::Transform2D.at(WIDTH * 0.5f32 - 150.0f32, 24.0f32),
+    Flock::Web::Sprite.new(Flock::Vec2.new(300, 60), Flock::Color.new(0.6, 0.9, 1.0), title))
 
   cmd.spawn(
     Player.new,
-    Flock::Web::Transform2D.new(Flock::Vec2.new(WIDTH * 0.5f32, HEIGHT * 0.5f32)),
-    Flock::Web::Sprite.new(Flock::Vec2.new(44, 44), Flock::Vec3.new(1.0, 1.0, 1.0)))
+    Flock::Transform2D.at(WIDTH * 0.5f32, HEIGHT * 0.5f32),
+    Flock::Web::Sprite.new(Flock::Vec2.new(44, 44), Flock::Color.new(1.0, 1.0, 1.0)))
 end
 
 # Bouncing checkerboard squares.
 app.add_system(Flock::Schedule::Update) do |world, _cmd|
   dt = world.resource(Flock::Time).delta.to_f32
-  world.query(Flock::Web::Transform2D, Velocity) do |_e, tf, vel|
+  world.query(Flock::Transform2D, Velocity) do |_e, tf, vel|
     p = tf.value.position + vel.value.v * dt
     v = vel.value.v
     if p.x < 0 || p.x > WIDTH
@@ -79,7 +79,7 @@ app.add_system(Flock::Schedule::Update) do |world, _cmd|
     dx += inp.gamepad_x if inp.gamepad_x.abs > 0.15f32
     dy += inp.gamepad_y if inp.gamepad_y.abs > 0.15f32
   end
-  world.query(Player, Flock::Web::Transform2D) do |_e, _p, tf|
+  world.query(Player, Flock::Transform2D) do |_e, _p, tf|
     np = tf.value.position + Flock::Vec2.new(dx, dy) * (340.0f32 * dt)
     tf.value.position = Flock::Vec2.new(np.x.clamp(0.0f32, WIDTH - 44.0f32), np.y.clamp(0.0f32, HEIGHT - 44.0f32))
   end

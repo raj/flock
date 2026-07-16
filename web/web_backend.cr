@@ -12,22 +12,15 @@ module Flock::Web
 
   MAX = 512 # max sprites per frame
 
-  struct Transform2D
-    include Flock::Component
-    property position : Flock::Vec2
-
-    def initialize(@position : Flock::Vec2 = Flock::Vec2.new)
-    end
-  end
-
   # A sprite: `color` tints, `texture` (a JS renderer texture id; 0 = solid white).
+  # Uses the shared, native-free `Flock::Transform2D` for placement.
   struct Sprite
     include Flock::Component
     property size : Flock::Vec2
-    property color : Flock::Vec3
+    property color : Flock::Color
     property texture : Int32
 
-    def initialize(@size : Flock::Vec2, @color : Flock::Vec3, @texture : Int32 = 0)
+    def initialize(@size : Flock::Vec2, @color : Flock::Color = Flock::Color::WHITE, @texture : Int32 = 0)
     end
   end
 
@@ -114,10 +107,10 @@ module Flock::Web
       app.add_system(Flock::Schedule::Render) do |world, _cmd|
         # Collect {texture, x,y,w,h,r,g,b,a}, then order by texture for batched draws.
         items = [] of Tuple(Int32, Float32, Float32, Float32, Float32, Float32, Float32, Float32)
-        world.query(Transform2D, Sprite) do |_e, tf, sp|
+        world.query(Flock::Transform2D, Sprite) do |_e, tf, sp|
           next if items.size >= MAX
           p = tf.value.position; s = sp.value.size; c = sp.value.color
-          items << {sp.value.texture, p.x, p.y, s.x, s.y, c.x, c.y, c.z}
+          items << {sp.value.texture, p.x, p.y, s.x, s.y, c.r, c.g, c.b}
         end
         items.sort_by! &.[0]
 

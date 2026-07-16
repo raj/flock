@@ -6,8 +6,10 @@
 # implemented (they pull in native dependencies).
 
 require "./flock/math/math3d"
+require "./flock/color"
 require "./flock/ecs/entity"
 require "./flock/ecs/component"
+require "./flock/transform"
 require "./flock/ecs/bundle"
 require "./flock/ecs/sparse_set"
 require "./flock/ecs/world"
