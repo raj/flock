@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flock — Web (WASM + WebGPU)</title>
+  <style>
+    body { margin: 0; background: #0b0b12; color: #cdd; font: 14px/1.5 system-ui, sans-serif;
+           display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px; }
+    h1 { font-size: 18px; font-weight: 600; margin: 0; }
+    canvas { border-radius: 8px; box-shadow: 0 8px 40px #0008; background: #070710; }
+    #status { opacity: .7; }
+    code { background: #1a1a26; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Flock — ECS in WebAssembly, rendered with WebGPU</h1>
+  <canvas id="c" width="800" height="600"></canvas>
+  <div id="status">loading…</div>
+  <p>Crystal ECS core compiled to WASM (<code>web/main.cr</code>); WebGPU renderer in <code>web/renderer.js</code>.</p>
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>

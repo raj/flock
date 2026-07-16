@@ -169,22 +169,20 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       from `Flock.request_device` so headless/readback usage is covered too. This surfaces the
       real cause behind terse "Validation Error" messages. Default (unset): no output.
 
-## Web / WASM export (later)
+## Web / WASM export (`web/`, branch `web-wasm`)
 
-Ship a Flock game as HTML/WebAssembly. Feasible but a real project, deferred.
-- [ ] **Toolchain**: Crystal → browser WASM is proven by the `wesh` shard
-      (`/Users/rajdeenoo/Documents/code/crystal/wesh`): `crystal-js` interop + `wasm-ld` +
-      `wasm-opt` + WASI sysroot. Confirmed: Flock's **headless core** (math/ECS/app/time, no
-      native deps) already cross-compiles to `wasm32-wasi`.
-- [ ] **Blocker**: rendering (wgpu-native) and platform (SDL3) are **native libs**, unavailable
-      in the browser. Need a browser backend: WebGPU (or WebGL2) on a `<canvas>`, DOM input +
-      Web Gamepad API, WebAudio, `requestAnimationFrame` — all via `crystal-js` JS interop.
-- [ ] **Approach**: write a `WebPlugins` backend paralleling `DefaultPlugins` (the plugin split
-      keeps game/ECS code unchanged). `wesh` binds the DOM (not canvas/WebGPU), so it only
-      helps with the toolchain + surrounding HTML UI, not the game rendering.
-- [ ] **Incremental spike**: (1) run the ECS core in-browser via the wesh toolchain (no render,
-      state to `console.log`); (2) minimal canvas-2D/WebGL2 sprite backend for Space Invaders;
-      (3) then WebGPU for parity with the native backend.
+Ship a Flock scene as HTML/WebAssembly. **Working spike done** (`web/`):
+- [x] **Toolchain**: `web/build.sh` compiles Flock's native-free core to `wasm32-wasi` via the
+      `wesh` shard's patched `crystal-js` (`wasm-ld` + `wasm-opt` + auto WASI sysroot) →
+      `app.wasm` + `app.mjs`.
+- [x] **ECS in the browser**: `web/main.cr` runs `Flock::World`/query/Component + math in WASM;
+      each frame it fills a sprite-instance buffer and hands it to JS via a `@[JS::Method]` that
+      reads WASM linear memory. `JS.export` exposes `flock_init`/`flock_frame`.
+- [x] **WebGPU renderer**: `web/renderer.js` draws the instances as instanced quads with WebGPU
+      (Chrome). Verified end-to-end in Chrome (220 animated sprites; screenshotted).
+- [ ] **Next**: a `WebPlugins` backend paralleling `DefaultPlugins` (so unchanged game code runs
+      on either target); textures/text; DOM input + Web Gamepad API; WebAudio. wgpu-native + SDL3
+      stay native-only — the browser path is this separate WebGPU/DOM backend.
 
 ## Remaining work (open)
 
