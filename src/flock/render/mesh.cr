@@ -328,8 +328,8 @@ module Flock
           smp = samplers[ch["sampler"].as_i]
           times = gltf_read_floats(accessors, views, buffers, smp["input"].as_i)[0]
           values = gltf_read_floats(accessors, views, buffers, smp["output"].as_i)[0]
-          step = (smp["interpolation"]?.try(&.as_s) == "STEP")
-          GltfChannel.new(node, target["path"].as_s, times, values, step)
+          interp = smp["interpolation"]?.try(&.as_s) || "LINEAR"
+          GltfChannel.new(node, target["path"].as_s, times, values, interp)
         end
         GltfAnimation.new(anim["name"]?.try(&.as_s) || "", channels)
       end

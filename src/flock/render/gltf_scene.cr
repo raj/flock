@@ -1,15 +1,16 @@
 module Flock
   # One animation channel: samples a single node's TRS property over keyframe times.
   # `values` is flat, stride 3 for translation/scale, 4 for rotation (quaternion xyzw).
+  # For CUBICSPLINE each keyframe stores 3 blocks (in-tangent, value, out-tangent).
   class GltfChannel
     getter node : Int32
-    getter path : String # "translation" | "rotation" | "scale"
+    getter path : String   # "translation" | "rotation" | "scale"
+    getter interp : String # "LINEAR" | "STEP" | "CUBICSPLINE"
     getter times : Array(Float32)
     getter values : Array(Float32)
-    getter? step : Bool # STEP interpolation (else LINEAR)
 
     def initialize(@node : Int32, @path : String, @times : Array(Float32),
-                   @values : Array(Float32), @step : Bool = false)
+                   @values : Array(Float32), @interp : String = "LINEAR")
     end
 
     def stride : Int32
@@ -20,36 +21,64 @@ module Flock
       @times.empty? ? 0.0f32 : @times[-1]
     end
 
-    # Sampled value (of length `stride`) at time `t`, clamped to the keyframe range.
-    # LINEAR for translation/scale, normalized-lerp for rotation; STEP holds.
+    # Pose value (length `stride`) at keyframe index k, accounting for the CUBICSPLINE
+    # layout where each keyframe is {in-tangent, value, out-tangent}.
+    private def value_at(k : Int32) : Array(Float32)
+      s = stride
+      base = @interp == "CUBICSPLINE" ? k * 3 * s + s : k * s
+      @values[base, s]
+    end
+
+    # Sampled value (length `stride`) at time `t`, clamped to the keyframe range.
     def sample(t : Float32) : Array(Float32)
       s = stride
       n = @times.size
       return Array(Float32).new(s, 0.0f32) if n == 0
-      return @values[0, s] if t <= @times[0]
-      return @values[(n - 1) * s, s] if t >= @times[n - 1]
+      return value_at(0) if t <= @times[0]
+      return value_at(n - 1) if t >= @times[n - 1]
 
       i = 0
       while i < n - 1 && @times[i + 1] < t
         i += 1
       end
-      a = @values[i * s, s]
-      return a if @step
-      b = @values[(i + 1) * s, s]
       span = @times[i + 1] - @times[i]
       f = span > 0 ? (t - @times[i]) / span : 0.0f32
 
-      if @path == "rotation"
-        # nlerp (take the shorter arc), then normalize.
-        dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
-        sign = dot < 0 ? -1.0f32 : 1.0f32
-        q = Array(Float32).new(4) { |k| a[k] + (b[k] * sign - a[k]) * f }
-        len = Math.sqrt(q[0]**2 + q[1]**2 + q[2]**2 + q[3]**2)
-        len = 1.0f32 if len == 0
-        q.map { |v| (v / len).to_f32 }
-      else
-        Array(Float32).new(s) { |k| a[k] + (b[k] - a[k]) * f }
-      end
+      result =
+        if @interp == "STEP"
+          value_at(i)
+        elsif @interp == "CUBICSPLINE"
+          cubic(i, f, span, s)
+        elsif @path == "rotation"
+          # nlerp along the shorter arc.
+          a = value_at(i); b = value_at(i + 1)
+          dot = a[0]*b[0] + a[1]*b[1] + a[2]*b[2] + a[3]*b[3]
+          sign = dot < 0 ? -1.0f32 : 1.0f32
+          Array(Float32).new(4) { |k| a[k] + (b[k] * sign - a[k]) * f }
+        else
+          a = value_at(i); b = value_at(i + 1)
+          Array(Float32).new(s) { |k| a[k] + (b[k] - a[k]) * f }
+        end
+
+      @path == "rotation" ? normalize4(result) : result
+    end
+
+    # Cubic Hermite spline between keyframes i and i+1 (glTF CUBICSPLINE).
+    private def cubic(i : Int32, ft : Float32, td : Float32, s : Int32) : Array(Float32)
+      v0 = @values[i * 3 * s + s, s]
+      b0 = @values[i * 3 * s + 2 * s, s]      # out-tangent of keyframe i
+      a1 = @values[(i + 1) * 3 * s, s]        # in-tangent of keyframe i+1
+      v1 = @values[(i + 1) * 3 * s + s, s]
+      t2 = ft * ft; t3 = t2 * ft
+      h00 = 2*t3 - 3*t2 + 1; h10 = t3 - 2*t2 + ft
+      h01 = -2*t3 + 3*t2; h11 = t3 - t2
+      Array(Float32).new(s) { |k| h00*v0[k] + h10*td*b0[k] + h01*v1[k] + h11*td*a1[k] }
+    end
+
+    private def normalize4(q : Array(Float32)) : Array(Float32)
+      len = Math.sqrt(q[0]**2 + q[1]**2 + q[2]**2 + q[3]**2)
+      len = 1.0f32 if len == 0
+      q.map { |v| (v / len).to_f32 }
     end
   end
 

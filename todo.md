@@ -115,8 +115,10 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       (joints + inverse-bind matrices) and per-vertex JOINTS_0/WEIGHTS_0; `Flock::SkinnedModel`
       computes joint matrices from the animated hierarchy each frame and rewrites the mesh
       vertex buffer on the CPU (Σ weight · jointMatrix · bindVertex) — reuses the whole existing
-      pipeline (no skinned shader). Verified (`examples/skinning_test.cr`). Remaining: GPU
-      skinning (joint-matrix buffer + shader); CUBICSPLINE interpolation; IBL/ambient probes.
+      pipeline (no skinned shader). Verified (`examples/skinning_test.cr`). Animation
+      interpolation covers STEP, LINEAR (quaternion nlerp along the shorter arc) and
+      **CUBICSPLINE** (Hermite with in/out tangents; `examples/cubicspline_test.cr`).
+      Remaining: GPU skinning (joint-matrix buffer + shader); IBL/ambient probes.
 
 ## sdl3-cr
 
