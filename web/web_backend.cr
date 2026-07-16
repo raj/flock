@@ -103,11 +103,27 @@ module Flock::Web
     JS
   end
 
-  # Plays a loaded sound by id (no-op until it finishes decoding).
+  # Plays a loaded sound (no-op until decoded). `volume` 0..100, `loop` repeats.
+  # Returns a playback handle for `stop_sound` (0 if it couldn't start).
   @[JS::Method]
-  def play_sound(id : Int32) : Nil
+  def play_sound(id : Int32, volume : Int32 = 100, loop : Int32 = 0) : Int32
     <<-JS
-      if (globalThis.__flockPlaySound) globalThis.__flockPlaySound(#{id});
+      return (globalThis.__flockPlaySound ? globalThis.__flockPlaySound(#{id}, #{volume} / 100, #{loop}) : 0) | 0;
+    JS
+  end
+
+  @[JS::Method]
+  def stop_sound(handle : Int32) : Nil
+    <<-JS
+      if (globalThis.__flockStopSound) globalThis.__flockStopSound(#{handle});
+    JS
+  end
+
+  # Master output volume (0..100), applied to all sounds + beeps.
+  @[JS::Method]
+  def master_volume(percent : Int32) : Nil
+    <<-JS
+      if (globalThis.__flockMasterVolume) globalThis.__flockMasterVolume(#{percent} / 100);
     JS
   end
 

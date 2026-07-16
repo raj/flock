@@ -7,9 +7,12 @@ import init, { flock_init, flock_frame, flock_key, flock_gamepad } from "./app.m
 
 const WIDTH = 800, HEIGHT = 600, MAX = 512, FLOATS = 12;
 let device, context, pipeline, instanceBuf, uniformBuf, group0, format, sampler;
-let mipPipeline, mipSampler, audioCtx;
-const textures = [];  // id -> { bindGroup }  (id 0 = solid white)
-const sounds = [];    // id -> AudioBuffer | null
+let mipPipeline, mipSampler, audioCtx, masterGain;
+const textures = [];        // id -> { bindGroup }  (id 0 = solid white)
+const sounds = [];          // id -> AudioBuffer | null
+const textCache = new Map(); // text string -> texture id (glyph cache)
+const playing = new Map();   // handle -> AudioBufferSourceNode
+let handleSeq = 1;
 
 async function initGPU() {
   if (!navigator.gpu) throw new Error("WebGPU unavailable — use Chrome (or a WebGPU-enabled browser).");
@@ -78,6 +81,8 @@ async function initGPU() {
   resize(); // sets canvas size (HiDPI) + uniform
 
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.connect(audioCtx.destination);
 
   textures.push({ bindGroup: makeBindGroup(makeSolid(1, 1, [255, 255, 255, 255])) }); // id 0 = white
 }
@@ -168,6 +173,8 @@ globalThis.__flockCheckerboard = () => {
 };
 
 globalThis.__flockMakeText = (text) => {
+  const cached = textCache.get(text);
+  if (cached !== undefined) return cached; // glyph cache: reuse the texture for a repeated string
   const cv = document.createElement("canvas"), ctx = cv.getContext("2d");
   ctx.font = "bold 44px system-ui, sans-serif";
   const w = Math.max(1, Math.ceil(ctx.measureText(text).width) + 16), h = 60;
@@ -177,6 +184,7 @@ globalThis.__flockMakeText = (text) => {
   c2.fillText(text, 8, h / 2);
   const img = c2.getImageData(0, 0, w, h);
   const id = textures.length; textures.push({ bindGroup: makeBindGroup(makeMipped(w, h, { pixels: new Uint8Array(img.data.buffer) })) });
+  textCache.set(text, id);
   return id;
 };
 
@@ -205,18 +213,33 @@ globalThis.__flockLoadSound = (url) => {
   return id;
 };
 
-globalThis.__flockPlaySound = (id) => {
+// Plays a decoded sound at `vol` (0..1), optionally looping. WebAudio mixes concurrent
+// sources automatically; all go through masterGain. Returns a handle (0 if it can't play).
+globalThis.__flockPlaySound = (id, vol, loop) => {
   const buf = sounds[id];
-  if (!buf || audioCtx.state !== "running") return;
-  const src = audioCtx.createBufferSource(); src.buffer = buf; src.connect(audioCtx.destination); src.start();
+  if (!buf || audioCtx.state !== "running") return 0;
+  const src = audioCtx.createBufferSource(), g = audioCtx.createGain();
+  src.buffer = buf; src.loop = !!loop; g.gain.value = vol;
+  src.connect(g).connect(masterGain); src.start();
+  const h = handleSeq++;
+  playing.set(h, src);
+  src.onended = () => playing.delete(h);
+  return h;
 };
+
+globalThis.__flockStopSound = (h) => {
+  const s = playing.get(h);
+  if (s) { try { s.stop(); } catch (e) {} playing.delete(h); }
+};
+
+globalThis.__flockMasterVolume = (v) => { if (masterGain) masterGain.gain.value = v; };
 
 globalThis.__flockBeep = (freq, ms) => {
   if (!audioCtx || audioCtx.state !== "running") return;
   const t = audioCtx.currentTime, osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
   osc.frequency.value = freq; osc.type = "square";
   gain.gain.setValueAtTime(0.15, t); gain.gain.exponentialRampToValueAtTime(0.001, t + ms / 1000);
-  osc.connect(gain).connect(audioCtx.destination); osc.start(t); osc.stop(t + ms / 1000);
+  osc.connect(gain).connect(masterGain); osc.start(t); osc.stop(t + ms / 1000);
 };
 
 globalThis.__flockDraw = (floats, count, groups) => {

@@ -27,6 +27,7 @@ app.add_plugin(Flock::Web::WebPlugins.new)
 blip_id = -1 # sound id, set in startup, read by the beep system
 
 app.add_startup do |_world, cmd|
+  Flock::Web.master_volume(80) # master output level (0..100)
   checker = Flock::Web.checkerboard # procedural texture (id)
 
   # Load an image + a sound from files (async; sprites show white until the image lands).
