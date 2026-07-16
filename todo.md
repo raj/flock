@@ -163,10 +163,11 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
 
 ## Diagnostics
 
-- [ ] **Forward wgpu-native detailed logs.** The uncaptured-error callback only gives a terse
-      "Validation Error"; wgpu-native's own log has the real cause (e.g. "Bytes per row does not
-      respect COPY_BYTES_PER_ROW_ALIGNMENT"). Bind `wgpuSetLogCallback`/`wgpuSetLogLevel` and
-      forward to STDERR (opt-in via env, e.g. `FLOCK_WGPU_LOG`).
+- [x] **Forward wgpu-native detailed logs.** wgpu-cr binds `wgpuSetLogCallback`/`wgpuSetLogLevel`
+      (wgpu.h extras) + `WGPU.set_log_stderr(level)`. Flock forwards the internal log to STDERR
+      opt-in via `FLOCK_WGPU_LOG` (`trace`/`debug`/`info`/`warn`/`error`, or `1`=warn), set once
+      from `Flock.request_device` so headless/readback usage is covered too. This surfaces the
+      real cause behind terse "Validation Error" messages. Default (unset): no output.
 
 ## Web / WASM export (later)
 
@@ -191,8 +192,7 @@ All the big-ticket items above are done. What's left, gathered from the `Remaini
 notes buried in the completed entries plus the two open sections:
 
 ### Standalone (own sections above)
-- [ ] **Forward wgpu-native detailed logs** (Diagnostics) — bind `wgpuSetLogCallback`/
-      `wgpuSetLogLevel`, opt-in via `FLOCK_WGPU_LOG`.
+- [x] **Forward wgpu-native detailed logs** (Diagnostics) — done, opt-in via `FLOCK_WGPU_LOG`.
 - [ ] **Web / WASM export** — deferred; real project (see the section above).
 
 ### Polish left on shipped features

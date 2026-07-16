@@ -35,8 +35,31 @@ module Flock
     end
   end
 
+  @@wgpu_logging_setup = false
+
+  # Opt-in wgpu-native log forwarding. `FLOCK_WGPU_LOG` enables it (values: a level name
+  # trace/debug/info/warn/error, or 1/true = warn; off/0/false disables). The internal
+  # log reveals the real cause behind terse "Validation Error" messages. Called once,
+  # from request_device, so it also covers headless/readback usage.
+  def self.setup_wgpu_logging : Nil
+    return if @@wgpu_logging_setup
+    @@wgpu_logging_setup = true
+    v = ENV["FLOCK_WGPU_LOG"]?
+    return unless v
+    level = case v.downcase
+            when "trace"             then LibWGPU::LogLevel::Trace
+            when "debug"             then LibWGPU::LogLevel::Debug
+            when "info"              then LibWGPU::LogLevel::Info
+            when "error"             then LibWGPU::LogLevel::Error
+            when "off", "0", "false" then LibWGPU::LogLevel::Off
+            else                          LibWGPU::LogLevel::Warn
+            end
+    WGPU.set_log_stderr(level) unless level.off?
+  end
+
   # Equivalent of `WGPU.request_device` but with the error callbacks hooked up.
   def self.request_device(instance : LibWGPU::Instance, adapter : LibWGPU::Adapter) : LibWGPU::Device
+    setup_wgpu_logging
     result = DeviceRequestResult.new
 
     desc = LibWGPU::DeviceDescriptor.new
