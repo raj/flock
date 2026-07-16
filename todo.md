@@ -197,16 +197,23 @@ Ship a Flock scene as HTML/WebAssembly. **Working spike done** (`web/`):
       the left stick. (Wired + headless-validated; a physical pad isn't exercised in CI.)
 - [x] **WebAudio**: `Flock::Web.beep(freq, ms)` plays a WebAudio oscillator (AudioContext created
       on the first key gesture per autoplay policy). The demo beeps on Space / gamepad button 0.
-- [ ] **Remaining (web)**:
-      - **Shared components**: same game source on native + web (today web uses `Flock::Web::*`;
-        the native `Sprite` pulls in wgpu types → extract native-free `Transform2D`/`Color`/etc.).
-      - **Sprite atlas / UV sub-rects** (textures are whole-image today) + mipmaps.
-      - **Load files**: images (fetch → `createImageBitmap`) and audio (fetch → `decodeAudioData`),
-        not just procedural textures + oscillator beeps.
-      - **Input/display**: touch + pointer events, canvas resize / HiDPI (devicePixelRatio).
-      - **Packaging**: `--release` build (`wasm-opt -Oz`) + size report; make the `WESH` path
-        discoverable instead of hard-coded in `build.sh`.
-      - wgpu-native + SDL3 stay native-only — the browser path is this separate WebGPU/DOM backend.
+- [x] **Shared components**: `Color` + `Transform2D/3D` are now native-free core
+      (`src/flock/{color,transform}.cr`) used by both targets; web uses `Flock::Transform2D` +
+      `Flock::Color` (only `Flock::Web::Sprite`, which carries a texture id, stays web-specific).
+- [x] **Atlas UV + mipmaps**: `Sprite#uv_min/uv_size` (sub-rect sampling); textures upload with a
+      GPU-generated mip chain (verified in Chrome: a sprite showing a UV quarter of a test image).
+- [x] **Load files**: `Flock::Web.load_image(url)` (fetch → `createImageBitmap`, async, mipmapped)
+      and `load_sound(url)`/`play_sound(id)` (fetch → `decodeAudioData`). Demo loads
+      `assets/sprite.png` + `assets/blip.wav`.
+- [x] **Input/display**: pointer/touch drag → directional movement; HiDPI canvas
+      (`devicePixelRatio` backing store) + window resize handling.
+- [x] **Packaging**: `web/build.sh` auto-discovers the `wesh` checkout ($WESH or common paths),
+      reports wasm/gzip size, and supports `--release` (wasm-opt -Oz + JS mangle): ~156 KiB /
+      ~50 KiB gzip vs ~982 KiB debug.
+- [ ] **Future (web, nice-to-have)**: glyph/text caching (each `make_text` builds a texture);
+      audio volume/mixing/loop parity with native `Audio`; a shared `Sprite`/asset abstraction so
+      the very same source (not just components) runs on both; a `wesh dev`-style live-reload
+      server for the `web/` folder. wgpu-native + SDL3 remain native-only.
 
 ## Remaining work (open)
 

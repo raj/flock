@@ -25,12 +25,13 @@ web/build.sh     Compiles main.cr → app.wasm + app.mjs (crystal-js toolchain).
 
 ## Build
 
-Requires `wasm-ld` + `wasm-opt`, and the [`wesh`](../../..) shard's patched crystal-js
-(the WASI sysroot is fetched automatically on first build). If `wesh` lives elsewhere,
-set `WESH=/path/to/wesh`.
+Requires `wasm-ld` + `wasm-opt` (+ `uglifyjs` for `--release`), and the `wesh` shard's
+patched crystal-js (the WASI sysroot is fetched automatically on first build). `build.sh`
+auto-discovers `wesh` via `$WESH` or common sibling paths.
 
 ```sh
-web/build.sh                 # → web/app.wasm + web/app.mjs
+web/build.sh                 # debug   → web/app.wasm + web/app.mjs (~982 KiB)
+web/build.sh --release       # wasm-opt -Oz + JS mangle           (~156 KiB, ~50 KiB gzip)
 ```
 
 ## Run
@@ -42,8 +43,15 @@ cd web && python3 -m http.server 8000
 # open http://localhost:8000/  in Chrome
 ```
 
-## Status / next steps
+## Status
 
-Done: ECS core in WASM, per-frame instance streaming, WebGPU instanced-quad renderer.
-Next: a `WebPlugins` backend paralleling `DefaultPlugins` (so unchanged game code runs on
-either target), textures/text, DOM input + Web Gamepad API, and WebAudio.
+Done: ECS core in WASM; the `WebPlugins` backend (App/Plugin/Schedule reused from native);
+WebGPU instanced-quad rendering with per-texture batching; textures (procedural, text, and
+image files) with atlas UV sub-rects + mipmaps; keyboard + Web Gamepad + pointer/touch input;
+WebAudio (oscillator beeps + decoded audio files); HiDPI; a `--release` build.
+
+Controls (demo): arrow keys / gamepad left stick / drag to move the white square; Space (or
+gamepad button 0) plays a sound.
+
+Next (nice-to-have): glyph/text caching, audio volume/mixing parity, a shared Sprite/asset
+abstraction so the identical source runs native + web, and a live-reload dev server.
