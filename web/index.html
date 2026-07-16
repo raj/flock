@@ -18,6 +18,8 @@
   <canvas id="c" width="800" height="600"></canvas>
   <div id="status">loading…</div>
   <p>Crystal ECS core compiled to WASM (<code>web/main.cr</code>); WebGPU renderer in <code>web/renderer.js</code>.</p>
+  <!-- Live-reload when served by web/dev.mjs; silently no-ops under plain static hosting. -->
+  <script>try { new EventSource("/__events").onmessage = (e) => { if (e.data === "reload") location.reload(); }; } catch (_) {}</script>
   <script type="module" src="./renderer.js"></script>
 </body>
 </html>

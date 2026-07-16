@@ -39,8 +39,10 @@ web/build.sh --release       # wasm-opt -Oz + JS mangle           (~156 KiB, ~50
 WebGPU requires a secure context, so serve over HTTP (not `file://`) and open in Chrome:
 
 ```sh
+web/dev.sh                 # dev server: serves web/, rebuilds on .cr changes, live-reloads
+# or a plain static server:
 cd web && python3 -m http.server 8000
-# open http://localhost:8000/  in Chrome
+# then open http://localhost:8000/ in Chrome
 ```
 
 ## Status
