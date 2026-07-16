@@ -24,8 +24,23 @@ end
 app = Flock::App.new
 app.add_plugin(Flock::Web::WebPlugins.new)
 
+blip_id = -1 # sound id, set in startup, read by the beep system
+
 app.add_startup do |_world, cmd|
   checker = Flock::Web.checkerboard # procedural texture (id)
+
+  # Load an image + a sound from files (async; sprites show white until the image lands).
+  img = Flock::Web.load_image("assets/sprite.png")
+  blip_id = Flock::Web.load_sound("assets/blip.wav")
+
+  # Full image, and a second sprite showing just its top-left quarter (atlas UV sub-rect).
+  cmd.spawn(
+    Flock::Transform2D.at(60.0f32, 120.0f32),
+    Flock::Web::Sprite.new(Flock::Vec2.new(96, 96), Flock::Color::WHITE, img))
+  cmd.spawn(
+    Flock::Transform2D.at(60.0f32, 240.0f32),
+    Flock::Web::Sprite.new(Flock::Vec2.new(96, 96), Flock::Color::WHITE, img,
+      Flock::Vec2.new(0.0, 0.0), Flock::Vec2.new(0.5, 0.5)))
 
   120.times do
     s = 16.0f32 + rand.to_f32 * 30.0f32
@@ -90,7 +105,13 @@ space_prev = false
 app.add_system(Flock::Schedule::Update) do |world, _cmd|
   inp = world.resource(Flock::Web::Input)
   now = inp.pressed?(Flock::Web::SPACE) || inp.gamepad_button?(0)
-  Flock::Web.beep(660, 120) if now && !space_prev
+  if now && !space_prev
+    if blip_id >= 0
+      Flock::Web.play_sound(blip_id) # loaded audio file
+    else
+      Flock::Web.beep(660, 120)      # fallback synth beep
+    end
+  end
   space_prev = now
 end
 

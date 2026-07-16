@@ -12,15 +12,19 @@ module Flock::Web
 
   MAX = 512 # max sprites per frame
 
-  # A sprite: `color` tints, `texture` (a JS renderer texture id; 0 = solid white).
-  # Uses the shared, native-free `Flock::Transform2D` for placement.
+  # A sprite: `color` tints, `texture` (a JS renderer texture id; 0 = solid white),
+  # `uv_min`/`uv_size` select a sub-rectangle of the texture (atlas). Uses the shared,
+  # native-free `Flock::Transform2D` for placement.
   struct Sprite
     include Flock::Component
     property size : Flock::Vec2
     property color : Flock::Color
     property texture : Int32
+    property uv_min : Flock::Vec2
+    property uv_size : Flock::Vec2
 
-    def initialize(@size : Flock::Vec2, @color : Flock::Color = Flock::Color::WHITE, @texture : Int32 = 0)
+    def initialize(@size : Flock::Vec2, @color : Flock::Color = Flock::Color::WHITE, @texture : Int32 = 0,
+                   @uv_min : Flock::Vec2 = Flock::Vec2.new(0, 0), @uv_size : Flock::Vec2 = Flock::Vec2.new(1, 1))
     end
   end
 
@@ -60,19 +64,50 @@ module Flock::Web
     end
   end
 
-  BUFFER = Slice(Float32).new(MAX * 8)  # per instance: x,y,w,h, r,g,b,a
-  GROUPS = Slice(Int32).new(128)        # draw groups: [textureId, count] pairs (sorted by texture)
+  FLOATS = 12                            # per instance: x,y,w,h, r,g,b,a, u,v,uw,uh
+  BUFFER = Slice(Float32).new(MAX * FLOATS)
+  GROUPS = Slice(Int32).new(128)         # draw groups: [textureId, count] pairs (sorted by texture)
+
+  private record Inst,
+    tex : Int32, x : Float32, y : Float32, w : Float32, h : Float32,
+    r : Float32, g : Float32, b : Float32, a : Float32,
+    u : Float32, v : Float32, uw : Float32, uh : Float32
 
   # --- JS bridges (WebGPU renderer / text / audio live in renderer.js) ---
 
-  # Hands the grouped instance buffer to the WebGPU renderer.
+  # Hands the grouped instance buffer to the WebGPU renderer (12 floats/instance).
   @[JS::Method]
   def draw(ptr : Int32, count : Int32, groups_ptr : Int32, group_pairs : Int32) : Nil
     <<-JS
       if (__memory.buffer.byteLength === 0) __memory = new DataView(__exports.memory.buffer);
-      const f = new Float32Array(__exports.memory.buffer, #{ptr}, #{count} * 8);
+      const f = new Float32Array(__exports.memory.buffer, #{ptr}, #{count} * 12);
       const g = new Int32Array(__exports.memory.buffer, #{groups_ptr}, #{group_pairs} * 2);
       if (globalThis.__flockDraw) globalThis.__flockDraw(f, #{count}, g);
+    JS
+  end
+
+  # Loads an image from `url` (async, fetch → createImageBitmap → texture w/ mipmaps).
+  # Returns a texture id immediately; the sprite shows white until the image arrives.
+  @[JS::Method]
+  def load_image(url : String) : Int32
+    <<-JS
+      return (globalThis.__flockLoadImage ? globalThis.__flockLoadImage(#{url}) : 0) | 0;
+    JS
+  end
+
+  # Loads an audio file from `url` (async, fetch → decodeAudioData). Returns a sound id.
+  @[JS::Method]
+  def load_sound(url : String) : Int32
+    <<-JS
+      return (globalThis.__flockLoadSound ? globalThis.__flockLoadSound(#{url}) : 0) | 0;
+    JS
+  end
+
+  # Plays a loaded sound by id (no-op until it finishes decoding).
+  @[JS::Method]
+  def play_sound(id : Int32) : Nil
+    <<-JS
+      if (globalThis.__flockPlaySound) globalThis.__flockPlaySound(#{id});
     JS
   end
 
@@ -105,27 +140,29 @@ module Flock::Web
     def build(app : Flock::App) : Nil
       app.world.insert_resource(Input.new)
       app.add_system(Flock::Schedule::Render) do |world, _cmd|
-        # Collect {texture, x,y,w,h,r,g,b,a}, then order by texture for batched draws.
-        items = [] of Tuple(Int32, Float32, Float32, Float32, Float32, Float32, Float32, Float32)
+        # Collect instances, then order by texture for batched draws.
+        items = [] of Inst
         world.query(Flock::Transform2D, Sprite) do |_e, tf, sp|
           next if items.size >= MAX
           p = tf.value.position; s = sp.value.size; c = sp.value.color
-          items << {sp.value.texture, p.x, p.y, s.x, s.y, c.r, c.g, c.b}
+          uv = sp.value.uv_min; uz = sp.value.uv_size
+          items << Inst.new(sp.value.texture, p.x, p.y, s.x, s.y, c.r, c.g, c.b, c.a, uv.x, uv.y, uz.x, uz.y)
         end
-        items.sort_by! &.[0]
+        items.sort_by! &.tex
 
         pairs = 0
         cur_tex = -1
         cur_count = 0
         items.each_with_index do |it, i|
-          o = i * 8
-          BUFFER[o] = it[1]; BUFFER[o + 1] = it[2]; BUFFER[o + 2] = it[3]; BUFFER[o + 3] = it[4]
-          BUFFER[o + 4] = it[5]; BUFFER[o + 5] = it[6]; BUFFER[o + 6] = it[7]; BUFFER[o + 7] = 1.0f32
-          if it[0] != cur_tex
+          o = i * FLOATS
+          BUFFER[o] = it.x; BUFFER[o + 1] = it.y; BUFFER[o + 2] = it.w; BUFFER[o + 3] = it.h
+          BUFFER[o + 4] = it.r; BUFFER[o + 5] = it.g; BUFFER[o + 6] = it.b; BUFFER[o + 7] = it.a
+          BUFFER[o + 8] = it.u; BUFFER[o + 9] = it.v; BUFFER[o + 10] = it.uw; BUFFER[o + 11] = it.uh
+          if it.tex != cur_tex
             if cur_tex >= 0
               GROUPS[pairs * 2] = cur_tex; GROUPS[pairs * 2 + 1] = cur_count; pairs += 1
             end
-            cur_tex = it[0]; cur_count = 0
+            cur_tex = it.tex; cur_count = 0
           end
           cur_count += 1
         end
