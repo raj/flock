@@ -179,10 +179,18 @@ Ship a Flock scene as HTML/WebAssembly. **Working spike done** (`web/`):
       each frame it fills a sprite-instance buffer and hands it to JS via a `@[JS::Method]` that
       reads WASM linear memory. `JS.export` exposes `flock_init`/`flock_frame`.
 - [x] **WebGPU renderer**: `web/renderer.js` draws the instances as instanced quads with WebGPU
-      (Chrome). Verified end-to-end in Chrome (220 animated sprites; screenshotted).
-- [ ] **Next**: a `WebPlugins` backend paralleling `DefaultPlugins` (so unchanged game code runs
-      on either target); textures/text; DOM input + Web Gamepad API; WebAudio. wgpu-native + SDL3
-      stay native-only — the browser path is this separate WebGPU/DOM backend.
+      (Chrome). Verified end-to-end in Chrome (screenshotted).
+- [x] **WebPlugins backend** (`web/web_backend.cr`): parallels `DefaultPlugins` — reuses the
+      native-free App/Plugin/Schedule/World/Time core and adds browser equivalents (2D sprite
+      components, a keyboard `Input` resource fed from DOM events, a `Render`-schedule system
+      that streams instances to WebGPU). Games keep the native structure: `App.new
+      .add_plugin(WebPlugins.new).add_startup{…}.add_system(Update){…}`, driven from
+      requestAnimationFrame. `web/main.cr` demos it (bouncing squares + arrow-key player);
+      verified in Chrome (input moves the player). One glue fix: `build.sh` patches the
+      generated `clock_time_get` to refresh a detached memory view after WASM heap growth.
+- [ ] **Next**: textures/text; Web Gamepad API; WebAudio; a shared component layer so identical
+      game source runs on native + web (today the web target uses `Flock::Web::*` components).
+      wgpu-native + SDL3 stay native-only — the browser path is this separate WebGPU/DOM backend.
 
 ## Remaining work (open)
 

@@ -1,7 +1,7 @@
 // WebGPU renderer for the Flock web demo. The ECS (compiled to WebAssembly, see
 // main.cr) computes the sprite instances each frame and hands us a Float32Array via
 // globalThis.__flockDraw; we draw them as instanced quads with WebGPU (Chrome).
-import init, { flock_init, flock_frame } from "./app.mjs";
+import init, { flock_init, flock_frame, flock_key } from "./app.mjs";
 
 const WIDTH = 800, HEIGHT = 600, MAX = 220;
 let device, context, pipeline, instanceBuf, uniformBuf, bindGroup, format;
@@ -87,8 +87,15 @@ async function main() {
   try {
     await initGPU();
     await init();   // instantiate the WASM module
-    flock_init();   // spawn the ECS scene
-    status.textContent = "running — ECS in WebAssembly, rendered with WebGPU";
+    flock_init();   // run the App's Startup schedule (spawns the scene)
+    status.textContent = "running — App/ECS in WASM · WebGPU render · arrow keys move the white square";
+
+    // Forward keyboard to the WebPlugins Input resource (arrow keys / space).
+    const key = (e, down) => {
+      if ([32, 37, 38, 39, 40].includes(e.keyCode)) { flock_key(e.keyCode, down); e.preventDefault(); }
+    };
+    window.addEventListener("keydown", (e) => key(e, 1));
+    window.addEventListener("keyup", (e) => key(e, 0));
     let last = performance.now();
     const loop = (now) => {
       const dt = Math.min(50, now - last); last = now;
