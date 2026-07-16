@@ -27,26 +27,32 @@ module Flock
   # Not to be combined with the 2D RenderPlugin (each owns the whole frame).
   class Renderer3D < Resource
     MODEL_BYTES   = 64 # mat4 (16 f32)
-    GLOBALS_BYTES = 16 # time f32 + padding (uniform 16-byte alignment)
-    PARAM_BYTES   = 16 # per-instance vec4 (tint rgba)
+    GLOBALS_BYTES = 32 # time + padding + camera position (uniform 16-byte alignment)
+    PARAM_BYTES   = 32 # per-instance: tint vec4 + {metallic, roughness, _, _} vec4
 
     WGSL = <<-SHADER
     struct Camera { view_proj : mat4x4<f32> };
-    struct Globals { time : f32 };
+    // Two vec4 (std uniform layout): a.x = time, b.xyz = camera position.
+    struct Globals { a : vec4<f32>, b : vec4<f32> };
+    struct Inst { tint : vec4<f32>, mr : vec4<f32> }; // mr.x=metallic, mr.y=roughness
     @group(0) @binding(0) var<uniform> cam : Camera;
     @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
     @group(0) @binding(2) var<uniform> globals : Globals;
     @group(0) @binding(3) var<storage, read> normals : array<mat4x4<f32>>;
-    @group(0) @binding(4) var<storage, read> params : array<vec4<f32>>; // per-instance tint (rgba)
+    @group(0) @binding(4) var<storage, read> params : array<Inst>;
     @group(1) @binding(0) var base_tex : texture_2d<f32>;
-    @group(1) @binding(1) var base_smp : sampler;
+    @group(1) @binding(1) var samp : sampler;
+    @group(1) @binding(2) var mr_tex : texture_2d<f32>;   // metallic-roughness (G=rough, B=metal)
+    @group(1) @binding(3) var nrm_tex : texture_2d<f32>;  // tangent-space normal map
 
     struct VSOut {
       @builtin(position) clip : vec4<f32>,
       @location(0) normal : vec3<f32>,
       @location(1) color : vec3<f32>,
       @location(2) uv : vec2<f32>,
-      @location(3) alpha : f32,
+      @location(3) world : vec3<f32>,
+      @location(4) mr : vec2<f32>,
+      @location(5) alpha : f32,
     };
 
     @vertex
@@ -54,23 +60,65 @@ module Flock
                @location(2) col : vec3<f32>, @location(3) uv : vec2<f32>,
                @builtin(instance_index) ii : u32) -> VSOut {
       var out : VSOut;
-      out.clip = cam.view_proj * models[ii] * vec4<f32>(pos, 1.0);
+      let wp = models[ii] * vec4<f32>(pos, 1.0);
+      out.clip = cam.view_proj * wp;
+      out.world = wp.xyz;
       // Normal matrix (inverse-transpose) -> correct under non-uniform scale.
       out.normal = normalize((normals[ii] * vec4<f32>(nrm, 0.0)).xyz);
-      out.color = col * params[ii].rgb; // per-instance tint
+      out.color = col * params[ii].tint.rgb;
+      out.alpha = params[ii].tint.a;
       out.uv = uv;
-      out.alpha = params[ii].a;
+      out.mr = params[ii].mr.xy;
       return out;
+    }
+
+    // Tangent-space normal perturbation without stored tangents (derivative TBN).
+    fn perturb_normal(nn : vec3<f32>, wp : vec3<f32>, uv : vec2<f32>) -> vec3<f32> {
+      let m = textureSample(nrm_tex, samp, uv).xyz * 2.0 - 1.0;
+      let dp1 = dpdx(wp); let dp2 = dpdy(wp);
+      let du1 = dpdx(uv); let du2 = dpdy(uv);
+      let dp2p = cross(dp2, nn); let dp1p = cross(nn, dp1);
+      let T = dp2p * du1.x + dp1p * du2.x;
+      let B = dp2p * du1.y + dp1p * du2.y;
+      let denom = max(dot(T, T), dot(B, B));
+      // Degenerate UVs (no texture coords) -> no tangent frame; keep the geometric normal.
+      if (denom < 1e-12) { return nn; }
+      let inv = inverseSqrt(denom);
+      return normalize(T * (inv * m.x) + B * (inv * m.y) + nn * m.z);
     }
 
     @fragment
     fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
-      let light = normalize(vec3<f32>(0.4, 0.8, 0.6));
-      let diff = max(dot(normalize(in.normal), light), 0.0);
-      let shade = 0.25 + 0.75 * diff; // ambient + diffuse
-      // Base-color texture (white 1x1 by default) modulated by the (tinted) vertex color.
-      let tex = textureSample(base_tex, base_smp, in.uv);
-      return vec4<f32>(in.color * tex.rgb * shade, tex.a * in.alpha);
+      let btex = textureSample(base_tex, samp, in.uv);
+      let base = in.color * btex.rgb;
+      let mrs = textureSample(mr_tex, samp, in.uv);
+      let metal = clamp(mrs.b * in.mr.x, 0.0, 1.0);
+      let rough = clamp(mrs.g * in.mr.y, 0.045, 1.0);
+
+      let N = perturb_normal(normalize(in.normal), in.world, in.uv);
+      let L = normalize(vec3<f32>(0.4, 0.8, 0.6));
+      let V = normalize(globals.b.xyz - in.world);
+      let H = normalize(L + V);
+      let NdotL = max(dot(N, L), 0.0);
+      let NdotV = max(dot(N, V), 1e-3);
+      let NdotH = max(dot(N, H), 0.0);
+      let VdotH = max(dot(V, H), 0.0);
+
+      // GGX / Cook-Torrance specular for one directional light.
+      let a = rough * rough;
+      let a2 = a * a;
+      let dn = NdotH * NdotH * (a2 - 1.0) + 1.0;
+      let D = a2 / (3.14159265 * dn * dn + 1e-5);
+      let k = (rough + 1.0) * (rough + 1.0) / 8.0;
+      let G = (NdotV / (NdotV * (1.0 - k) + k)) * (NdotL / (NdotL * (1.0 - k) + k));
+      let F0 = mix(vec3<f32>(0.04, 0.04, 0.04), base, metal);
+      let F = F0 + (vec3<f32>(1.0, 1.0, 1.0) - F0) * pow(1.0 - VdotH, 5.0);
+      let spec = (D * G) * F / (4.0 * NdotV * NdotL + 1e-4);
+
+      let diffuse = base * (1.0 - metal);
+      let lit = (diffuse + spec) * NdotL;
+      let ambient = base * 0.2;
+      return vec4<f32>(ambient + lit, btex.a * in.alpha);
     }
     SHADER
 
@@ -92,8 +140,9 @@ module Flock
     @group1_layout : LibWGPU::BindGroupLayout # texture + sampler
     @pipeline_layout : LibWGPU::PipelineLayout
     @white : Texture
+    @flat_normal : Texture # 1x1 (0,0,1) tangent-space normal (no perturbation)
     @samplers : Hash(Tuple(SamplerFilter, SamplerWrap), LibWGPU::Sampler) = {} of Tuple(SamplerFilter, SamplerWrap) => LibWGPU::Sampler
-    @tex_groups : Hash(UInt64, LibWGPU::BindGroup) = {} of UInt64 => LibWGPU::BindGroup
+    @tex_groups : Hash(Tuple(UInt64, UInt64, UInt64), LibWGPU::BindGroup) = {} of Tuple(UInt64, UInt64, UInt64) => LibWGPU::BindGroup
     @uniform_buf : LibWGPU::Buffer
     @model_buf : LibWGPU::Buffer
     @normal_buf : LibWGPU::Buffer
@@ -111,6 +160,7 @@ module Flock
       @group1_layout = build_group1_layout
       @pipeline_layout = build_pipeline_layout
       @white = Texture.white(@gpu)
+      @flat_normal = Texture.from_pixels(@gpu, 1, 1, Bytes[128_u8, 128_u8, 255_u8, 255_u8])
 
       @shader = build_shader(WGSL)
       @pipeline = build_pipeline(@shader)
@@ -149,6 +199,7 @@ module Flock
       @samplers.each_value { |s| LibWGPU.sampler_release(s) }
       @samplers.clear
       @white.release
+      @flat_normal.release
       LibWGPU.bind_group_release(@group0)
       LibWGPU.buffer_release(@globals_buf)
       LibWGPU.buffer_release(@param_buf)
@@ -222,16 +273,18 @@ module Flock
       LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
     end
 
-    # group1: base-color texture (binding 0) + sampler (binding 1), fragment stage.
+    # group1: base-color (0) + sampler (1) + metallic-roughness (2) + normal map (3).
     private def build_group1_layout : LibWGPU::BindGroupLayout
-      tex = LibWGPU::TextureBindingLayout.new
-      tex.sample_type = LibWGPU::TextureSampleType::Float
-      tex.view_dimension = LibWGPU::TextureViewDimension::N2D
-      e0 = LibWGPU::BindGroupLayoutEntry.new
-      e0.binding = 0_u32
-      e0.visibility = LibWGPU::ShaderStage::Fragment
-      e0.texture = tex
-
+      texlayout = ->(binding : UInt32) do
+        t = LibWGPU::TextureBindingLayout.new
+        t.sample_type = LibWGPU::TextureSampleType::Float
+        t.view_dimension = LibWGPU::TextureViewDimension::N2D
+        e = LibWGPU::BindGroupLayoutEntry.new
+        e.binding = binding
+        e.visibility = LibWGPU::ShaderStage::Fragment
+        e.texture = t
+        e
+      end
       smp = LibWGPU::SamplerBindingLayout.new
       smp.type_ = LibWGPU::SamplerBindingType::Filtering
       e1 = LibWGPU::BindGroupLayoutEntry.new
@@ -239,12 +292,14 @@ module Flock
       e1.visibility = LibWGPU::ShaderStage::Fragment
       e1.sampler = smp
 
-      entries = uninitialized LibWGPU::BindGroupLayoutEntry[2]
-      entries[0] = e0
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[4]
+      entries[0] = texlayout.call(0_u32)
       entries[1] = e1
+      entries[2] = texlayout.call(2_u32)
+      entries[3] = texlayout.call(3_u32)
       d = LibWGPU::BindGroupLayoutDescriptor.new
       d.label = WGPU.empty_string_view
-      d.entry_count = 2_u64
+      d.entry_count = 4_u64
       d.entries = entries.to_unsafe
       LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
     end
@@ -276,24 +331,22 @@ module Flock
       LibWGPU.device_create_sampler(@gpu.device, pointerof(d))
     end
 
-    private def tex_group(texture : Texture) : LibWGPU::BindGroup
-      @tex_groups.fetch(texture.view.address) do
-        e0 = LibWGPU::BindGroupEntry.new
-        e0.binding = 0_u32
-        e0.texture_view = texture.view
-        e1 = LibWGPU::BindGroupEntry.new
-        e1.binding = 1_u32
-        e1.sampler = sampler_for(texture.filter, texture.wrap)
-        entries = uninitialized LibWGPU::BindGroupEntry[2]
-        entries[0] = e0
-        entries[1] = e1
+    private def tex_group(base : Texture, mr : Texture, normal : Texture) : LibWGPU::BindGroup
+      key = {base.view.address, mr.view.address, normal.view.address}
+      @tex_groups.fetch(key) do
+        e0 = LibWGPU::BindGroupEntry.new; e0.binding = 0_u32; e0.texture_view = base.view
+        e1 = LibWGPU::BindGroupEntry.new; e1.binding = 1_u32; e1.sampler = sampler_for(base.filter, base.wrap)
+        e2 = LibWGPU::BindGroupEntry.new; e2.binding = 2_u32; e2.texture_view = mr.view
+        e3 = LibWGPU::BindGroupEntry.new; e3.binding = 3_u32; e3.texture_view = normal.view
+        entries = uninitialized LibWGPU::BindGroupEntry[4]
+        entries[0] = e0; entries[1] = e1; entries[2] = e2; entries[3] = e3
         d = LibWGPU::BindGroupDescriptor.new
         d.label = WGPU.empty_string_view
         d.layout = @group1_layout
-        d.entry_count = 2_u64
+        d.entry_count = 4_u64
         d.entries = entries.to_unsafe
         bg = LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
-        @tex_groups[texture.view.address] = bg
+        @tex_groups[key] = bg
         bg
       end
     end
@@ -482,10 +535,11 @@ module Flock
       vp = cam.view_projection(@gpu.aspect)
       LibWGPU.queue_write_buffer(@gpu.queue, @uniform_buf, 0_u64, vp.m.to_unsafe.as(Void*), 64_u64)
 
-      # Globals: elapsed time (seconds), for animated materials.
+      # Globals: elapsed time (a.x) + camera position (b.xyz, for specular view vector).
       t = world.resource?(Time).try(&.elapsed.to_f32) || 0.0f32
-      globals = StaticArray(Float32, 4).new(0.0f32)
+      globals = StaticArray(Float32, 8).new(0.0f32)
       globals[0] = t
+      globals[4] = cam.position.x; globals[5] = cam.position.y; globals[6] = cam.position.z
       LibWGPU.queue_write_buffer(@gpu.queue, @globals_buf, 0_u64, globals.to_unsafe.as(Void*), GLOBALS_BYTES.to_u64)
 
       # Group entities by (mesh, material) so identical bodies are drawn in ONE
@@ -493,12 +547,12 @@ module Flock
       # instances index the storage buffer via first_instance (= @builtin(instance_index)).
       # Frustum culling drops instances whose world bounding sphere is off-screen.
       frustum = Frustum.from(vp)
-      groups = [] of {Mesh, Material3D?, Texture, Array({Mat4, Color})}
-      slot = {} of Tuple(UInt64, UInt64, UInt64) => Int32
+      groups = [] of {Mesh, Material3D?, Texture, Texture, Texture, Array({Mat4, Color, Float32, Float32})}
+      slot = {} of Tuple(UInt64, UInt64, UInt64, UInt64, UInt64) => Int32
       total = 0
       culled = 0
-      world.query(Transform3D, MeshRenderer) do |_e, tf, mr|
-        mesh = mr.value.mesh
+      world.query(Transform3D, MeshRenderer) do |_e, tf, mrr|
+        mesh = mrr.value.mesh
         model = tf.value.matrix
 
         if @cull && mesh.bounds_radius != Float32::MAX
@@ -511,15 +565,18 @@ module Flock
           end
         end
 
-        material = mr.value.material
-        texture = mr.value.texture || @white
-        inst = {model, mr.value.tint} # per-instance transform + tint
-        key = {mesh.object_id, material ? material.object_id : 0_u64, texture.object_id}
+        material = mrr.value.material
+        base = mrr.value.texture || @white
+        mr_tex = mrr.value.metallic_roughness || @white
+        nrm_tex = mrr.value.normal_map || @flat_normal
+        inst = {model, mrr.value.tint, mrr.value.metallic, mrr.value.roughness}
+        key = {mesh.object_id, material ? material.object_id : 0_u64,
+               base.object_id, mr_tex.object_id, nrm_tex.object_id}
         if gi = slot[key]?
-          groups[gi][3] << inst
+          groups[gi][5] << inst
         else
           slot[key] = groups.size
-          groups << {mesh, material, texture, [inst]}
+          groups << {mesh, material, base, mr_tex, nrm_tex, [inst]}
         end
         total += 1
       end
@@ -533,11 +590,11 @@ module Flock
         @scratch.clear
         @scratch_n.clear
         @scratch_p.clear
-        groups.each do |(_m, _mat, _tex, insts)|
-          insts.each do |(model, tint)|
+        groups.each do |(_m, _mat, _b, _mrt, _nt, insts)|
+          insts.each do |(model, tint, metallic, roughness)|
             @scratch.concat(model.m)
             @scratch_n.concat(model.normal_matrix.m)
-            @scratch_p.push(tint.r, tint.g, tint.b, tint.a)
+            @scratch_p.push(tint.r, tint.g, tint.b, tint.a, metallic, roughness, 0.0f32, 0.0f32)
           end
         end
         LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
@@ -578,14 +635,14 @@ module Flock
       current = Pointer(Void).null.as(LibWGPU::RenderPipeline)
 
       base = 0_u32
-      groups.each do |(mesh, material, texture, insts)|
+      groups.each do |(mesh, material, base_tex, mr_tex, nrm_tex, insts)|
         count = insts.size.to_u32
         pipeline = material ? material.pipeline : @pipeline
         if pipeline != current
           LibWGPU.render_pass_encoder_set_pipeline(pass, pipeline)
           current = pipeline
         end
-        LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(texture), 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(base_tex, mr_tex, nrm_tex), 0_u64, Pointer(UInt32).null)
         LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, mesh.vertex_buf, 0_u64, mesh.vertex_bytes)
         LibWGPU.render_pass_encoder_set_index_buffer(pass, mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, mesh.index_bytes)
         # One instanced draw for the whole group; first_instance = base offset.

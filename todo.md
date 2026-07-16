@@ -102,7 +102,12 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       `MeshRenderer#tint` (rgba) feeds a per-instance storage buffer (group0 binding 4); many
       entities share one mesh/material/texture yet render in different colors within a single
       instanced draw (`examples/instance_tint_test.cr`; solar-system planets now share one
-      sphere, tinted per planet). Remaining: glTF metallic-roughness/normal maps; animation.
+      sphere, tinted per planet). **PBR**: the built-in shader is metallic-roughness (GGX
+      specular + Fresnel) with a base-color texture, a metallic-roughness map (G=rough, B=metal)
+      and a tangent-space normal map (derivative TBN — no stored tangents); `MeshRenderer`
+      carries the maps + `metallic`/`roughness` factors (per-instance). `Mesh.load_gltf_pbr`
+      extracts all three maps + factors from a glTF material. Verified (`examples/pbr_test.cr`,
+      `gltf_pbr_test.cr`). Remaining: glTF animation (skins/keyframes); IBL/ambient probes.
 
 ## sdl3-cr
 

@@ -48,13 +48,22 @@ module Flock
     include Component
     property mesh : Mesh
     property material : Material3D?
-    property texture : Texture?
+    property texture : Texture? # base color
+    # PBR maps (glTF metallic-roughness workflow), used by the built-in shader:
+    # `metallic_roughness` packs roughness in G and metallic in B; `normal_map` is a
+    # tangent-space normal map. `metallic`/`roughness` are scalar factors (0..1)
+    # multiplied into the sampled values (or used alone when no map is set).
+    property metallic_roughness : Texture?
+    property normal_map : Texture?
+    property metallic : Float32
+    property roughness : Float32
     # Per-instance tint (multiplied into the mesh's vertex color) + alpha. Lets many
     # entities share one mesh yet render in different colors within a single draw.
     property tint : Color
 
     def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil,
-                   @tint : Color = Color::WHITE)
+                   @tint : Color = Color::WHITE, @metallic_roughness : Texture? = nil,
+                   @normal_map : Texture? = nil, @metallic : Float32 = 0.0f32, @roughness : Float32 = 1.0f32)
     end
   end
 

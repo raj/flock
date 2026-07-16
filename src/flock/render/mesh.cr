@@ -277,6 +277,53 @@ module Flock
       {mesh, gltf_base_color_texture(gpu, doc, buffers, File.dirname(path))}
     end
 
+    # Full PBR (glTF metallic-roughness) loader. Returns the mesh plus the first
+    # material's maps and scalar factors, ready to feed a `MeshRenderer`:
+    #   m = Mesh.load_gltf_pbr(gpu, "model.glb")
+    #   cmd.spawn(Transform3D.new, MeshRenderer.new(m[:mesh], texture: m[:base_color],
+    #     metallic_roughness: m[:metallic_roughness], normal_map: m[:normal],
+    #     metallic: m[:metallic], roughness: m[:roughness]))
+    def self.load_gltf_pbr(gpu : GpuContext, path : String, color : Color = Color::WHITE)
+      mesh = load_gltf(gpu, path, color)
+      json_text, glb_bin = read_gltf_container(path)
+      doc = JSON.parse(json_text)
+      buffers = gltf_buffers(doc, File.dirname(path), glb_bin)
+      dir = File.dirname(path)
+
+      base = nil.as(Texture?); mr = nil.as(Texture?); normal = nil.as(Texture?)
+      metallic = 1.0f32; roughness = 1.0f32
+
+      if mats = doc["materials"]?
+        mats.as_a.each do |m|
+          pbr = m["pbrMetallicRoughness"]?
+          if pbr
+            metallic = pbr["metallicFactor"]?.try(&.as_f.to_f32) || 1.0f32
+            roughness = pbr["roughnessFactor"]?.try(&.as_f.to_f32) || 1.0f32
+            if bc = pbr["baseColorTexture"]?
+              base = gltf_texture_at(gpu, doc, buffers, dir, bc["index"].as_i)
+            end
+            if m2 = pbr["metallicRoughnessTexture"]?
+              mr = gltf_texture_at(gpu, doc, buffers, dir, m2["index"].as_i)
+            end
+          end
+          if nt = m["normalTexture"]?
+            normal = gltf_texture_at(gpu, doc, buffers, dir, nt["index"].as_i)
+          end
+          break if base || mr || normal
+        end
+      end
+
+      {mesh: mesh, base_color: base, metallic_roughness: mr, normal: normal,
+       metallic: metallic, roughness: roughness}
+    end
+
+    private def self.gltf_texture_at(gpu : GpuContext, doc : JSON::Any, buffers : Array(Bytes),
+                                     dir : String, ti : Int32) : Texture
+      tex = doc["textures"].as_a[ti]
+      img = doc["images"].as_a[tex["source"].as_i]
+      gltf_load_image(gpu, doc, img, buffers, dir)
+    end
+
     # Finds the first material's base-color texture and decodes it (or nil if none).
     private def self.gltf_base_color_texture(gpu : GpuContext, doc : JSON::Any,
                                              buffers : Array(Bytes), dir : String) : Texture?
