@@ -120,8 +120,11 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       **CUBICSPLINE** (Hermite with in/out tangents; `examples/cubicspline_test.cr`).
       **Ambient probe**: `Flock::AmbientLight` (hemisphere sky/ground by world normal) tints
       the PBR ambient term — a cheap IBL stand-in; neutral gray when absent
-      (`examples/ambient_test.cr`). Remaining: GPU skinning (joint-matrix buffer + shader);
-      full IBL (prefiltered environment + BRDF LUT).
+      (`examples/ambient_test.cr`). **GPU skinning**: `Flock::GpuSkinnedModel` + a dedicated
+      skinned pipeline (2nd vertex buffer for joints/weights, joint matrices in group2) skin
+      pos/normal in the vertex shader; only joint matrices upload per frame. Additive — the
+      rigid path is untouched. Matches CPU skinning pixel-for-pixel (`examples/skinning_gpu_test.cr`).
+      Remaining (nice-to-have): full IBL (prefiltered environment + BRDF LUT).
 
 ## sdl3-cr
 

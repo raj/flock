@@ -11,6 +11,25 @@ module Flock
     end
   end
 
+  # A GPU-skinned mesh instance (drawn with Renderer3D's skinned pipeline): it reuses a
+  # bind-pose `Mesh` for slot 0, plus a skin vertex buffer (joints+weights) for slot 1
+  # and a joint-matrix storage buffer updated each frame. Built via
+  # `Renderer3D#build_gpu_skin` and driven by `Flock::GpuSkinnedModel`.
+  struct GpuSkinnedMesh
+    include Component
+    getter mesh : Mesh
+    getter skin_buf : LibWGPU::Buffer
+    getter skin_bytes : UInt64
+    getter joint_buf : LibWGPU::Buffer
+    getter joint_group : LibWGPU::BindGroup
+    getter joint_count : Int32
+    getter joint_nodes : Array(Int32)
+    getter inverse_binds : Array(Mat4)
+
+    def initialize(@mesh, @skin_buf, @skin_bytes, @joint_buf, @joint_group, @joint_count, @joint_nodes, @inverse_binds)
+    end
+  end
+
   # A custom 3D material: a render pipeline built from user WGSL by
   # `Renderer3D#build_material`, sharing the renderer's pipeline layout (group0 =
   # camera + models + globals) and vertex layout (pos/normal/color). Assign to
@@ -136,6 +155,49 @@ module Flock
     }
     SHADER
 
+    # GPU skinning shader: reads per-vertex joints/weights from vertex buffer slot 1 and
+    # joint matrices from group2, and skins pos/normal on the GPU. Reuses group0 (cam +
+    # globals) and group1 (base color). Simple diffuse + hemisphere ambient.
+    SKINNED_WGSL = <<-SHADER
+    struct Camera { view_proj : mat4x4<f32> };
+    struct Globals { a : vec4<f32>, b : vec4<f32>, c : vec4<f32>, d : vec4<f32> };
+    @group(0) @binding(0) var<uniform> cam : Camera;
+    @group(0) @binding(2) var<uniform> globals : Globals;
+    @group(1) @binding(0) var base_tex : texture_2d<f32>;
+    @group(1) @binding(1) var samp : sampler;
+    @group(2) @binding(0) var<storage, read> joints : array<mat4x4<f32>>;
+
+    struct VSOut {
+      @builtin(position) clip : vec4<f32>,
+      @location(0) normal : vec3<f32>,
+      @location(1) color : vec3<f32>,
+      @location(2) uv : vec2<f32>,
+    };
+
+    @vertex
+    fn vs_main(@location(0) pos : vec3<f32>, @location(1) nrm : vec3<f32>,
+               @location(2) col : vec3<f32>, @location(3) uv : vec2<f32>,
+               @location(4) ji : vec4<u32>, @location(5) jw : vec4<f32>) -> VSOut {
+      let skin = jw.x * joints[ji.x] + jw.y * joints[ji.y] + jw.z * joints[ji.z] + jw.w * joints[ji.w];
+      var out : VSOut;
+      let wp = skin * vec4<f32>(pos, 1.0);
+      out.clip = cam.view_proj * wp;
+      out.normal = normalize((skin * vec4<f32>(nrm, 0.0)).xyz);
+      out.color = col;
+      out.uv = uv;
+      return out;
+    }
+
+    @fragment
+    fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
+      let base = in.color * textureSample(base_tex, samp, in.uv).rgb;
+      let n = normalize(in.normal);
+      let d = max(dot(n, normalize(vec3<f32>(0.4, 0.8, 0.6))), 0.0);
+      let amb = mix(globals.d.rgb, globals.c.rgb, n.y * 0.5 + 0.5);
+      return vec4<f32>(base * (amb + d), 1.0);
+    }
+    SHADER
+
     @model_capacity : Int32 = 64
     @scratch : Array(Float32) = [] of Float32
     @scratch_n : Array(Float32) = [] of Float32
@@ -153,6 +215,10 @@ module Flock
     @group0_layout : LibWGPU::BindGroupLayout
     @group1_layout : LibWGPU::BindGroupLayout # texture + sampler
     @pipeline_layout : LibWGPU::PipelineLayout
+    # GPU skinning: joint-matrix bind group layout + a dedicated skinned pipeline.
+    @joint_layout : LibWGPU::BindGroupLayout
+    @skinned_shader : LibWGPU::ShaderModule
+    @skinned_pipeline : LibWGPU::RenderPipeline
     @white : Texture
     @flat_normal : Texture # 1x1 (0,0,1) tangent-space normal (no perturbation)
     @samplers : Hash(Tuple(SamplerFilter, SamplerWrap), LibWGPU::Sampler) = {} of Tuple(SamplerFilter, SamplerWrap) => LibWGPU::Sampler
@@ -178,6 +244,11 @@ module Flock
 
       @shader = build_shader(WGSL)
       @pipeline = build_pipeline(@shader)
+
+      # Skinned pipeline (group0 + group1 + joint matrices in group2).
+      @joint_layout = build_joint_layout
+      @skinned_shader = build_shader(SKINNED_WGSL)
+      @skinned_pipeline = build_skinned_pipeline(@skinned_shader)
 
       @uniform_buf = make_buffer(64_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
       @model_buf = make_buffer((@model_capacity * MODEL_BYTES).to_u64,
@@ -220,6 +291,9 @@ module Flock
       LibWGPU.buffer_release(@normal_buf)
       LibWGPU.buffer_release(@model_buf)
       LibWGPU.buffer_release(@uniform_buf)
+      LibWGPU.render_pipeline_release(@skinned_pipeline)
+      LibWGPU.shader_module_release(@skinned_shader)
+      LibWGPU.bind_group_layout_release(@joint_layout)
       LibWGPU.pipeline_layout_release(@pipeline_layout)
       LibWGPU.render_pipeline_release(@pipeline)
       LibWGPU.shader_module_release(@shader)
@@ -439,6 +513,145 @@ module Flock
       desc.multisample = multisample
       desc.fragment = pointerof(fragment)
       LibWGPU.device_create_render_pipeline(@gpu.device, pointerof(desc))
+    end
+
+    # group2 for skinning: a read-only storage buffer of joint matrices (vertex stage).
+    private def build_joint_layout : LibWGPU::BindGroupLayout
+      jb = LibWGPU::BufferBindingLayout.new
+      jb.type_ = LibWGPU::BufferBindingType::ReadOnlyStorage
+      e0 = LibWGPU::BindGroupLayoutEntry.new
+      e0.binding = 0_u32
+      e0.visibility = LibWGPU::ShaderStage::Vertex
+      e0.buffer = jb
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[1]
+      entries[0] = e0
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 1_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
+    private def build_skinned_pipeline(shader : LibWGPU::ShaderModule) : LibWGPU::RenderPipeline
+      vs = WGPU.string_view("vs_main")
+      fs = WGPU.string_view("fs_main")
+
+      # Buffer 0: the bind-pose mesh (pos/normal/color/uv), same layout as the rigid path.
+      a0 = LibWGPU::VertexAttribute.new; a0.format = LibWGPU::VertexFormat::Float32x3; a0.offset = 0_u64; a0.shader_location = 0_u32
+      a1 = LibWGPU::VertexAttribute.new; a1.format = LibWGPU::VertexFormat::Float32x3; a1.offset = 12_u64; a1.shader_location = 1_u32
+      a2 = LibWGPU::VertexAttribute.new; a2.format = LibWGPU::VertexFormat::Float32x3; a2.offset = 24_u64; a2.shader_location = 2_u32
+      a3 = LibWGPU::VertexAttribute.new; a3.format = LibWGPU::VertexFormat::Float32x2; a3.offset = 36_u64; a3.shader_location = 3_u32
+      attrs0 = uninitialized LibWGPU::VertexAttribute[4]
+      attrs0[0] = a0; attrs0[1] = a1; attrs0[2] = a2; attrs0[3] = a3
+
+      # Buffer 1: skin data — joints (Uint32x4) + weights (Float32x4), stride 32.
+      a4 = LibWGPU::VertexAttribute.new; a4.format = LibWGPU::VertexFormat::Uint32x4; a4.offset = 0_u64; a4.shader_location = 4_u32
+      a5 = LibWGPU::VertexAttribute.new; a5.format = LibWGPU::VertexFormat::Float32x4; a5.offset = 16_u64; a5.shader_location = 5_u32
+      attrs1 = uninitialized LibWGPU::VertexAttribute[2]
+      attrs1[0] = a4; attrs1[1] = a5
+
+      # Configure each layout as a local, then copy into the array (indexing a
+      # StaticArray of structs returns a copy, so `layouts[0].field = …` wouldn't stick).
+      l0 = LibWGPU::VertexBufferLayout.new
+      l0.step_mode = LibWGPU::VertexStepMode::Vertex
+      l0.array_stride = Mesh::STRIDE
+      l0.attribute_count = 4_u64
+      l0.attributes = attrs0.to_unsafe
+      l1 = LibWGPU::VertexBufferLayout.new
+      l1.step_mode = LibWGPU::VertexStepMode::Vertex
+      l1.array_stride = 32_u64
+      l1.attribute_count = 2_u64
+      l1.attributes = attrs1.to_unsafe
+      layouts = uninitialized LibWGPU::VertexBufferLayout[2]
+      layouts[0] = l0
+      layouts[1] = l1
+
+      vertex = LibWGPU::VertexState.new
+      vertex.module_ = shader
+      vertex.entry_point = vs
+      vertex.buffer_count = 2_u64
+      vertex.buffers = layouts.to_unsafe
+
+      target = LibWGPU::ColorTargetState.new
+      target.format = @gpu.format
+      target.write_mask = LibWGPU::ColorWriteMask::All
+      fragment = LibWGPU::FragmentState.new
+      fragment.module_ = shader
+      fragment.entry_point = fs
+      fragment.target_count = 1_u64
+      fragment.targets = pointerof(target)
+
+      primitive = LibWGPU::PrimitiveState.new
+      primitive.topology = LibWGPU::PrimitiveTopology::TriangleList
+      primitive.front_face = LibWGPU::FrontFace::CCW
+      primitive.cull_mode = LibWGPU::CullMode::None
+
+      face = LibWGPU::StencilFaceState.new
+      face.compare = LibWGPU::CompareFunction::Always
+      face.fail_op = LibWGPU::StencilOperation::Keep
+      face.depth_fail_op = LibWGPU::StencilOperation::Keep
+      face.pass_op = LibWGPU::StencilOperation::Keep
+      depth = LibWGPU::DepthStencilState.new
+      depth.format = LibWGPU::TextureFormat::Depth32Float
+      depth.depth_write_enabled = LibWGPU::OptionalBool::True
+      depth.depth_compare = LibWGPU::CompareFunction::Less
+      depth.stencil_front = face
+      depth.stencil_back = face
+
+      multisample = LibWGPU::MultisampleState.new
+      multisample.count = 1_u32
+      multisample.mask = 0xFFFFFFFF_u32
+
+      pl_layouts = uninitialized LibWGPU::BindGroupLayout[3]
+      pl_layouts[0] = @group0_layout; pl_layouts[1] = @group1_layout; pl_layouts[2] = @joint_layout
+      pld = LibWGPU::PipelineLayoutDescriptor.new
+      pld.label = WGPU.empty_string_view
+      pld.bind_group_layout_count = 3_u64
+      pld.bind_group_layouts = pl_layouts.to_unsafe
+      skinned_layout = LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(pld))
+
+      desc = LibWGPU::RenderPipelineDescriptor.new
+      desc.label = WGPU.empty_string_view
+      desc.layout = skinned_layout
+      desc.vertex = vertex
+      desc.primitive = primitive
+      desc.depth_stencil = pointerof(depth)
+      desc.multisample = multisample
+      desc.fragment = pointerof(fragment)
+      pipe = LibWGPU.device_create_render_pipeline(@gpu.device, pointerof(desc))
+      LibWGPU.pipeline_layout_release(skinned_layout)
+      pipe
+    end
+
+    # Builds a GPU-skinned mesh: reuses `mesh` for slot 0, uploads a skin vertex buffer
+    # (joints u32x4 + weights f32x4 per vertex) and allocates a joint-matrix storage
+    # buffer (+ its bind group). Feed `joints`/`weights` 4-per-vertex, in mesh order.
+    def build_gpu_skin(mesh : Mesh, joints : Array(Int32), weights : Array(Float32),
+                       joint_nodes : Array(Int32), inverse_binds : Array(Mat4)) : GpuSkinnedMesh
+      vcount = joints.size // 4
+      skin = Array(UInt32).new(vcount * 8)
+      vcount.times do |v|
+        4.times { |i| skin << joints[v * 4 + i].to_u32 }
+        4.times { |i| skin << weights[v * 4 + i].unsafe_as(UInt32) } # reinterpret f32 bits
+      end
+      skin_bytes = (skin.size * 4).to_u64
+      skin_buf = make_buffer(skin_bytes, LibWGPU::BufferUsage::Vertex | LibWGPU::BufferUsage::CopyDst)
+      LibWGPU.queue_write_buffer(@gpu.queue, skin_buf, 0_u64, skin.to_unsafe.as(Void*), skin_bytes)
+
+      jcount = joint_nodes.size
+      joint_buf = make_buffer((jcount * MODEL_BYTES).to_u64, LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
+      e0 = LibWGPU::BindGroupEntry.new
+      e0.binding = 0_u32; e0.buffer = joint_buf; e0.offset = 0_u64; e0.size = (jcount * MODEL_BYTES).to_u64
+      entries = uninitialized LibWGPU::BindGroupEntry[1]
+      entries[0] = e0
+      bgd = LibWGPU::BindGroupDescriptor.new
+      bgd.label = WGPU.empty_string_view
+      bgd.layout = @joint_layout
+      bgd.entry_count = 1_u64
+      bgd.entries = entries.to_unsafe
+      joint_group = LibWGPU.device_create_bind_group(@gpu.device, pointerof(bgd))
+
+      GpuSkinnedMesh.new(mesh, skin_buf, skin_bytes, joint_buf, joint_group, jcount, joint_nodes, inverse_binds)
     end
 
     private def build_group0 : LibWGPU::BindGroup
@@ -665,6 +878,22 @@ module Flock
         # One instanced draw for the whole group; first_instance = base offset.
         LibWGPU.render_pass_encoder_draw_indexed(pass, mesh.index_count, count, 0_u32, 0, base)
         base += count
+      end
+
+      # GPU-skinned meshes (own pipeline + skin buffer + joint group). Additive: no-op
+      # when the scene has none, so the rigid path above is unaffected.
+      white_group = nil.as(LibWGPU::BindGroup?)
+      world.query(GpuSkinnedMesh) do |_e, sk|
+        s = sk.value
+        white_group ||= tex_group(@white, @white, @flat_normal)
+        LibWGPU.render_pass_encoder_set_pipeline(pass, @skinned_pipeline)
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, white_group.not_nil!, 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 2_u32, s.joint_group, 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, s.mesh.vertex_buf, 0_u64, s.mesh.vertex_bytes)
+        LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 1_u32, s.skin_buf, 0_u64, s.skin_bytes)
+        LibWGPU.render_pass_encoder_set_index_buffer(pass, s.mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, s.mesh.index_bytes)
+        LibWGPU.render_pass_encoder_draw_indexed(pass, s.mesh.index_count, 1_u32, 0_u32, 0, 0_u32)
       end
 
       LibWGPU.render_pass_encoder_end(pass)

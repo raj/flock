@@ -282,4 +282,44 @@ module Flock
       apply
     end
   end
+
+  # GPU-skinned variant of SkinnedModel: skinning runs in the vertex shader. Each frame
+  # it only uploads the joint matrices (not the vertices) to each skin's storage buffer;
+  # Renderer3D draws the skinned meshes with its skinned pipeline.
+  class GpuSkinnedModel
+    getter scene : GltfScene
+    property time : Float32 = 0.0f32
+    property clip : Int32 = 0
+    @skins : Array(GpuSkinnedMesh)
+
+    def initialize(@scene : GltfScene, @gpu : GpuContext, @skins : Array(GpuSkinnedMesh))
+    end
+
+    def self.spawn(scene : GltfScene, world : World, renderer : Renderer3D, gpu : GpuContext) : GpuSkinnedModel
+      skins = [] of GpuSkinnedMesh
+      scene.skins.each do |part|
+        gsm = renderer.build_gpu_skin(part.mesh, part.joints, part.weights, part.joint_nodes, part.inverse_binds)
+        world.add(world.spawn, gsm)
+        skins << gsm
+      end
+      new(scene, gpu, skins)
+    end
+
+    # Uploads joint matrices (worldJoint · inverseBind) for the current pose.
+    def apply : Nil
+      worlds = @scene.world_matrices(@time, @clip)
+      @skins.each do |gsm|
+        mats = Array(Float32).new(gsm.joint_count * 16)
+        gsm.joint_count.times { |j| mats.concat((worlds[gsm.joint_nodes[j]] * gsm.inverse_binds[j]).m) }
+        LibWGPU.queue_write_buffer(@gpu.queue, gsm.joint_buf, 0_u64, mats.to_unsafe.as(Void*), (mats.size * 4).to_u64)
+      end
+    end
+
+    def update(dt : Float32) : Nil
+      d = (@scene.animations[@clip]?.try(&.duration)) || 0.0f32
+      @time += dt
+      @time = @time % d if d > 0 && @time > d
+      apply
+    end
+  end
 end
