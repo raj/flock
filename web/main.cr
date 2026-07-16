@@ -1,8 +1,9 @@
-# Flock web demo, built on the WebPlugins backend (web_backend.cr). Same structure as a
-# native Flock game: an App with plugins + systems on schedules, querying components.
-# Bouncing squares (ECS movement) + a white player square driven by the arrow keys.
+# Flock web demo on the WebPlugins backend. Shows textured sprites (a procedural
+# checkerboard), text rasterized to a texture, keyboard + Web Gamepad input, and a
+# WebAudio beep — all driven by the shared App/Plugin/Schedule/ECS core in WASM.
 #
-# Build: web/build.sh  → web/app.wasm + web/app.mjs  (served with index.html + renderer.js)
+# Controls: arrow keys or a gamepad's left stick move the white player; Space (or gamepad
+# button 0) plays a beep. Build: web/build.sh
 require "./web_backend"
 
 WIDTH  = 800.0f32
@@ -24,14 +25,23 @@ app = Flock::App.new
 app.add_plugin(Flock::Web::WebPlugins.new)
 
 app.add_startup do |_world, cmd|
-  160.times do
-    s = 12.0f32 + rand.to_f32 * 30.0f32
+  checker = Flock::Web.checkerboard # procedural texture (id)
+
+  120.times do
+    s = 16.0f32 + rand.to_f32 * 30.0f32
     cmd.spawn(
       Flock::Web::Transform2D.new(Flock::Vec2.new(rand.to_f32 * WIDTH, rand.to_f32 * HEIGHT)),
       Flock::Web::Sprite.new(Flock::Vec2.new(s, s),
-        Flock::Vec3.new(0.3f32 + rand.to_f32 * 0.7f32, 0.3f32 + rand.to_f32 * 0.7f32, 0.3f32 + rand.to_f32 * 0.7f32)),
-      Velocity.new(Flock::Vec2.new((rand.to_f32 - 0.5f32) * 300.0f32, (rand.to_f32 - 0.5f32) * 300.0f32)))
+        Flock::Vec3.new(0.4f32 + rand.to_f32 * 0.6f32, 0.4f32 + rand.to_f32 * 0.6f32, 0.4f32 + rand.to_f32 * 0.6f32),
+        checker),
+      Velocity.new(Flock::Vec2.new((rand.to_f32 - 0.5f32) * 280.0f32, (rand.to_f32 - 0.5f32) * 280.0f32)))
   end
+
+  # Text rasterized to a texture, drawn as a (tinted) sprite.
+  title = Flock::Web.make_text("FLOCK · WEB")
+  cmd.spawn(
+    Flock::Web::Transform2D.new(Flock::Vec2.new(WIDTH * 0.5f32 - 150.0f32, 24.0f32)),
+    Flock::Web::Sprite.new(Flock::Vec2.new(300, 60), Flock::Vec3.new(0.6, 0.9, 1.0), title))
 
   cmd.spawn(
     Player.new,
@@ -39,7 +49,7 @@ app.add_startup do |_world, cmd|
     Flock::Web::Sprite.new(Flock::Vec2.new(44, 44), Flock::Vec3.new(1.0, 1.0, 1.0)))
 end
 
-# Bouncing squares.
+# Bouncing checkerboard squares.
 app.add_system(Flock::Schedule::Update) do |world, _cmd|
   dt = world.resource(Flock::Time).delta.to_f32
   world.query(Flock::Web::Transform2D, Velocity) do |_e, tf, vel|
@@ -56,7 +66,7 @@ app.add_system(Flock::Schedule::Update) do |world, _cmd|
   end
 end
 
-# Player: arrow-key movement (WebPlugins Input resource).
+# Player: keyboard arrows + gamepad left stick.
 app.add_system(Flock::Schedule::Update) do |world, _cmd|
   dt = world.resource(Flock::Time).delta.to_f32
   inp = world.resource(Flock::Web::Input)
@@ -65,10 +75,23 @@ app.add_system(Flock::Schedule::Update) do |world, _cmd|
   dx += 1.0f32 if inp.pressed?(Flock::Web::ARROW_RIGHT)
   dy -= 1.0f32 if inp.pressed?(Flock::Web::ARROW_UP)
   dy += 1.0f32 if inp.pressed?(Flock::Web::ARROW_DOWN)
+  if inp.gamepad_connected?
+    dx += inp.gamepad_x if inp.gamepad_x.abs > 0.15f32
+    dy += inp.gamepad_y if inp.gamepad_y.abs > 0.15f32
+  end
   world.query(Player, Flock::Web::Transform2D) do |_e, _p, tf|
-    np = tf.value.position + Flock::Vec2.new(dx, dy) * (320.0f32 * dt)
+    np = tf.value.position + Flock::Vec2.new(dx, dy) * (340.0f32 * dt)
     tf.value.position = Flock::Vec2.new(np.x.clamp(0.0f32, WIDTH - 44.0f32), np.y.clamp(0.0f32, HEIGHT - 44.0f32))
   end
+end
+
+# Beep on Space / gamepad button 0 (edge-triggered).
+space_prev = false
+app.add_system(Flock::Schedule::Update) do |world, _cmd|
+  inp = world.resource(Flock::Web::Input)
+  now = inp.pressed?(Flock::Web::SPACE) || inp.gamepad_button?(0)
+  Flock::Web.beep(660, 120) if now && !space_prev
+  space_prev = now
 end
 
 Flock::Web.launch(app)

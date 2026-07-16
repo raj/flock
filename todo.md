@@ -188,9 +188,25 @@ Ship a Flock scene as HTML/WebAssembly. **Working spike done** (`web/`):
       requestAnimationFrame. `web/main.cr` demos it (bouncing squares + arrow-key player);
       verified in Chrome (input moves the player). One glue fix: `build.sh` patches the
       generated `clock_time_get` to refresh a detached memory view after WASM heap growth.
-- [ ] **Next**: textures/text; Web Gamepad API; WebAudio; a shared component layer so identical
-      game source runs on native + web (today the web target uses `Flock::Web::*` components).
-      wgpu-native + SDL3 stay native-only — the browser path is this separate WebGPU/DOM backend.
+- [x] **Textures + text**: `Sprite#texture` (a renderer texture id); the render system groups
+      sprites by texture and the WebGPU renderer draws one batch per texture. `Flock::Web
+      .checkerboard` (procedural) and `.make_text(str)` (rasterized on a 2D canvas → texture)
+      register textures. Verified in Chrome (checkerboard sprites + a "FLOCK · WEB" text banner).
+- [x] **Web Gamepad**: `renderer.js` polls `navigator.getGamepads()` each frame → `flock_gamepad`
+      → the `Input` resource (`gamepad_x/y`, `gamepad_button?`); the demo player also moves with
+      the left stick. (Wired + headless-validated; a physical pad isn't exercised in CI.)
+- [x] **WebAudio**: `Flock::Web.beep(freq, ms)` plays a WebAudio oscillator (AudioContext created
+      on the first key gesture per autoplay policy). The demo beeps on Space / gamepad button 0.
+- [ ] **Remaining (web)**:
+      - **Shared components**: same game source on native + web (today web uses `Flock::Web::*`;
+        the native `Sprite` pulls in wgpu types → extract native-free `Transform2D`/`Color`/etc.).
+      - **Sprite atlas / UV sub-rects** (textures are whole-image today) + mipmaps.
+      - **Load files**: images (fetch → `createImageBitmap`) and audio (fetch → `decodeAudioData`),
+        not just procedural textures + oscillator beeps.
+      - **Input/display**: touch + pointer events, canvas resize / HiDPI (devicePixelRatio).
+      - **Packaging**: `--release` build (`wasm-opt -Oz`) + size report; make the `WESH` path
+        discoverable instead of hard-coded in `build.sh`.
+      - wgpu-native + SDL3 stay native-only — the browser path is this separate WebGPU/DOM backend.
 
 ## Remaining work (open)
 
