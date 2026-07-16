@@ -111,8 +111,12 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       hierarchy (geometry unbaked, one Mesh per mesh-node) and parses TRS keyframe animations
       (LINEAR/STEP, quaternion nlerp); `Flock::AnimatedModel` spawns an entity per node and
       `update`/`apply` writes each node's world matrix into a `Transform3D#matrix_override`.
-      Verified (`examples/anim_test.cr`). Remaining: skinning (skeletal/JOINTS+WEIGHTS);
-      CUBICSPLINE interpolation; IBL/ambient probes.
+      Verified (`examples/anim_test.cr`). **Skinning (CPU)**: `load_gltf_scene` parses `skins`
+      (joints + inverse-bind matrices) and per-vertex JOINTS_0/WEIGHTS_0; `Flock::SkinnedModel`
+      computes joint matrices from the animated hierarchy each frame and rewrites the mesh
+      vertex buffer on the CPU (Σ weight · jointMatrix · bindVertex) — reuses the whole existing
+      pipeline (no skinned shader). Verified (`examples/skinning_test.cr`). Remaining: GPU
+      skinning (joint-matrix buffer + shader); CUBICSPLINE interpolation; IBL/ambient probes.
 
 ## sdl3-cr
 

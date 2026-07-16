@@ -306,7 +306,8 @@ module Flock
           else
             StaticArray[0.0f32, 0.0f32, 0.0f32, 1.0f32]
           end
-        mesh = (mi = n["mesh"]?) ? local_mesh.call(mi.as_i) : nil
+        # Skinned nodes are handled as SkinnedParts (below), not as rigid node meshes.
+        mesh = (n["skin"]?.nil? && (mi = n["mesh"]?)) ? local_mesh.call(mi.as_i) : nil
         children = n["children"]?.try(&.as_a.map(&.as_i)) || [] of Int32
         GltfNode.new(t, rot, s, mesh, children)
       end
@@ -333,7 +334,41 @@ module Flock
         GltfAnimation.new(anim["name"]?.try(&.as_s) || "", channels)
       end
 
-      GltfScene.new(nodes, roots, animations)
+      skins = [] of SkinnedPart
+      json_nodes.each do |n|
+        next unless n["skin"]? && n["mesh"]?
+        skins << gltf_build_skinned_part(gpu, doc, n, accessors, views, buffers, color)
+      end
+
+      GltfScene.new(nodes, roots, animations, skins)
+    end
+
+    # Builds a CPU-skinned part for a node that has both a mesh and a skin: the bind-pose
+    # vertices (identity local space), per-vertex JOINTS_0/WEIGHTS_0, and the skin's joint
+    # node indices + inverse-bind matrices.
+    private def self.gltf_build_skinned_part(gpu : GpuContext, doc : JSON::Any, node : JSON::Any,
+                                             accessors, views, buffers : Array(Bytes), color : Color) : SkinnedPart
+      skin = doc["skins"].as_a[node["skin"].as_i]
+      joint_nodes = skin["joints"].as_a.map(&.as_i)
+      ibm = gltf_read_floats(accessors, views, buffers, skin["inverseBindMatrices"].as_i)[0]
+      inverse_binds = Array(Mat4).new(joint_nodes.size) do |j|
+        a = StaticArray(Float32, 16).new(0.0f32)
+        16.times { |k| a[k] = ibm[j * 16 + k] } # glTF matrices are column-major
+        Mat4.new(a)
+      end
+
+      verts = [] of Float32
+      indices = [] of UInt32
+      joints = [] of Int32
+      weights = [] of Float32
+      doc["meshes"].as_a[node["mesh"].as_i]["primitives"].as_a.each do |prim|
+        gltf_append_primitive(prim, Mat4.identity, doc, accessors, views, buffers, color, verts, indices)
+        attrs = prim["attributes"]
+        gltf_read_floats(accessors, views, buffers, attrs["JOINTS_0"].as_i)[0].each { |x| joints << x.to_i }
+        weights.concat(gltf_read_floats(accessors, views, buffers, attrs["WEIGHTS_0"].as_i)[0])
+      end
+
+      SkinnedPart.new(build(gpu, verts, indices), verts, joints, weights, joint_nodes, inverse_binds)
     end
 
     # Like `load_gltf`, but also loads the first material's base-color texture (from an

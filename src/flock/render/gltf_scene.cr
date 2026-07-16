@@ -78,14 +78,32 @@ module Flock
     end
   end
 
+  # A CPU-skinned mesh: bind-pose interleaved vertices (Mesh::FLOATS floats each) plus
+  # per-vertex joint indices (into `joint_nodes`) and weights, the skin's joint node
+  # indices and inverse-bind matrices, and the target Mesh whose vertex buffer is
+  # rewritten each frame with the skinned positions/normals.
+  class SkinnedPart
+    getter mesh : Mesh
+    getter bind_verts : Array(Float32)
+    getter joints : Array(Int32)   # 4 per vertex
+    getter weights : Array(Float32) # 4 per vertex
+    getter joint_nodes : Array(Int32)
+    getter inverse_binds : Array(Mat4)
+
+    def initialize(@mesh, @bind_verts, @joints, @weights, @joint_nodes, @inverse_binds)
+    end
+  end
+
   # A loaded glTF scene graph with its animations. `world_matrices(t)` evaluates the
-  # hierarchy at a given time. Node (TRS) animation only — skinning is not supported.
+  # hierarchy at a given time. Covers node (TRS) animation and CPU skinning (`skins`).
   class GltfScene
     getter nodes : Array(GltfNode)
     getter roots : Array(Int32)
     getter animations : Array(GltfAnimation)
+    getter skins : Array(SkinnedPart)
 
-    def initialize(@nodes : Array(GltfNode), @roots : Array(Int32), @animations : Array(GltfAnimation))
+    def initialize(@nodes : Array(GltfNode), @roots : Array(Int32),
+                   @animations : Array(GltfAnimation), @skins : Array(SkinnedPart) = [] of SkinnedPart)
     end
 
     def mesh_nodes : Array(Int32)
@@ -168,6 +186,71 @@ module Flock
       @time += dt
       @time = @time % d if d > 0 && @time > d
       apply(world)
+    end
+  end
+
+  # Plays a skinned glTF scene: spawns each skinned mesh (identity transform — the
+  # skinned vertices are already in scene space) and, each frame, computes joint
+  # matrices from the animated node hierarchy and rewrites the mesh vertex buffers on
+  # the CPU (Σ weight · jointMatrix · bindVertex). Correctness-first; GPU skinning is a
+  # future optimization.
+  class SkinnedModel
+    getter scene : GltfScene
+    property time : Float32 = 0.0f32
+    property clip : Int32 = 0
+
+    def initialize(@scene : GltfScene, @gpu : GpuContext)
+    end
+
+    # Spawns one entity (identity Transform3D) per skinned mesh and returns the player.
+    def self.spawn(scene : GltfScene, world : World, gpu : GpuContext, tint : Color = Color::WHITE) : SkinnedModel
+      scene.skins.each do |part|
+        e = world.spawn
+        world.add(e, Transform3D.new)
+        world.add(e, MeshRenderer.new(part.mesh, tint: tint))
+      end
+      new(scene, gpu)
+    end
+
+    # CPU-skins every part at the current time and uploads the new vertices.
+    def apply : Nil
+      worlds = @scene.world_matrices(@time, @clip)
+      f = Mesh::FLOATS
+      @scene.skins.each do |part|
+        jmats = Array(Mat4).new(part.joint_nodes.size) do |j|
+          worlds[part.joint_nodes[j]] * part.inverse_binds[j]
+        end
+        verts = part.bind_verts.dup
+        vcount = part.bind_verts.size // f
+        vcount.times do |v|
+          bx = part.bind_verts[v * f]; by = part.bind_verts[v * f + 1]; bz = part.bind_verts[v * f + 2]
+          bnx = part.bind_verts[v * f + 3]; bny = part.bind_verts[v * f + 4]; bnz = part.bind_verts[v * f + 5]
+          px = 0.0f32; py = 0.0f32; pz = 0.0f32
+          nx = 0.0f32; ny = 0.0f32; nz = 0.0f32
+          4.times do |i|
+            w = part.weights[v * 4 + i]
+            next if w == 0.0f32
+            m = jmats[part.joints[v * 4 + i]]
+            tp = m.transform_point(Vec3.new(bx, by, bz))
+            px += tp.x * w; py += tp.y * w; pz += tp.z * w
+            nd = m.transform_direction(Vec3.new(bnx, bny, bnz))
+            nx += nd.x * w; ny += nd.y * w; nz += nd.z * w
+          end
+          nl = Math.sqrt(nx * nx + ny * ny + nz * nz)
+          nl = 1.0f32 if nl == 0
+          verts[v * f] = px; verts[v * f + 1] = py; verts[v * f + 2] = pz
+          verts[v * f + 3] = nx / nl; verts[v * f + 4] = ny / nl; verts[v * f + 5] = nz / nl
+        end
+        LibWGPU.queue_write_buffer(@gpu.queue, part.mesh.vertex_buf, 0_u64,
+          verts.to_unsafe.as(Void*), (verts.size * 4).to_u64)
+      end
+    end
+
+    def update(dt : Float32) : Nil
+      d = (@scene.animations[@clip]?.try(&.duration)) || 0.0f32
+      @time += dt
+      @time = @time % d if d > 0 && @time > d
+      apply
     end
   end
 end

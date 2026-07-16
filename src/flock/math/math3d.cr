@@ -226,6 +226,14 @@ module Flock
         self[0, 2] * p.x + self[1, 2] * p.y + self[2, 2] * p.z + self[3, 2])
     end
 
+    # Transforms a direction (w=0): rotation/scale only, ignoring translation.
+    def transform_direction(v : Vec3) : Vec3
+      Vec3.new(
+        self[0, 0] * v.x + self[1, 0] * v.y + self[2, 0] * v.z,
+        self[0, 1] * v.x + self[1, 1] * v.y + self[2, 1] * v.z,
+        self[0, 2] * v.x + self[1, 2] * v.y + self[2, 2] * v.z)
+    end
+
     # Per-axis scale factors = lengths of the upper-3x3 basis columns (rotation-invariant).
     def scale_factors : Vec3
       sx = Math.sqrt(self[0, 0]**2 + self[0, 1]**2 + self[0, 2]**2)
