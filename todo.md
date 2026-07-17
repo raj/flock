@@ -149,9 +149,11 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       shader (group3: light-vp + `texture_depth_2d` + `sampler_comparison`) applies a 3×3 PCF shadow
       factor to that light only. No caster → group3 is bound but unused, so lit/legacy scenes are
       unchanged. GPU-skinned meshes cast shadows too (a skinned depth pass, `SHADOW_SKINNED_WGSL`,
-      skins the vertices into the same map). See `examples/shadow_test.cr` + `shadow_skinned_test.cr`
-      (shadows-on vs -off readbacks). *Spot/point shadows, morph casters, and shadow-frustum fitting
-      to off-screen casters are future work.*
+      skins the vertices into the same map), and the light frustum is fit to the rigid AABB **plus**
+      each skinned caster's per-frame world AABB (shared-by-reference `SkinnedBounds` updated by
+      `GpuSkinnedModel`), so a skinned caster outside/above the rigid geometry — or a skinned-only
+      scene — still casts correctly. See `examples/shadow_test.cr` + `shadow_skinned_test.cr` +
+      `shadow_skinned_fit_test.cr`. *Spot/point shadows and morph shadow casters are future work.*
 - [x] **Transparency / alpha blending.** Set `transparent: true` on a `MeshRenderer`. Opaque
       meshes still batch/instance as before; translucent ones are collected separately, sorted
       back-to-front by camera distance, and drawn after all opaque geometry with a blended

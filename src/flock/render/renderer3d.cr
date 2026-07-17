@@ -52,6 +52,29 @@ module Flock
     end
   end
 
+  # Mutable, shared-by-reference world-space AABB of a skinned mesh's current pose. It's a
+  # class (reference), so the `GpuSkinnedMesh` copy stored in the World and the copy held by
+  # `GpuSkinnedModel` share ONE object: the model updates it each frame, the renderer reads
+  # it (to fit the shadow frustum) without any write-back plumbing.
+  class SkinnedBounds
+    property min : Vec3 = Vec3.new(Float32::MAX, Float32::MAX, Float32::MAX)
+    property max : Vec3 = Vec3.new(-Float32::MAX, -Float32::MAX, -Float32::MAX)
+    getter? valid : Bool = false
+
+    def reset : Nil
+      @min = Vec3.new(Float32::MAX, Float32::MAX, Float32::MAX)
+      @max = Vec3.new(-Float32::MAX, -Float32::MAX, -Float32::MAX)
+      @valid = false
+    end
+
+    # Folds a world sphere (center ± radius) into the AABB.
+    def add(c : Vec3, r : Float32) : Nil
+      @min = Vec3.new(Math.min(@min.x, c.x - r), Math.min(@min.y, c.y - r), Math.min(@min.z, c.z - r))
+      @max = Vec3.new(Math.max(@max.x, c.x + r), Math.max(@max.y, c.y + r), Math.max(@max.z, c.z + r))
+      @valid = true
+    end
+  end
+
   # A GPU-skinned mesh instance (drawn with Renderer3D's skinned pipeline): it reuses a
   # bind-pose `Mesh` for slot 0, plus a skin vertex buffer (joints+weights) for slot 1
   # and a joint-matrix storage buffer updated each frame. Built via
@@ -66,6 +89,7 @@ module Flock
     getter joint_count : Int32
     getter joint_nodes : Array(Int32)
     getter inverse_binds : Array(Mat4)
+    getter bounds : SkinnedBounds = SkinnedBounds.new # shared, updated by GpuSkinnedModel
 
     def initialize(@mesh, @skin_buf, @skin_bytes, @joint_buf, @joint_group, @joint_count, @joint_nodes, @inverse_binds)
     end
@@ -2133,10 +2157,23 @@ module Flock
           @scratch_p.to_unsafe.as(Void*), (@scratch_p.size * 4).to_u64)
       end
 
+      # Fold the GPU-skinned casters' world AABBs into the shadow bounds, so the light
+      # frustum covers them too (they aren't in the rigid `groups`). Their bounds are kept
+      # current by GpuSkinnedModel each frame (shared-by-reference SkinnedBounds).
+      if shadow_index >= 0
+        world.query(GpuSkinnedMesh) do |_e, sk|
+          b = sk.value.bounds
+          next unless b.valid?
+          bb_min = Vec3.new(Math.min(bb_min.x, b.min.x), Math.min(bb_min.y, b.min.y), Math.min(bb_min.z, b.min.z))
+          bb_max = Vec3.new(Math.max(bb_max.x, b.max.x), Math.max(bb_max.y, b.max.y), Math.max(bb_max.z, b.max.z))
+        end
+      end
+
       # Shadow pass: render the drawn instances from the caster's point of view into the
-      # shadow map. Fit an orthographic light frustum to the scene AABB. Runs before the
-      # main pass; the same @model_buf + group layout (base offsets) are reused.
-      shadow_on = shadow_index >= 0 && total > 0 && bb_max.x >= bb_min.x
+      # shadow map. Fit an orthographic light frustum to the scene AABB (rigid + skinned).
+      # Runs before the main pass; the same @model_buf + group layout (base offsets) reused.
+      # Gated on a valid AABB (not total>0): a skinned-only scene still casts shadows.
+      shadow_on = shadow_index >= 0 && bb_max.x >= bb_min.x
       if shadow_on
         center = Vec3.new((bb_min.x + bb_max.x) * 0.5f32, (bb_min.y + bb_max.y) * 0.5f32, (bb_min.z + bb_max.z) * 0.5f32)
         ext = bb_max - center

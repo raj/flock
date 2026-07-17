@@ -415,12 +415,22 @@ module Flock
       new(scene, gpu, skins)
     end
 
-    # Uploads joint matrices (worldJoint · inverseBind) for the current pose.
+    # Uploads joint matrices (worldJoint · inverseBind) for the current pose, and refreshes
+    # each skin's world-space AABB (union of the bind sphere transformed by every skinning
+    # matrix — a conservative bound of the deformed mesh, so the shadow frustum can fit it).
     def apply : Nil
       worlds = @scene.world_matrices(@time, @clip)
       @skins.each do |gsm|
         mats = Array(Float32).new(gsm.joint_count * 16)
-        gsm.joint_count.times { |j| mats.concat((worlds[gsm.joint_nodes[j]] * gsm.inverse_binds[j]).m) }
+        gsm.bounds.reset
+        c0 = gsm.mesh.bounds_center
+        r0 = gsm.mesh.bounds_radius == Float32::MAX ? 1.0f32 : gsm.mesh.bounds_radius
+        gsm.joint_count.times do |j|
+          sm = worlds[gsm.joint_nodes[j]] * gsm.inverse_binds[j]
+          mats.concat(sm.m)
+          s = sm.scale_factors
+          gsm.bounds.add(sm.transform_point(c0), r0 * Math.max(s.x, Math.max(s.y, s.z)))
+        end
         LibWGPU.queue_write_buffer(@gpu.queue, gsm.joint_buf, 0_u64, mats.to_unsafe.as(Void*), (mats.size * 4).to_u64)
       end
     end
