@@ -294,10 +294,11 @@ notes buried in the completed entries plus the two open sections:
 ### Polish left on shipped features
 - [ ] **Mouse**: cursor control (hide/capture/relative mode).
 - [ ] **Text**: per-string texture cache + glyph atlas (native side; web already caches).
-- [ ] **Sampler**: mipmap generation (native `Texture` is single-mip — see "3D — remaining").
-- [ ] **3D**: see the dedicated **"3D — remaining"** section (glTF emissive/occlusion/morph
-      targets). Lighting, directional shadow mapping, transparency, MSAA, native mipmaps and
-      HDR post-processing/tonemapping are done.
+- [ ] **3D**: see the dedicated **"3D — remaining"** section. Lighting, directional shadow
+      mapping, transparency, MSAA, native mipmaps, HDR post-processing/tonemapping, glTF
+      material completeness (emissive/occlusion/alpha modes) and camera controllers + skinned
+      normal matrix are done. Left: glTF morph targets / multiple UVs / `KHR_lights_punctual`,
+      and deformed-mesh frustum culling.
 - [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
 
 ### Cross-platform validation
