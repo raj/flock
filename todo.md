@@ -143,8 +143,13 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       falloff. With no `Light` entities the shader keeps its legacy hard-coded directional light,
       so existing scenes/tests are unchanged. See `examples/lights_test.cr` (directional/point/spot
       readbacks verified).
-- [ ] **Shadows (shadow mapping).** None. Add a depth-only pass from the light into a depth
-      texture + a comparison sampler in the main shader (directional first; spot/point later).
+- [x] **Shadows (shadow mapping).** Directional shadow caster: set `casts_shadows: true` on a
+      directional `Light`. `Renderer3D` fits an orthographic light frustum to the drawn scene AABB,
+      renders a depth-only pass into a 2048² `Depth32Float` shadow map (`SHADOW_WGSL`), and the PBR
+      shader (group3: light-vp + `texture_depth_2d` + `sampler_comparison`) applies a 3×3 PCF shadow
+      factor to that light only. No caster → group3 is bound but unused, so lit/legacy scenes are
+      unchanged. See `examples/shadow_test.cr` (shadows-on vs -off readback). *Spot/point shadows and
+      shadow-frustum fitting to off-screen casters are future work.*
 - [ ] **Transparency / alpha blending.** The 3D color target is **opaque only** (no `BlendState`,
       `write_mask = All`, depth-write on). Add an alpha-blended material flag + back-to-front
       sorting for translucent meshes (blend enabled, depth-write off).
@@ -270,9 +275,9 @@ notes buried in the completed entries plus the two open sections:
 - [ ] **Mouse**: cursor control (hide/capture/relative mode).
 - [ ] **Text**: per-string texture cache + glyph atlas (native side; web already caches).
 - [ ] **Sampler**: mipmap generation (native `Texture` is single-mip — see "3D — remaining").
-- [ ] **3D**: see the dedicated **"3D — remaining"** section (shadows, transparency,
-      MSAA, native mipmaps, post-processing/tonemapping, glTF emissive/occlusion/morph targets).
-      Lighting system is done.
+- [ ] **3D**: see the dedicated **"3D — remaining"** section (transparency, MSAA, native
+      mipmaps, post-processing/tonemapping, glTF emissive/occlusion/morph targets).
+      Lighting system and directional shadow mapping are done.
 - [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
 
 ### Cross-platform validation

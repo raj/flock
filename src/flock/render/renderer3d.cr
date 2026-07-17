@@ -25,18 +25,21 @@ module Flock
     property kind : LightKind
     property color : Color
     property intensity : Float32
-    property direction : Vec3 # directional/spot aim (world space)
-    property range : Float32  # point/spot falloff radius
-    property inner : Float32  # spot inner cone half-angle (radians)
-    property outer : Float32  # spot outer cone half-angle (radians)
+    property direction : Vec3    # directional/spot aim (world space)
+    property range : Float32     # point/spot falloff radius
+    property inner : Float32     # spot inner cone half-angle (radians)
+    property outer : Float32     # spot outer cone half-angle (radians)
+    property casts_shadows : Bool # only the first directional shadow-caster is honored
 
     def initialize(@kind : LightKind = LightKind::Directional, @color : Color = Color::WHITE,
                    @intensity : Float32 = 1.0f32, @direction : Vec3 = Vec3.new(0, -1, 0),
-                   @range : Float32 = 10.0f32, @inner : Float32 = 0.3f32, @outer : Float32 = 0.5f32)
+                   @range : Float32 = 10.0f32, @inner : Float32 = 0.3f32, @outer : Float32 = 0.5f32,
+                   @casts_shadows : Bool = false)
     end
 
-    def self.directional(direction : Vec3, color : Color = Color::WHITE, intensity : Number = 1.0) : Light
-      new(LightKind::Directional, color, intensity.to_f32, direction)
+    def self.directional(direction : Vec3, color : Color = Color::WHITE, intensity : Number = 1.0,
+                          casts_shadows : Bool = false) : Light
+      new(LightKind::Directional, color, intensity.to_f32, direction, casts_shadows: casts_shadows)
     end
 
     def self.point(color : Color = Color::WHITE, intensity : Number = 1.0, range : Number = 10.0) : Light
@@ -98,8 +101,9 @@ module Flock
     MODEL_BYTES   = 64 # mat4 (16 f32)
     GLOBALS_BYTES = 64 # time / camera position / ambient sky / ambient ground (4 vec4)
     PARAM_BYTES   = 32 # per-instance: tint vec4 + {metallic, roughness, _, _} vec4
-    MAX_LIGHTS    = 16 # storage-buffer capacity; extra lights are dropped
-    LIGHT_BYTES   = 64 # per light: 4 vec4 (pos+kind / dir+range / color+intensity / cones)
+    MAX_LIGHTS    = 16   # storage-buffer capacity; extra lights are dropped
+    LIGHT_BYTES   = 64   # per light: 4 vec4 (pos+kind / dir+range / color+intensity / cones)
+    SHADOW_SIZE   = 2048 # shadow map resolution (Depth32Float), single directional caster
 
     WGSL = <<-SHADER
     struct Camera { view_proj : mat4x4<f32> };
@@ -125,6 +129,10 @@ module Flock
     @group(2) @binding(1) var pref_cube : texture_cube<f32>;   // prefiltered specular (mips)
     @group(2) @binding(2) var brdf_lut : texture_2d<f32>;      // split-sum BRDF LUT
     @group(2) @binding(3) var ibl_samp : sampler;
+    // group3: shadow map for the directional caster at index globals.a.w (-1 = none).
+    @group(3) @binding(0) var<uniform> light_vp : mat4x4<f32>; // world -> light clip space
+    @group(3) @binding(1) var shadow_map : texture_depth_2d;
+    @group(3) @binding(2) var shadow_samp : sampler_comparison;
 
     struct VSOut {
       @builtin(position) clip : vec4<f32>,
@@ -166,6 +174,29 @@ module Flock
       if (denom < 1e-12) { return nn; }
       let inv = inverseSqrt(denom);
       return normalize(T * (inv * m.x) + B * (inv * m.y) + nn * m.z);
+    }
+
+    // Shadow factor for a world position (1 = lit, 0 = fully shadowed). Projects into the
+    // caster's light space and does a 3x3 PCF comparison against the shadow depth map.
+    fn sample_shadow(world : vec3<f32>) -> f32 {
+      let lp = light_vp * vec4<f32>(world, 1.0);
+      let ndc = lp.xyz / lp.w;
+      let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+      // Outside the shadow frustum -> treat as lit (no shadow information there).
+      if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0) {
+        return 1.0;
+      }
+      let bias = 0.0025;
+      let cur = ndc.z - bias;
+      let texel = 1.0 / 2048.0;
+      var sum = 0.0;
+      for (var y = -1; y <= 1; y = y + 1) {
+        for (var x = -1; x <= 1; x = x + 1) {
+          let off = vec2<f32>(f32(x), f32(y)) * texel;
+          sum = sum + textureSampleCompareLevel(shadow_map, shadow_samp, uv + off, cur);
+        }
+      }
+      return sum / 9.0;
     }
 
     // GGX / Cook-Torrance BRDF for one light direction L, returns (diffuse + spec) * NdotL.
@@ -230,7 +261,13 @@ module Flock
               atten = atten * clamp((cd - lg.v3.y) / max(lg.v3.x - lg.v3.y, 1e-4), 0.0, 1.0);
             }
           }
-          lit = lit + shade(N, V, L, base, metal, rough) * lg.v2.rgb * lg.v2.w * atten;
+          // Shadow only the designated directional caster. globals.a.w holds
+          // (caster index + 1); 0 means no shadow caster this frame.
+          var sh = 1.0;
+          if (i32(globals.a.w + 0.5) == i32(i) + 1) {
+            sh = sample_shadow(in.world);
+          }
+          lit = lit + shade(N, V, L, base, metal, rough) * lg.v2.rgb * lg.v2.w * atten * sh;
         }
       }
 
@@ -299,6 +336,19 @@ module Flock
     }
     SHADER
 
+    # Depth-only shadow pass: renders the rigid instances from the caster's point of view
+    # into the shadow map. Reuses group0's model storage buffer; the camera slot holds the
+    # light view-projection. No fragment output (depth is the only product).
+    SHADOW_WGSL = <<-SHADER
+    @group(0) @binding(0) var<uniform> light_vp : mat4x4<f32>;
+    @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
+
+    @vertex
+    fn vs_main(@location(0) pos : vec3<f32>, @builtin(instance_index) ii : u32) -> @builtin(position) vec4<f32> {
+      return light_vp * models[ii] * vec4<f32>(pos, 1.0);
+    }
+    SHADER
+
     @model_capacity : Int32 = 64
     @scratch : Array(Float32) = [] of Float32
     @scratch_n : Array(Float32) = [] of Float32
@@ -335,6 +385,19 @@ module Flock
     @globals_buf : LibWGPU::Buffer
     @lights_buf : LibWGPU::Buffer
     @group0 : LibWGPU::BindGroup
+    # Shadow mapping (single directional caster): a depth-only pass into @shadow_tex,
+    # sampled by the main PBR shader (group3) with a comparison sampler.
+    @shadow_layout : LibWGPU::BindGroupLayout       # group3 for the main pass
+    @shadow_pass_layout : LibWGPU::BindGroupLayout   # group0 for the depth pass
+    @shadow_pipeline_layout : LibWGPU::PipelineLayout
+    @shadow_shader : LibWGPU::ShaderModule
+    @shadow_pipeline : LibWGPU::RenderPipeline
+    @shadow_vp_buf : LibWGPU::Buffer                 # light view-projection (mat4)
+    @shadow_sampler : LibWGPU::Sampler               # comparison sampler
+    @shadow_tex : LibWGPU::Texture
+    @shadow_view : LibWGPU::TextureView
+    @shadow_group3 : LibWGPU::BindGroup              # main-pass: light_vp + map + sampler
+    @shadow_pass_group : LibWGPU::BindGroup          # depth-pass: light_vp + models
     @materials : Array(Material3D) = [] of Material3D
     @depth_tex : LibWGPU::Texture
     @depth_view : LibWGPU::TextureView
@@ -345,6 +408,7 @@ module Flock
       @group0_layout = build_group0_layout
       @group1_layout = build_group1_layout
       @ibl_layout = build_ibl_layout
+      @shadow_layout = build_shadow_layout
       @pipeline_layout = build_pipeline_layout
       @white = Texture.white(@gpu)
       @flat_normal = Texture.from_pixels(@gpu, 1, 1, Bytes[128_u8, 128_u8, 255_u8, 255_u8])
@@ -369,6 +433,19 @@ module Flock
       @lights_buf = make_buffer((MAX_LIGHTS * LIGHT_BYTES).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       @group0 = build_group0
+
+      # Shadow mapping: depth pass pipeline + shadow map + comparison sampler + bind groups.
+      @shadow_pass_layout = build_shadow_pass_layout
+      @shadow_pipeline_layout = build_shadow_pipeline_layout
+      @shadow_shader = build_shader(SHADOW_WGSL)
+      @shadow_pipeline = build_shadow_pipeline
+      @shadow_vp_buf = make_buffer(64_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
+      @shadow_sampler = build_shadow_sampler
+      @shadow_tex = Pointer(Void).null.as(LibWGPU::Texture)
+      @shadow_view = Pointer(Void).null.as(LibWGPU::TextureView)
+      build_shadow_texture
+      @shadow_group3 = build_shadow_group3
+      @shadow_pass_group = build_shadow_pass_group
 
       # Depth texture (lazily sized to the surface on first render).
       @depth_tex = Pointer(Void).null.as(LibWGPU::Texture)
@@ -395,6 +472,17 @@ module Flock
       @samplers.clear
       @white.release
       @flat_normal.release
+      LibWGPU.bind_group_release(@shadow_pass_group)
+      LibWGPU.bind_group_release(@shadow_group3)
+      LibWGPU.texture_view_release(@shadow_view) unless @shadow_view.null?
+      LibWGPU.texture_release(@shadow_tex) unless @shadow_tex.null?
+      LibWGPU.sampler_release(@shadow_sampler)
+      LibWGPU.buffer_release(@shadow_vp_buf)
+      LibWGPU.render_pipeline_release(@shadow_pipeline)
+      LibWGPU.shader_module_release(@shadow_shader)
+      LibWGPU.pipeline_layout_release(@shadow_pipeline_layout)
+      LibWGPU.bind_group_layout_release(@shadow_pass_layout)
+      LibWGPU.bind_group_layout_release(@shadow_layout)
       LibWGPU.bind_group_release(@group0)
       LibWGPU.buffer_release(@lights_buf)
       LibWGPU.buffer_release(@globals_buf)
@@ -514,15 +602,193 @@ module Flock
     end
 
     private def build_pipeline_layout : LibWGPU::PipelineLayout
-      layouts = uninitialized LibWGPU::BindGroupLayout[3]
+      layouts = uninitialized LibWGPU::BindGroupLayout[4]
       layouts[0] = @group0_layout
       layouts[1] = @group1_layout
       layouts[2] = @ibl_layout
+      layouts[3] = @shadow_layout
       d = LibWGPU::PipelineLayoutDescriptor.new
       d.label = WGPU.empty_string_view
-      d.bind_group_layout_count = 3_u64
+      d.bind_group_layout_count = 4_u64
       d.bind_group_layouts = layouts.to_unsafe
       LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(d))
+    end
+
+    # group3 (main pass): light view-projection uniform + shadow depth map + comparison sampler.
+    private def build_shadow_layout : LibWGPU::BindGroupLayout
+      ub = LibWGPU::BufferBindingLayout.new
+      ub.type_ = LibWGPU::BufferBindingType::Uniform
+      e0 = LibWGPU::BindGroupLayoutEntry.new
+      e0.binding = 0_u32; e0.visibility = LibWGPU::ShaderStage::Fragment; e0.buffer = ub
+
+      tex = LibWGPU::TextureBindingLayout.new
+      tex.sample_type = LibWGPU::TextureSampleType::Depth
+      tex.view_dimension = LibWGPU::TextureViewDimension::N2D
+      e1 = LibWGPU::BindGroupLayoutEntry.new
+      e1.binding = 1_u32; e1.visibility = LibWGPU::ShaderStage::Fragment; e1.texture = tex
+
+      smp = LibWGPU::SamplerBindingLayout.new
+      smp.type_ = LibWGPU::SamplerBindingType::Comparison
+      e2 = LibWGPU::BindGroupLayoutEntry.new
+      e2.binding = 2_u32; e2.visibility = LibWGPU::ShaderStage::Fragment; e2.sampler = smp
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[3]
+      entries[0] = e0; entries[1] = e1; entries[2] = e2
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 3_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
+    # group0 for the depth-only shadow pass: light-vp uniform + model storage buffer.
+    private def build_shadow_pass_layout : LibWGPU::BindGroupLayout
+      ub = LibWGPU::BufferBindingLayout.new
+      ub.type_ = LibWGPU::BufferBindingType::Uniform
+      e0 = LibWGPU::BindGroupLayoutEntry.new
+      e0.binding = 0_u32; e0.visibility = LibWGPU::ShaderStage::Vertex; e0.buffer = ub
+
+      sb = LibWGPU::BufferBindingLayout.new
+      sb.type_ = LibWGPU::BufferBindingType::ReadOnlyStorage
+      e1 = LibWGPU::BindGroupLayoutEntry.new
+      e1.binding = 1_u32; e1.visibility = LibWGPU::ShaderStage::Vertex; e1.buffer = sb
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[2]
+      entries[0] = e0; entries[1] = e1
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 2_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
+    private def build_shadow_pipeline_layout : LibWGPU::PipelineLayout
+      layouts = uninitialized LibWGPU::BindGroupLayout[1]
+      layouts[0] = @shadow_pass_layout
+      d = LibWGPU::PipelineLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.bind_group_layout_count = 1_u64
+      d.bind_group_layouts = layouts.to_unsafe
+      LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(d))
+    end
+
+    # Depth-only pipeline (no fragment/color target) writing the shadow map.
+    private def build_shadow_pipeline : LibWGPU::RenderPipeline
+      vs = WGPU.string_view("vs_main")
+      a0 = LibWGPU::VertexAttribute.new
+      a0.format = LibWGPU::VertexFormat::Float32x3; a0.offset = 0_u64; a0.shader_location = 0_u32
+      attrs = uninitialized LibWGPU::VertexAttribute[1]
+      attrs[0] = a0
+      vlayout = LibWGPU::VertexBufferLayout.new
+      vlayout.step_mode = LibWGPU::VertexStepMode::Vertex
+      vlayout.array_stride = Mesh::STRIDE
+      vlayout.attribute_count = 1_u64
+      vlayout.attributes = attrs.to_unsafe
+
+      vertex = LibWGPU::VertexState.new
+      vertex.module_ = @shadow_shader
+      vertex.entry_point = vs
+      vertex.buffer_count = 1_u64
+      vertex.buffers = pointerof(vlayout)
+
+      primitive = LibWGPU::PrimitiveState.new
+      primitive.topology = LibWGPU::PrimitiveTopology::TriangleList
+      primitive.front_face = LibWGPU::FrontFace::CCW
+      primitive.cull_mode = LibWGPU::CullMode::None
+
+      face = LibWGPU::StencilFaceState.new
+      face.compare = LibWGPU::CompareFunction::Always
+      face.fail_op = LibWGPU::StencilOperation::Keep
+      face.depth_fail_op = LibWGPU::StencilOperation::Keep
+      face.pass_op = LibWGPU::StencilOperation::Keep
+      depth = LibWGPU::DepthStencilState.new
+      depth.format = LibWGPU::TextureFormat::Depth32Float
+      depth.depth_write_enabled = LibWGPU::OptionalBool::True
+      depth.depth_compare = LibWGPU::CompareFunction::Less
+      depth.stencil_front = face
+      depth.stencil_back = face
+
+      multisample = LibWGPU::MultisampleState.new
+      multisample.count = 1_u32
+      multisample.mask = 0xFFFFFFFF_u32
+
+      desc = LibWGPU::RenderPipelineDescriptor.new
+      desc.label = WGPU.empty_string_view
+      desc.layout = @shadow_pipeline_layout
+      desc.vertex = vertex
+      desc.primitive = primitive
+      desc.depth_stencil = pointerof(depth)
+      desc.multisample = multisample
+      desc.fragment = Pointer(LibWGPU::FragmentState).null
+      LibWGPU.device_create_render_pipeline(@gpu.device, pointerof(desc))
+    end
+
+    private def build_shadow_texture : Nil
+      desc = LibWGPU::TextureDescriptor.new
+      desc.label = WGPU.empty_string_view
+      desc.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::TextureBinding
+      desc.dimension = LibWGPU::TextureDimension::N2D
+      desc.size = LibWGPU::Extent3D.new(width: SHADOW_SIZE.to_u32, height: SHADOW_SIZE.to_u32, depth_or_array_layers: 1_u32)
+      desc.format = LibWGPU::TextureFormat::Depth32Float
+      desc.mip_level_count = 1_u32
+      desc.sample_count = 1_u32
+      @shadow_tex = LibWGPU.device_create_texture(@gpu.device, pointerof(desc))
+      vd = LibWGPU::TextureViewDescriptor.new
+      vd.label = WGPU.empty_string_view
+      vd.format = LibWGPU::TextureFormat::Depth32Float
+      vd.dimension = LibWGPU::TextureViewDimension::N2D
+      vd.base_mip_level = 0_u32; vd.mip_level_count = 1_u32
+      vd.base_array_layer = 0_u32; vd.array_layer_count = 1_u32
+      vd.aspect = LibWGPU::TextureAspect::DepthOnly
+      @shadow_view = LibWGPU.texture_create_view(@shadow_tex, pointerof(vd))
+    end
+
+    private def build_shadow_sampler : LibWGPU::Sampler
+      d = LibWGPU::SamplerDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.address_mode_u = LibWGPU::AddressMode::ClampToEdge
+      d.address_mode_v = LibWGPU::AddressMode::ClampToEdge
+      d.address_mode_w = LibWGPU::AddressMode::ClampToEdge
+      d.mag_filter = LibWGPU::FilterMode::Linear
+      d.min_filter = LibWGPU::FilterMode::Linear
+      d.mipmap_filter = LibWGPU::MipmapFilterMode::Nearest
+      d.lod_min_clamp = 0.0f32; d.lod_max_clamp = 1.0f32
+      d.compare = LibWGPU::CompareFunction::LessEqual
+      d.max_anisotropy = 1_u16
+      LibWGPU.device_create_sampler(@gpu.device, pointerof(d))
+    end
+
+    private def build_shadow_group3 : LibWGPU::BindGroup
+      e0 = LibWGPU::BindGroupEntry.new
+      e0.binding = 0_u32; e0.buffer = @shadow_vp_buf; e0.offset = 0_u64; e0.size = 64_u64
+      e1 = LibWGPU::BindGroupEntry.new
+      e1.binding = 1_u32; e1.texture_view = @shadow_view
+      e2 = LibWGPU::BindGroupEntry.new
+      e2.binding = 2_u32; e2.sampler = @shadow_sampler
+      entries = uninitialized LibWGPU::BindGroupEntry[3]
+      entries[0] = e0; entries[1] = e1; entries[2] = e2
+      d = LibWGPU::BindGroupDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.layout = @shadow_layout
+      d.entry_count = 3_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
+    end
+
+    private def build_shadow_pass_group : LibWGPU::BindGroup
+      e0 = LibWGPU::BindGroupEntry.new
+      e0.binding = 0_u32; e0.buffer = @shadow_vp_buf; e0.offset = 0_u64; e0.size = 64_u64
+      e1 = LibWGPU::BindGroupEntry.new
+      e1.binding = 1_u32; e1.buffer = @model_buf; e1.offset = 0_u64
+      e1.size = (@model_capacity * MODEL_BYTES).to_u64
+      entries = uninitialized LibWGPU::BindGroupEntry[2]
+      entries[0] = e0; entries[1] = e1
+      d = LibWGPU::BindGroupDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.layout = @shadow_pass_layout
+      d.entry_count = 2_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
     end
 
     # group2 (rigid pipeline): irradiance cube + prefiltered cube + BRDF LUT + sampler.
@@ -976,6 +1242,8 @@ module Flock
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       LibWGPU.bind_group_release(@group0)
       @group0 = build_group0
+      LibWGPU.bind_group_release(@shadow_pass_group)
+      @shadow_pass_group = build_shadow_pass_group
     end
 
     private def ensure_depth(w : UInt32, h : UInt32) : Nil
@@ -1015,13 +1283,14 @@ module Flock
       end
     end
 
-    # Renders the world's meshes into an arbitrary target (surface or offscreen),
-    # with its own depth buffer. Used by `render` and by readback tests.
-    # Packs every (Transform3D, Light) entity into the lights storage buffer and returns
-    # the count (capped at MAX_LIGHTS). Layout per light: 4 vec4 matching the WGSL `Light`.
-    private def upload_lights(world : World) : Int32
+    # Packs every (Transform3D, Light) entity into the lights storage buffer. Returns the
+    # light count (capped at MAX_LIGHTS), the index of the first directional shadow caster
+    # (-1 if none), and that caster's normalized travel direction. Layout per light: 4 vec4.
+    private def upload_lights(world : World) : {Int32, Int32, Vec3}
       @scratch_l.clear
       count = 0
+      shadow_index = -1
+      shadow_dir = Vec3.new(0, -1, 0)
       world.query(Transform3D, Light) do |_e, tf, lt|
         next if count >= MAX_LIGHTS
         l = lt.value
@@ -1029,10 +1298,15 @@ module Flock
         d = l.direction
         len = Math.sqrt(d.x * d.x + d.y * d.y + d.z * d.z).to_f32
         len = 1.0f32 if len < 1e-6f32
+        nd = Vec3.new(d.x / len, d.y / len, d.z / len)
+        if shadow_index < 0 && l.kind.directional? && l.casts_shadows
+          shadow_index = count
+          shadow_dir = nd
+        end
         # v0: position + kind
         @scratch_l << pos.x << pos.y << pos.z << l.kind.value.to_f32
         # v1: normalized direction + range
-        @scratch_l << d.x / len << d.y / len << d.z / len << l.range
+        @scratch_l << nd.x << nd.y << nd.z << l.range
         # v2: color + intensity
         @scratch_l << l.color.r << l.color.g << l.color.b << l.intensity
         # v3: cone cosines (spot) + padding
@@ -1043,9 +1317,53 @@ module Flock
         LibWGPU.queue_write_buffer(@gpu.queue, @lights_buf, 0_u64,
           @scratch_l.to_unsafe.as(Void*), (count * LIGHT_BYTES).to_u64)
       end
-      count
+      {count, shadow_index, shadow_dir}
     end
 
+    # Depth-only pass writing the shadow map from the caster's point of view. Iterates the
+    # same draw groups (identical instance base offsets as the main pass) so shadows match
+    # the rendered geometry. Submitted before the main pass, so the queue orders the write
+    # ahead of the sampling read.
+    private def render_shadow_pass(groups) : Nil
+      depth_att = LibWGPU::RenderPassDepthStencilAttachment.new
+      depth_att.view = @shadow_view
+      depth_att.depth_load_op = LibWGPU::LoadOp::Clear
+      depth_att.depth_store_op = LibWGPU::StoreOp::Store
+      depth_att.depth_clear_value = 1.0f32
+
+      pass_desc = LibWGPU::RenderPassDescriptor.new
+      pass_desc.label = WGPU.empty_string_view
+      pass_desc.color_attachment_count = 0_u64
+      pass_desc.color_attachments = Pointer(LibWGPU::RenderPassColorAttachment).null
+      pass_desc.depth_stencil_attachment = pointerof(depth_att)
+
+      enc_desc = LibWGPU::CommandEncoderDescriptor.new
+      enc_desc.label = WGPU.empty_string_view
+      encoder = LibWGPU.device_create_command_encoder(@gpu.device, pointerof(enc_desc))
+      pass = LibWGPU.command_encoder_begin_render_pass(encoder, pointerof(pass_desc))
+      LibWGPU.render_pass_encoder_set_pipeline(pass, @shadow_pipeline)
+      LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @shadow_pass_group, 0_u64, Pointer(UInt32).null)
+      base = 0_u32
+      groups.each do |(mesh, _mat, _b, _mrt, _nt, insts)|
+        count = insts.size.to_u32
+        LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, mesh.vertex_buf, 0_u64, mesh.vertex_bytes)
+        LibWGPU.render_pass_encoder_set_index_buffer(pass, mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, mesh.index_bytes)
+        LibWGPU.render_pass_encoder_draw_indexed(pass, mesh.index_count, count, 0_u32, 0, base)
+        base += count
+      end
+      LibWGPU.render_pass_encoder_end(pass)
+      cmd_desc = LibWGPU::CommandBufferDescriptor.new
+      cmd_desc.label = WGPU.empty_string_view
+      cmd = LibWGPU.command_encoder_finish(encoder, pointerof(cmd_desc))
+      cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
+      LibWGPU.queue_submit(@gpu.queue, 1_u64, cmds.to_unsafe)
+      LibWGPU.command_buffer_release(cmd)
+      LibWGPU.render_pass_encoder_release(pass)
+      LibWGPU.command_encoder_release(encoder)
+    end
+
+    # Renders the world's meshes into an arbitrary target (surface or offscreen),
+    # with its own depth buffer. Used by `render` and by readback tests.
     def render_into(world : World, target : LibWGPU::TextureView) : Nil
       ensure_depth(@gpu.width, @gpu.height)
 
@@ -1062,12 +1380,14 @@ module Flock
       ibl_group = ibl ? ibl.group : @default_ibl.group
       # Collect lights (Transform3D + Light) into the lights storage buffer. With none,
       # the shader keeps its legacy hard-coded directional light (count stays 0).
-      light_count = upload_lights(world)
+      light_count, shadow_index, shadow_dir = upload_lights(world)
 
       globals = StaticArray(Float32, 16).new(0.0f32)
       globals[0] = t
       globals[1] = ibl ? 1.0f32 : 0.0f32
       globals[2] = light_count.to_f32
+      # a.w = shadow caster index + 1 (0 = none); the shader shadows only that light.
+      globals[3] = shadow_index >= 0 ? (shadow_index + 1).to_f32 : 0.0f32
       globals[4] = cam.position.x; globals[5] = cam.position.y; globals[6] = cam.position.z
       globals[8] = amb.sky.r; globals[9] = amb.sky.g; globals[10] = amb.sky.b
       globals[12] = amb.ground.r; globals[13] = amb.ground.g; globals[14] = amb.ground.b
@@ -1116,16 +1436,28 @@ module Flock
 
       # Even with nothing to draw (empty scene or everything culled) we still run the
       # pass below so the frame is cleared; only the buffer uploads are skipped.
+      # While packing, accumulate a world-space AABB of the drawn geometry so the shadow
+      # frustum can be fitted to it (only needed when a caster is present).
+      bb_min = Vec3.new(Float32::MAX, Float32::MAX, Float32::MAX)
+      bb_max = Vec3.new(-Float32::MAX, -Float32::MAX, -Float32::MAX)
       if total > 0
         ensure_capacity(total)
         @scratch.clear
         @scratch_n.clear
         @scratch_p.clear
-        groups.each do |(_m, _mat, _b, _mrt, _nt, insts)|
+        groups.each do |(mesh, _mat, _b, _mrt, _nt, insts)|
           insts.each do |(model, tint, metallic, roughness)|
             @scratch.concat(model.m)
             @scratch_n.concat(model.normal_matrix.m)
             @scratch_p.push(tint.r, tint.g, tint.b, tint.a, metallic, roughness, 0.0f32, 0.0f32)
+            if shadow_index >= 0
+              c = model.transform_point(mesh.bounds_center)
+              s = model.scale_factors
+              r = (mesh.bounds_radius == Float32::MAX ? 1.0f32 : mesh.bounds_radius) *
+                  Math.max(s.x, Math.max(s.y, s.z))
+              bb_min = Vec3.new(Math.min(bb_min.x, c.x - r), Math.min(bb_min.y, c.y - r), Math.min(bb_min.z, c.z - r))
+              bb_max = Vec3.new(Math.max(bb_max.x, c.x + r), Math.max(bb_max.y, c.y + r), Math.max(bb_max.z, c.z + r))
+            end
           end
         end
         LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
@@ -1134,6 +1466,24 @@ module Flock
           @scratch_n.to_unsafe.as(Void*), (@scratch_n.size * 4).to_u64)
         LibWGPU.queue_write_buffer(@gpu.queue, @param_buf, 0_u64,
           @scratch_p.to_unsafe.as(Void*), (@scratch_p.size * 4).to_u64)
+      end
+
+      # Shadow pass: render the drawn instances from the caster's point of view into the
+      # shadow map. Fit an orthographic light frustum to the scene AABB. Runs before the
+      # main pass; the same @model_buf + group layout (base offsets) are reused.
+      shadow_on = shadow_index >= 0 && total > 0 && bb_max.x >= bb_min.x
+      if shadow_on
+        center = Vec3.new((bb_min.x + bb_max.x) * 0.5f32, (bb_min.y + bb_max.y) * 0.5f32, (bb_min.z + bb_max.z) * 0.5f32)
+        ext = bb_max - center
+        radius = Math.max(ext.x, Math.max(ext.y, ext.z))
+        radius = 0.5f32 if radius < 1e-3f32
+        up = shadow_dir.y.abs > 0.99f32 ? Vec3.new(0, 0, 1) : Vec3.new(0, 1, 0)
+        eye = center - shadow_dir * (radius + 1.0f32)
+        view = Mat4.look_at(eye, center, up)
+        proj = Mat4.orthographic(-radius, radius, -radius, radius, 0.05, (2.0f32 * radius + 2.0f32))
+        light_vp = proj * view
+        LibWGPU.queue_write_buffer(@gpu.queue, @shadow_vp_buf, 0_u64, light_vp.m.to_unsafe.as(Void*), 64_u64)
+        render_shadow_pass(groups)
       end
 
       color_att = LibWGPU::RenderPassColorAttachment.new
@@ -1165,6 +1515,9 @@ module Flock
       LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
       # group2 = IBL (rigid pipeline); default (unused) environment when none is set.
       LibWGPU.render_pass_encoder_set_bind_group(pass, 2_u32, ibl_group, 0_u64, Pointer(UInt32).null)
+      # group3 = shadow map (light_vp + depth map + comparison sampler); the shader only
+      # samples it for the caster at globals.a.w, so it is harmless when no caster is set.
+      LibWGPU.render_pass_encoder_set_bind_group(pass, 3_u32, @shadow_group3, 0_u64, Pointer(UInt32).null)
       current = Pointer(Void).null.as(LibWGPU::RenderPipeline)
 
       base = 0_u32
