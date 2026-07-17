@@ -21,13 +21,28 @@ module Flock
     getter height : UInt32
     getter filter : SamplerFilter
     getter wrap : SamplerWrap
+    # Stable, process-unique id — a safe cache key (a view's pointer address could be reused
+    # by a later texture; an id never is).
+    getter id : UInt64
+    @@next_id : UInt64 = 0_u64
+    # Callbacks fired on `release` (renderers register here to evict this texture's cached
+    # bind groups, so releasing a dynamic texture doesn't leak them).
+    @on_release = [] of ->
 
     def initialize(@texture : LibWGPU::Texture, @view : LibWGPU::TextureView,
                    @width : UInt32, @height : UInt32,
                    @filter : SamplerFilter = SamplerFilter::Nearest, @wrap : SamplerWrap = SamplerWrap::Clamp)
+      @id = (@@next_id += 1)
+    end
+
+    # Registers a callback invoked once, when this texture is released.
+    def on_release(&block : ->) : Nil
+      @on_release << block
     end
 
     def release : Nil
+      @on_release.each &.call
+      @on_release.clear
       LibWGPU.texture_view_release(@view)
       LibWGPU.texture_release(@texture)
     end

@@ -419,7 +419,7 @@ module Flock
     end
 
     private def tex_group(texture : Texture) : LibWGPU::BindGroup
-      @tex_groups.fetch(texture.view.address) do
+      @tex_groups.fetch(texture.id) do
         e0 = LibWGPU::BindGroupEntry.new
         e0.binding = 0_u32
         e0.texture_view = texture.view
@@ -437,7 +437,10 @@ module Flock
         d.entry_count = 2_u64
         d.entries = entries.to_unsafe
         bg = LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
-        @tex_groups[texture.view.address] = bg
+        @tex_groups[texture.id] = bg
+        # Evict + free this bind group when the texture is released (dynamic-text friendly).
+        id = texture.id
+        texture.on_release { @tex_groups.delete(id).try { |g| LibWGPU.bind_group_release(g) } }
         bg
       end
     end

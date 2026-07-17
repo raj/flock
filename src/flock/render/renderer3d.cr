@@ -1391,10 +1391,14 @@ module Flock
       LibWGPU.device_create_sampler(@gpu.device, pointerof(d))
     end
 
+    # Number of cached texture bind groups (for tests / diagnostics).
+    def cached_texture_groups : Int32
+      @tex_groups.size
+    end
+
     private def tex_group(base : Texture, mr : Texture, normal : Texture,
                           emissive : Texture, occlusion : Texture) : LibWGPU::BindGroup
-      key = {base.view.address, mr.view.address, normal.view.address,
-             emissive.view.address, occlusion.view.address}
+      key = {base.id, mr.id, normal.id, emissive.id, occlusion.id}
       @tex_groups.fetch(key) do
         e0 = LibWGPU::BindGroupEntry.new; e0.binding = 0_u32; e0.texture_view = base.view
         e1 = LibWGPU::BindGroupEntry.new; e1.binding = 1_u32; e1.sampler = sampler_for(base.filter, base.wrap)
@@ -1411,6 +1415,13 @@ module Flock
         d.entries = entries.to_unsafe
         bg = LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
         @tex_groups[key] = bg
+        # Evict when ANY of the keyed textures is released. First release wins; a later one
+        # finds the entry gone (delete returns nil) and no-ops. Skip @white/@flat_normal
+        # (defaults live for the renderer's lifetime and are released in `release`).
+        {base, mr, normal, emissive, occlusion}.each do |tex|
+          next if tex.same?(@white) || tex.same?(@flat_normal)
+          tex.on_release { @tex_groups.delete(key).try { |g| LibWGPU.bind_group_release(g) } }
+        end
         bg
       end
     end
