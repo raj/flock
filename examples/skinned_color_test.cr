@@ -75,8 +75,7 @@ renderer.render_into(world, target.view)
 px = target.read
 center = px.rgb(32, 32)
 
-target.release
-renderer.release; gpu.release
+Flock.release_all(target, renderer, gpu)
 
 puts "skinned quad center = #{center} (expect green, not the red fallback)"
 ok = center[1] > 150 && center[1] > center[0] * 2 && center[1] > center[2] * 2

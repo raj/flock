@@ -32,11 +32,7 @@ puts "center = #{center}, corner = #{corner}"
 ok = center[2] > 60 && center[2].to_i > center[0].to_i && # blue from the texture
      corner[0] < 20 && corner[1] < 20 && corner[2] < 20
 
-target.release
-blue.release
-cube.release
-renderer.release
-gpu.release
+Flock.release_all(target, blue, cube, renderer, gpu)
 
 puts ok ? "✅ textured 3D mesh OK" : "❌ 3D texture not sampled as expected"
 exit(ok ? 0 : 1)

@@ -64,8 +64,7 @@ renderer.render_into(world, target.view) # <-- would raise a validation error be
 px = target.read
 center = px.rgb(32, 32)
 
-target.release
-red.release; renderer.release; gpu.release
+Flock.release_all(target, red, renderer, gpu)
 
 puts "center = #{center} (translucent red over green morph quad)"
 # Both channels present: red panel (R) blended over the green morph quad (G) behind it.

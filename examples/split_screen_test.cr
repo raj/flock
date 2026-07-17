@@ -37,9 +37,7 @@ puts "right half = #{right}"
 ok = left[0] > 200 && left[2] < 60 &&  # left red
      right[2] > 200 && right[0] < 60   # right blue
 
-target.release
-renderer.release
-gpu.release
+Flock.release_all(target, renderer, gpu)
 
 puts ok ? "✅ per-region clear (split-screen) OK" : "❌ regions not cleared as expected"
 exit(ok ? 0 : 1)

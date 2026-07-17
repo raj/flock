@@ -69,8 +69,7 @@ renderer.render_into(world, target.view)
 px = target.read
 center = px.rgb(32, 32)
 
-target.release
-renderer.release; gpu.release
+Flock.release_all(target, renderer, gpu)
 
 puts "center = #{center} (expect lit green; black => weight not de-normalized)"
 ok = center[1] > 100 && center[1] > center[0] && center[1] > center[2]

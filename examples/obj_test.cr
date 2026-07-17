@@ -57,10 +57,7 @@ puts "corner = #{corner}"
 ok = center[2] > 40 && center[2].to_i > center[0].to_i && # bluish, non-background
      corner[0] < 20 && corner[1] < 20 && corner[2] < 20
 
-target.release
-mesh.release
-renderer.release
-gpu.release
+Flock.release_all(target, mesh, renderer, gpu)
 
 puts ok ? "✅ OBJ loading OK" : "❌ OBJ mesh not rendered as expected"
 exit(ok ? 0 : 1)

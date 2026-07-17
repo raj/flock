@@ -41,11 +41,7 @@ end
 puts "bright pixels (text) = #{bright}"
 
 # Cleanup
-target.release
-text_tex.release
-font.release
-renderer.release
-gpu.release
+Flock.release_all(target, text_tex, font, renderer, gpu)
 
 if bright > 20
   puts "✅ text rendering OK"

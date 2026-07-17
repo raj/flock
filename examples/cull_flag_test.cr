@@ -34,8 +34,7 @@ renderer.render_into(make_world(cube, false), target.view)
 nocull_drawn = renderer.last_drawn
 nocull_culled = renderer.last_culled
 
-target.release
-cube.release; renderer.release; gpu.release
+Flock.release_all(target, cube, renderer, gpu)
 
 puts "cull:true  -> drawn=#{culled_drawn} culled=#{culled_culled}"
 puts "cull:false -> drawn=#{nocull_drawn} culled=#{nocull_culled}"

@@ -47,11 +47,7 @@ ok = center[1] > 60 && center[1].to_i > center[2].to_i && # 3D cube: green, non-
      sprite[2] > 90 && sprite[0] > 90 &&                  # 2D sprite: white (high blue+red)
      corner[0] < 20 && corner[1] < 20 && corner[2] < 20    # background
 
-target.release
-cube.release
-r2.release
-r3.release
-gpu.release
+Flock.release_all(target, cube, r2, r3, gpu)
 
 puts ok ? "✅ unified 2D + 3D OK" : "❌ 2D/3D composition not as expected"
 exit(ok ? 0 : 1)

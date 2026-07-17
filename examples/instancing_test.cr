@@ -45,10 +45,7 @@ puts "left lit = #{left}, right lit = #{right}, center dark = #{center_dark}, co
 
 ok = left && right && center_dark && corner_dark
 
-target.release
-cube.release
-renderer.release
-gpu.release
+Flock.release_all(target, cube, renderer, gpu)
 
 puts ok ? "✅ instanced meshes OK" : "❌ instancing not rendered as expected"
 exit(ok ? 0 : 1)

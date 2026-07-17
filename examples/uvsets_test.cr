@@ -48,8 +48,7 @@ world.query(Flock::Transform3D, Flock::MeshRenderer) do |_e, _tf, mr|
 end
 uv1 = render_center.call # base uses TEXCOORD_1 -> blue
 
-target.release
-mesh.release; tex.release; renderer.release; gpu.release
+Flock.release_all(target, mesh, tex, renderer, gpu)
 
 puts "TEXCOORD_0 center = #{uv0} (expect red)   TEXCOORD_1 center = #{uv1} (expect blue)"
 ok = uv0[0] > 150 && uv0[0] > uv0[2] * 2 &&  # uv0 -> red

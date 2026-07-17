@@ -97,9 +97,7 @@ ok = center[1] > 60 && center[1].to_i > center[0].to_i && center[1].to_i > cente
 
 target.release
 tex.try &.release
-mesh.release
-renderer.release
-gpu.release
+Flock.release_all(mesh, renderer, gpu)
 
 puts ok ? "✅ glTF base-color texture OK" : "❌ glTF texture not applied as expected"
 exit(ok ? 0 : 1)

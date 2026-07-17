@@ -47,8 +47,7 @@ end
 
 none = saturated(gpu, world, Flock::Tonemap::None)
 aces = saturated(gpu, world, Flock::Tonemap::Aces)
-sphere.release
-gpu.release
+Flock.release_all(sphere, gpu)
 
 puts "blown-out pixels: none=#{none}, ACES=#{aces}"
 ok = none > 300 &&            # without tonemapping the bright side clips badly

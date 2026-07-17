@@ -47,8 +47,7 @@ end
 
 aa = count_edge_pixels(gpu, world, 1)
 msaa = count_edge_pixels(gpu, world, 4)
-quad.release
-gpu.release
+Flock.release_all(quad, gpu)
 
 puts "partial-coverage edge pixels: aliased=#{aa}, MSAA 4x=#{msaa}"
 ok = msaa > aa * 3 && msaa > 100

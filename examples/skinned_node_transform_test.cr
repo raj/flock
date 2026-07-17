@@ -65,8 +65,7 @@ px = target.read
 left = px.rgb(8, 32)[1]    # where x=-2 projects (quad expected here with the fix)
 center = px.rgb(32, 32)[1] # x=0 (background with the fix; quad with the old code)
 
-target.release
-renderer.release; gpu.release
+Flock.release_all(target, renderer, gpu)
 
 puts "green: left(x=-2)=#{left}, center(x=0)=#{center}"
 ok = left > 120 && center < 40 # quad shifted left by the removed mesh-node transform

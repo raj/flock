@@ -34,10 +34,7 @@ puts "corner = #{corner}"
 ok = center[0] > 60 && center[0] > center[2] && # reddish, non-background
      corner[0] < 20 && corner[1] < 20 && corner[2] < 20 # background
 
-target.release
-cube.release
-renderer.release
-gpu.release
+Flock.release_all(target, cube, renderer, gpu)
 
 puts ok ? "✅ 3D mesh rendering OK" : "❌ cube not rendered as expected"
 exit(ok ? 0 : 1)

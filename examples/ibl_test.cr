@@ -41,11 +41,7 @@ puts "center with IBL    = #{with_ibl}"
 # With IBL the metallic sphere reflects the blue environment (blue-dominant, brighter).
 ok = with_ibl[2] > 80 && with_ibl[2] > with_ibl[0] && with_ibl[2] > no_ibl[2] + 20
 
-ibl.release
-sphere.release
-target.release
-renderer.release
-gpu.release
+Flock.release_all(ibl, sphere, target, renderer, gpu)
 
 puts ok ? "✅ prefiltered IBL OK" : "❌ IBL reflection not as expected"
 exit(ok ? 0 : 1)

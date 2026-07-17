@@ -60,9 +60,7 @@ puts "right (custom) = #{right}"
 ok = left[0] > 200 && left[2] < 60 && # left red
      right[2] > 200 && right[0] < 90  # right blue (custom shader)
 
-target.release
-renderer.release
-gpu.release
+Flock.release_all(target, renderer, gpu)
 
 puts ok ? "✅ per-sprite material OK" : "❌ materials not applied as expected"
 exit(ok ? 0 : 1)

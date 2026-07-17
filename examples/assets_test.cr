@@ -14,8 +14,7 @@ hit = a.same?(b)
 distinct = !a.same?(c)
 puts "font(24)==font(24) : #{hit}   font(24)!=font(48) : #{distinct}"
 
-assets.release
-gpu.release
+Flock.release_all(assets, gpu)
 ok = hit && distinct
 puts ok ? "✅ asset cache OK" : "❌ cache FAILED"
 exit(ok ? 0 : 1)

@@ -30,9 +30,7 @@ puts "center = #{center}, corner = #{corner}"
 ok = center[1] > 200 && center[0] < 60 && center[2] < 60 && # green center (from the bank texture)
      corner[0] < 60 && corner[1] < 60 && corner[2] < 60      # black corner
 
-target.release
-renderer.release
-gpu.release
+Flock.release_all(target, renderer, gpu)
 
 puts ok ? "✅ native Sprite2D (shared component) OK" : "❌ Sprite2D not rendered as expected"
 exit(ok ? 0 : 1)

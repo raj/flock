@@ -83,11 +83,7 @@ world.query(Flock::Transform3D, Flock::Light) do |_e, _tf, lt|
 end
 off_shadow, off_lit = render_and_sample.call
 
-target.release
-ground.release
-sphere.release
-renderer.release
-gpu.release
+Flock.release_all(target, ground, sphere, renderer, gpu)
 
 puts "shadow pixel: on=#{on_shadow} off=#{off_shadow}   lit control: on=#{on_lit} off=#{off_lit}"
 ok = off_shadow > 120 &&              # with shadows off, that ground point is lit

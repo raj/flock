@@ -49,10 +49,7 @@ puts "center = #{center}"
 ok = drawn == 1 && culled == 1 && drawn_nocull == 2 &&
      center[0].to_i + center[1].to_i + center[2].to_i > 40 # visible cube rendered
 
-target.release
-cube.release
-renderer.release
-gpu.release
+Flock.release_all(target, cube, renderer, gpu)
 
 puts ok ? "✅ frustum culling OK" : "❌ culling did not behave as expected"
 exit(ok ? 0 : 1)

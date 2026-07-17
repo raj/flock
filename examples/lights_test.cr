@@ -39,10 +39,7 @@ ok = center[0] > 60 &&              # visibly lit
      center[0] > center[1] * 2 &&   # strongly red
      center[0] > center[2] * 2
 
-target.release
-sphere.release
-renderer.release
-gpu.release
+Flock.release_all(target, sphere, renderer, gpu)
 
 puts ok ? "✅ directional light OK" : "❌ light did not color the sphere as expected"
 exit(ok ? 0 : 1)

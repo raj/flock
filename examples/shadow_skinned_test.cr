@@ -90,8 +90,7 @@ world.query(Flock::Transform3D, Flock::Light) do |_e, _tf, lt|
 end
 off_under, off_far = render_lum.call
 
-target.release
-ground.release; renderer.release; gpu.release
+Flock.release_all(target, ground, renderer, gpu)
 
 puts "under quad: shadows on=#{on_under} off=#{off_under}   far control: on=#{on_far} off=#{off_far}"
 ok = off_under > 120 &&               # lit ground under the quad with shadows off

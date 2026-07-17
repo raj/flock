@@ -124,9 +124,7 @@ puts "lit@t0=#{l0}, lit@t1=#{l1}, changed pixels=#{ch}"
 # Both poses render the bar, and skinning visibly deforms it (many pixels change).
 ok = l0 > 200 && l1 > 200 && ch > 400
 
-target.release
-renderer.release
-gpu.release
+Flock.release_all(target, renderer, gpu)
 
 puts ok ? "✅ glTF skinning (CPU) OK" : "❌ skinning did not deform the mesh as expected"
 exit(ok ? 0 : 1)

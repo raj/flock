@@ -64,12 +64,7 @@ world.query(Flock::Transform3D, Flock::MeshRenderer) do |_e, _tf, mr|
 end
 mip_mean, mip_var = render_stats.call
 
-target.release
-tex_flat.release
-tex_mip.release
-quad.release
-renderer.release
-gpu.release
+Flock.release_all(target, tex_flat, tex_mip, quad, renderer, gpu)
 
 puts "no-mip: mean=#{flat_mean.round(1)} var=#{flat_var.round(1)}   mipped: mean=#{mip_mean.round(1)} var=#{mip_var.round(1)}"
 # The mipped block is a uniform averaged mid-tone (the base-0.5 gray, brightened by the

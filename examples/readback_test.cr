@@ -41,9 +41,7 @@ ok = center[0] > 200 && center[1] < 60 && center[2] < 60 && # red center
      corner[0] < 60 && corner[1] < 60 && corner[2] < 60     # black corner
 
 # Cleanup
-target.release
-renderer.release
-gpu.release
+Flock.release_all(target, renderer, gpu)
 
 if ok
   puts "✅ readback OK (draws=#{renderer.last_draw_calls}, sprites=#{renderer.last_sprites})"

@@ -38,8 +38,7 @@ end
 
 after = renderer.cached_texture_groups
 
-target.release
-quad.release; renderer.release; gpu.release
+Flock.release_all(target, quad, renderer, gpu)
 
 puts "cache: start=#{start} max-during=#{max_seen} after=#{after} (8 dynamic textures)"
 # Each frame adds one entry then releasing evicts it, so the cache never accumulates:

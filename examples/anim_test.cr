@@ -78,9 +78,7 @@ puts "center@t=0 = #{start} (expect empty), center@t=0.5 = #{mid} (expect green)
 ok = (start[0] + start[1] + start[2] < 30) &&              # empty at start
      (mid[1] > 60 && mid[1] > mid[0] && mid[1] > mid[2])   # green quad centered
 
-target.release
-renderer.release
-gpu.release
+Flock.release_all(target, renderer, gpu)
 
 puts ok ? "✅ glTF node animation OK" : "❌ animation sampling not as expected"
 exit(ok ? 0 : 1)

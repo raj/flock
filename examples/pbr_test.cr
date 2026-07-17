@@ -45,12 +45,7 @@ puts "matte=#{matte} metallic=#{metal} (diff #{diff(matte, metal)})"
 
 ok = diff(flat, tilt) > 8 && diff(matte, metal) > 8
 
-flat_n.release
-tilt_n.release
-cube.release
-target.release
-renderer.release
-gpu.release
+Flock.release_all(flat_n, tilt_n, cube, target, renderer, gpu)
 
 puts ok ? "✅ PBR (normal map + metallic) OK" : "❌ PBR maps had no visible effect"
 exit(ok ? 0 : 1)

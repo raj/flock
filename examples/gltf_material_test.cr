@@ -81,10 +81,7 @@ wc2.add(ec2, Flock::Transform3D.new(scale: Flock::Vec3.new(4.0, 4.0, 0.1)))
 wc2.add(ec2, Flock::MeshRenderer.new(quad, texture: faded)) # cutoff 0 -> kept
 unmasked = render_center.call(wc2)
 
-target.release
-sphere_black.release; quad.release; occ_dark.release; faded.release
-renderer.release
-gpu.release
+Flock.release_all(target, sphere_black, quad, occ_dark, faded, renderer, gpu)
 
 puts "emissive: on=#{emissive} off=#{emissive_off}"
 puts "occlusion: occluded=#{occluded} unoccluded=#{unoccluded}"

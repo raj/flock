@@ -98,8 +98,7 @@ center = px.rgb(32, 32)
 ok &&= check(center[0] > 60 && center[0] > center[1] * 2 && center[0] > center[2] * 2,
   "sphere lit red by imported light, got #{center}")
 
-target.release
-sphere.release; renderer.release; gpu.release
+Flock.release_all(target, sphere, renderer, gpu)
 
 puts "imported #{lights.size} lights + #{cams.size} camera; lit-sphere center = #{center}"
 puts ok ? "✅ glTF scene import (lights + cameras) OK" : "❌ glTF scene import failed"

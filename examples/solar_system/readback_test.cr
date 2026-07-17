@@ -58,10 +58,7 @@ puts "corner = #{corner}"
 ok = center[0] > 80 && center[0] > center[2] &&
      corner[0] < 20 && corner[1] < 20 && corner[2] < 20
 
-target.release
-sun.release
-renderer.release
-gpu.release
+Flock.release_all(target, sun, renderer, gpu)
 
 puts ok ? "✅ solar-system 3D material OK" : "❌ sun not rendered as expected"
 exit(ok ? 0 : 1)

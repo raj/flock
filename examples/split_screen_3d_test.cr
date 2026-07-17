@@ -42,8 +42,7 @@ px = target.read
 left = px.rgb(32, 64)  # left-half center
 right = px.rgb(96, 64) # right-half center
 
-target.release
-redcube.release; bluecube.release; renderer.release; gpu.release
+Flock.release_all(target, redcube, bluecube, renderer, gpu)
 
 puts "left half = #{left} (expect red), right half = #{right} (expect blue)"
 ok = left[0] > 100 && left[0] > left[2] * 2 &&   # left viewport -> red cube

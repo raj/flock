@@ -90,8 +90,7 @@ pbr[:base_color].try &.release
 pbr[:metallic_roughness].try &.release
 pbr[:normal].try &.release
 pbr[:mesh].release
-renderer.release
-gpu.release
+Flock.release_all(renderer, gpu)
 
 puts ok ? "✅ glTF PBR maps + factors OK" : "❌ glTF PBR extraction not as expected"
 exit(ok ? 0 : 1)

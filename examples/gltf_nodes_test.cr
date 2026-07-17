@@ -63,10 +63,7 @@ ok = left[2] > 60 && left[2].to_i > left[0].to_i && # quad is blue (material), n
      center[0] < 20 && center[1] < 20 && center[2] < 20 && # node shifted it away from center
      corner[0] < 20 && corner[1] < 20 && corner[2] < 20
 
-target.release
-mesh.release
-renderer.release
-gpu.release
+Flock.release_all(target, mesh, renderer, gpu)
 
 puts ok ? "✅ glTF node transforms + material color OK" : "❌ node/material enrichment not as expected"
 exit(ok ? 0 : 1)

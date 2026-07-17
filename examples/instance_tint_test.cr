@@ -42,10 +42,7 @@ right_blue = scan(px, (2 * SIZE // 3)...(SIZE - 4), mid) { |r, g, b| b > 60 && b
 puts "left red = #{left_red}, right blue = #{right_blue}, drawn = #{renderer.last_drawn}"
 ok = left_red && right_blue
 
-target.release
-cube.release
-renderer.release
-gpu.release
+Flock.release_all(target, cube, renderer, gpu)
 
 puts ok ? "✅ per-instance tint OK" : "❌ per-instance tint not applied as expected"
 exit(ok ? 0 : 1)

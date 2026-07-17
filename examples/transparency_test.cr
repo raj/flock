@@ -52,11 +52,7 @@ world.query(Flock::Transform3D, Flock::MeshRenderer) do |_e, _tf, mr|
 end
 opaque = render_center.call
 
-target.release
-red.release
-blue.release
-renderer.release
-gpu.release
+Flock.release_all(target, red, blue, renderer, gpu)
 
 puts "overlap transparent = #{trans}, opaque = #{opaque}"
 ok = trans[2] > 60 &&                 # blue visible through the translucent panel

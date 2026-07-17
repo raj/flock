@@ -41,10 +41,7 @@ ok = top[2] > top[0] &&        # top is bluish (sky)
      bot[0] > bot[2] &&        # bottom is reddish (ground)
      bot[0] > bot[1]
 
-target.release
-sphere.release
-renderer.release
-gpu.release
+Flock.release_all(target, sphere, renderer, gpu)
 
 puts ok ? "✅ hemisphere ambient probe OK" : "❌ ambient probe not directional as expected"
 exit(ok ? 0 : 1)

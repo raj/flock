@@ -86,11 +86,7 @@ lit = ->(c : Tuple(Int32, Int32, Int32)) { c[0].to_i + c[1].to_i + c[2].to_i > 6
 bg = ->(c : Tuple(Int32, Int32, Int32)) { c[0] < 20 && c[1] < 20 && c[2] < 20 }
 ok = lit.call(gltf_c) && bg.call(gltf_k) && lit.call(glb_c) && bg.call(glb_k)
 
-gltf_mesh.release
-glb_mesh.release
-target.release
-renderer.release
-gpu.release
+Flock.release_all(gltf_mesh, glb_mesh, target, renderer, gpu)
 
 puts ok ? "✅ glTF loading OK (.gltf + .glb)" : "❌ glTF mesh not rendered as expected"
 exit(ok ? 0 : 1)

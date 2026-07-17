@@ -114,4 +114,13 @@ module Flock
       WGPU.null(LibWGPU::Surface), format, width.to_u32, height.to_u32,
       Pointer(Void).null.as(LibSDL::Window), Pointer(Void).null.as(LibSDL::MetalView))
   end
+
+  # Releases each resource in the given order — anything with a `release` method
+  # (RenderTarget, Mesh, Texture, Renderer2D/3D, GpuContext, ...). Pass the
+  # GpuContext LAST: it owns the device the others reference. Collapses the tail
+  # of `x.release` lines in examples into one call:
+  #   Flock.release_all(target, mesh, renderer, gpu)
+  def self.release_all(*resources) : Nil
+    resources.each { |r| r.release }
+  end
 end

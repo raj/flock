@@ -86,8 +86,7 @@ end
 base_l, base_r = render_lr.call(0.0f32)     # weight 0 -> quad on the left
 morph_l, morph_r = render_lr.call(1.0f32)   # weight 1 -> quad shifted right
 
-target.release
-renderer.release; gpu.release
+Flock.release_all(target, renderer, gpu)
 
 puts "weight 0: left=#{base_l} right=#{base_r}   weight 1: left=#{morph_l} right=#{morph_r}"
 ok = base_l > 150 && base_r < 40 &&   # unmorphed: quad on the left

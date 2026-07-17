@@ -35,10 +35,7 @@ center = px.rgb(SIZE // 2, SIZE // 2)
 puts "center = #{center}"
 ok = center[0] > 60 && center[2] > 60 # both red and blue -> linear blend (not a pure texel)
 
-target.release
-tex.release
-renderer.release
-gpu.release
+Flock.release_all(target, tex, renderer, gpu)
 
 puts ok ? "✅ configurable sampler (linear) OK" : "❌ linear filtering not applied"
 exit(ok ? 0 : 1)
