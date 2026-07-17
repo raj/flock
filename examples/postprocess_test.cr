@@ -8,9 +8,9 @@
 #   crystal run examples/postprocess_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
 
-SIZE = 128_u32
+SIZE = 128
 
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+gpu = Flock.headless_context(SIZE, SIZE)
 sphere = Flock::Mesh.sphere(gpu, radius: 1.0, segments: 48, rings: 24, color: Flock::Color.new(1.0, 1.0, 1.0))
 
 world = Flock::World.new
@@ -29,49 +29,18 @@ world.add(e, Flock::MeshRenderer.new(sphere))
 # Counts fully-saturated (blown-out) pixels for a renderer at the given tonemap mode.
 def saturated(gpu, world, tonemap : Flock::Tonemap) : Int32
   renderer = Flock::Renderer3D.new(gpu, 1, tonemap)
-  td = LibWGPU::TextureDescriptor.new
-  td.label = WGPU.empty_string_view
-  td.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::CopySrc
-  td.dimension = LibWGPU::TextureDimension::N2D
-  td.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-  td.format = LibWGPU::TextureFormat::RGBA8Unorm
-  td.mip_level_count = 1_u32; td.sample_count = 1_u32
-  tt = LibWGPU.device_create_texture(gpu.device, pointerof(td))
-  tv = LibWGPU.texture_create_view(tt, Pointer(LibWGPU::TextureViewDescriptor).null)
-  renderer.render_into(world, tv)
+  target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
+  renderer.render_into(world, target.view)
+  px = target.read
 
-  rb = SIZE * 4
-  bs = (rb * SIZE).to_u64
-  bd = LibWGPU::BufferDescriptor.new
-  bd.label = WGPU.empty_string_view
-  bd.usage = LibWGPU::BufferUsage::MapRead | LibWGPU::BufferUsage::CopyDst
-  bd.size = bs; bd.mapped_at_creation = 0_u32
-  rbk = LibWGPU.device_create_buffer(gpu.device, pointerof(bd))
-  src = LibWGPU::TexelCopyTextureInfo.new
-  src.texture = tt; src.mip_level = 0_u32
-  src.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: 0_u32); src.aspect = LibWGPU::TextureAspect::All
-  lay = LibWGPU::TexelCopyBufferLayout.new
-  lay.offset = 0_u64; lay.bytes_per_row = rb; lay.rows_per_image = SIZE
-  dst = LibWGPU::TexelCopyBufferInfo.new; dst.layout = lay; dst.buffer = rbk
-  ext = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-  ed = LibWGPU::CommandEncoderDescriptor.new; ed.label = WGPU.empty_string_view
-  enc = LibWGPU.device_create_command_encoder(gpu.device, pointerof(ed))
-  LibWGPU.command_encoder_copy_texture_to_buffer(enc, pointerof(src), pointerof(dst), pointerof(ext))
-  cd = LibWGPU::CommandBufferDescriptor.new; cd.label = WGPU.empty_string_view
-  cmd = LibWGPU.command_encoder_finish(enc, pointerof(cd))
-  cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
-  LibWGPU.queue_submit(gpu.queue, 1_u64, cmds.to_unsafe)
-  WGPU.map_buffer_read(gpu.instance, rbk, bs)
-  px = LibWGPU.buffer_get_mapped_range(rbk, 0_u64, bs).as(UInt8*)
   blown = 0
-  (0...(SIZE * SIZE)).each do |i|
-    o = i.to_i * 4
-    blown += 1 if px[o] >= 250 && px[o + 1] >= 250 && px[o + 2] >= 250
+  (0...SIZE).each do |y|
+    (0...SIZE).each do |x|
+      r, g, b = px.rgb(x, y)
+      blown += 1 if r >= 250 && g >= 250 && b >= 250
+    end
   end
-  LibWGPU.buffer_unmap(rbk)
-  LibWGPU.buffer_release(rbk)
-  LibWGPU.texture_view_release(tv)
-  LibWGPU.texture_release(tt)
+  target.release
   renderer.release
   blown
 end

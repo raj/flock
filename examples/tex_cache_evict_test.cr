@@ -6,21 +6,13 @@
 #   crystal run examples/tex_cache_evict_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
 
-SIZE = 32_u32
+SIZE = 32
 
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 quad = Flock::Mesh.cube(gpu, color: Flock::Color::WHITE)
 
-td = LibWGPU::TextureDescriptor.new
-td.label = WGPU.empty_string_view
-td.usage = LibWGPU::TextureUsage::RenderAttachment
-td.dimension = LibWGPU::TextureDimension::N2D
-td.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-td.format = LibWGPU::TextureFormat::RGBA8Unorm
-td.mip_level_count = 1_u32; td.sample_count = 1_u32
-tt = LibWGPU.device_create_texture(device, pointerof(td))
-tv = LibWGPU.texture_create_view(tt, Pointer(LibWGPU::TextureViewDescriptor).null)
+target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
 
 world = Flock::World.new
 world.insert_resource(Flock::Time.new)
@@ -39,14 +31,14 @@ max_seen = 0
   world.query(Flock::Transform3D, Flock::MeshRenderer) do |_e, _tf, mr|
     m = mr.value; m.texture = tex; mr.value = m
   end
-  renderer.render_into(world, tv)
+  renderer.render_into(world, target.view)
   max_seen = Math.max(max_seen, renderer.cached_texture_groups)
   tex.release # <- fires on_release -> evicts its cached bind group
 end
 
 after = renderer.cached_texture_groups
 
-LibWGPU.texture_view_release(tv); LibWGPU.texture_release(tt)
+target.release
 quad.release; renderer.release; gpu.release
 
 puts "cache: start=#{start} max-during=#{max_seen} after=#{after} (8 dynamic textures)"

@@ -3,7 +3,7 @@ require "../src/flock/gpu"
 
 FONT = "/System/Library/Fonts/Supplemental/Arial.ttf"
 
-gpu, instance, device, queue = Flock.headless_context(1_u32, 1_u32)
+gpu = Flock.headless_context(1, 1)
 
 assets = Flock::Assets.new(gpu)
 a = assets.font(FONT, 24)

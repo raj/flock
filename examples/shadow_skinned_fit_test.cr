@@ -8,7 +8,7 @@
 require "../src/flock/gpu"
 require "base64"
 
-SIZE = 128_u32
+SIZE = 128
 LE = IO::ByteFormat::LittleEndian
 
 io = IO::Memory.new
@@ -45,7 +45,7 @@ json = %({
 path = File.tempname("flock_skinsh", ".gltf")
 File.write(path, json)
 
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 scene = Flock::Mesh.load_gltf_scene(gpu, path, Flock::Color.new(0.7, 0.7, 0.7))
 File.delete(path) rescue nil
@@ -65,22 +65,7 @@ world.add(g, Flock::MeshRenderer.new(ground))
 model = Flock::GpuSkinnedModel.spawn(scene, world, renderer, gpu)
 model.apply
 
-td = LibWGPU::TextureDescriptor.new
-td.label = WGPU.empty_string_view
-td.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::CopySrc
-td.dimension = LibWGPU::TextureDimension::N2D
-td.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-td.format = LibWGPU::TextureFormat::RGBA8Unorm
-td.mip_level_count = 1_u32; td.sample_count = 1_u32
-tt = LibWGPU.device_create_texture(device, pointerof(td))
-tv = LibWGPU.texture_create_view(tt, Pointer(LibWGPU::TextureViewDescriptor).null)
-rb = SIZE * 4
-bs = (rb * SIZE).to_u64
-bd = LibWGPU::BufferDescriptor.new
-bd.label = WGPU.empty_string_view
-bd.usage = LibWGPU::BufferUsage::MapRead | LibWGPU::BufferUsage::CopyDst
-bd.size = bs; bd.mapped_at_creation = 0_u32
-readback = LibWGPU.device_create_buffer(device, pointerof(bd))
+target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
 
 vp = cam.view_projection(1.0f32)
 def project(vp : Flock::Mat4, p : Flock::Vec3) : {Int32, Int32}
@@ -93,27 +78,10 @@ under = project(vp, Flock::Vec3.new(0.2, 0.02, 0.15)) # small ground under the e
 far = project(vp, Flock::Vec3.new(-1.2, 0.02, 0.0))    # ground left of the shadow (lit)
 
 render_lum = ->do
-  renderer.render_into(world, tv)
-  src = LibWGPU::TexelCopyTextureInfo.new
-  src.texture = tt; src.mip_level = 0_u32
-  src.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: 0_u32); src.aspect = LibWGPU::TextureAspect::All
-  lay = LibWGPU::TexelCopyBufferLayout.new
-  lay.offset = 0_u64; lay.bytes_per_row = rb; lay.rows_per_image = SIZE
-  dst = LibWGPU::TexelCopyBufferInfo.new; dst.layout = lay; dst.buffer = readback
-  ext = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-  ed = LibWGPU::CommandEncoderDescriptor.new; ed.label = WGPU.empty_string_view
-  enc = LibWGPU.device_create_command_encoder(device, pointerof(ed))
-  LibWGPU.command_encoder_copy_texture_to_buffer(enc, pointerof(src), pointerof(dst), pointerof(ext))
-  cd = LibWGPU::CommandBufferDescriptor.new; cd.label = WGPU.empty_string_view
-  cmd = LibWGPU.command_encoder_finish(enc, pointerof(cd))
-  cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
-  LibWGPU.queue_submit(queue, 1_u64, cmds.to_unsafe)
-  WGPU.map_buffer_read(instance, readback, bs)
-  px = LibWGPU.buffer_get_mapped_range(readback, 0_u64, bs).as(UInt8*)
-  lum = ->(pt : {Int32, Int32}) { o = pt[1] * rb.to_i + pt[0] * 4; px[o].to_i + px[o + 1].to_i + px[o + 2].to_i }
-  r = {lum.call(under), lum.call(far)}
-  LibWGPU.buffer_unmap(readback)
-  r
+  renderer.render_into(world, target.view)
+  px = target.read
+  lum = ->(pt : {Int32, Int32}) { c = px.rgb(pt[0], pt[1]); c[0] + c[1] + c[2] }
+  {lum.call(under), lum.call(far)}
 end
 
 on_under, on_far = render_lum.call
@@ -122,7 +90,7 @@ world.query(Flock::Transform3D, Flock::Light) do |_e, _tf, lt|
 end
 off_under, off_far = render_lum.call
 
-LibWGPU.buffer_release(readback); LibWGPU.texture_view_release(tv); LibWGPU.texture_release(tt)
+target.release
 ground.release; renderer.release; gpu.release
 
 puts "under quad: shadows on=#{on_under} off=#{off_under}   far control: on=#{on_far} off=#{off_far}"

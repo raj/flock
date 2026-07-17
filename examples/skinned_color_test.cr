@@ -6,7 +6,7 @@
 require "../src/flock/gpu"
 require "base64"
 
-SIZE = 64_u32
+SIZE = 64
 LE = IO::ByteFormat::LittleEndian
 
 io = IO::Memory.new
@@ -55,7 +55,7 @@ json = %({
 path = File.tempname("flock_skincol", ".gltf")
 File.write(path, json)
 
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 
 # RED fallback — the green COLOR_0 must override it if vertex colors flow through skinning.
@@ -69,45 +69,13 @@ world.add(world.spawn, Flock::Camera3D.new(position: Flock::Vec3.new(0.0, 0.0, 2
 model = Flock::GpuSkinnedModel.spawn(scene, world, renderer, gpu)
 model.apply
 
-td = LibWGPU::TextureDescriptor.new
-td.label = WGPU.empty_string_view
-td.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::CopySrc
-td.dimension = LibWGPU::TextureDimension::N2D
-td.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-td.format = LibWGPU::TextureFormat::RGBA8Unorm
-td.mip_level_count = 1_u32; td.sample_count = 1_u32
-tt = LibWGPU.device_create_texture(device, pointerof(td))
-tv = LibWGPU.texture_create_view(tt, Pointer(LibWGPU::TextureViewDescriptor).null)
-renderer.render_into(world, tv)
+target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
+renderer.render_into(world, target.view)
 
-rb = SIZE * 4
-bs = (rb * SIZE).to_u64
-bd = LibWGPU::BufferDescriptor.new
-bd.label = WGPU.empty_string_view
-bd.usage = LibWGPU::BufferUsage::MapRead | LibWGPU::BufferUsage::CopyDst
-bd.size = bs; bd.mapped_at_creation = 0_u32
-rbk = LibWGPU.device_create_buffer(device, pointerof(bd))
-src = LibWGPU::TexelCopyTextureInfo.new
-src.texture = tt; src.mip_level = 0_u32
-src.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: 0_u32); src.aspect = LibWGPU::TextureAspect::All
-lay = LibWGPU::TexelCopyBufferLayout.new
-lay.offset = 0_u64; lay.bytes_per_row = rb; lay.rows_per_image = SIZE
-dst = LibWGPU::TexelCopyBufferInfo.new; dst.layout = lay; dst.buffer = rbk
-ext = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-ec = LibWGPU::CommandEncoderDescriptor.new; ec.label = WGPU.empty_string_view
-enc = LibWGPU.device_create_command_encoder(device, pointerof(ec))
-LibWGPU.command_encoder_copy_texture_to_buffer(enc, pointerof(src), pointerof(dst), pointerof(ext))
-cc = LibWGPU::CommandBufferDescriptor.new; cc.label = WGPU.empty_string_view
-cmd = LibWGPU.command_encoder_finish(enc, pointerof(cc))
-cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
-LibWGPU.queue_submit(queue, 1_u64, cmds.to_unsafe)
-WGPU.map_buffer_read(instance, rbk, bs)
-px = LibWGPU.buffer_get_mapped_range(rbk, 0_u64, bs).as(UInt8*)
-o = 32 * rb.to_i + 32 * 4
-center = {px[o].to_i, px[o + 1].to_i, px[o + 2].to_i}
-LibWGPU.buffer_unmap(rbk)
+px = target.read
+center = px.rgb(32, 32)
 
-LibWGPU.buffer_release(rbk); LibWGPU.texture_view_release(tv); LibWGPU.texture_release(tt)
+target.release
 renderer.release; gpu.release
 
 puts "skinned quad center = #{center} (expect green, not the red fallback)"

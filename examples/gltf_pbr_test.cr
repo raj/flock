@@ -7,7 +7,7 @@
 require "../src/flock/gpu"
 require "base64"
 
-SIZE = 128_u32
+SIZE = 128
 LE = IO::ByteFormat::LittleEndian
 
 def bmp(r : UInt8, g : UInt8, b : UInt8) : String
@@ -55,7 +55,7 @@ json = %({
 path = File.tempname("flock_pbr", ".gltf")
 File.write(path, json)
 
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 
 pbr = Flock::Mesh.load_gltf_pbr(gpu, path, Flock::Color::WHITE)
@@ -75,53 +75,17 @@ world.add(e, Flock::MeshRenderer.new(pbr[:mesh], texture: pbr[:base_color],
   metallic_roughness: pbr[:metallic_roughness], normal_map: pbr[:normal],
   metallic: pbr[:metallic], roughness: pbr[:roughness]))
 
-tdesc = LibWGPU::TextureDescriptor.new
-tdesc.label = WGPU.empty_string_view
-tdesc.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::CopySrc
-tdesc.dimension = LibWGPU::TextureDimension::N2D
-tdesc.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-tdesc.format = LibWGPU::TextureFormat::RGBA8Unorm
-tdesc.mip_level_count = 1_u32
-tdesc.sample_count = 1_u32
-target_tex = LibWGPU.device_create_texture(device, pointerof(tdesc))
-target_view = LibWGPU.texture_create_view(target_tex, Pointer(LibWGPU::TextureViewDescriptor).null)
-renderer.render_into(world, target_view)
+target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
+renderer.render_into(world, target.view)
 
-row_bytes = SIZE * 4
-buf_size = (row_bytes * SIZE).to_u64
-bdesc = LibWGPU::BufferDescriptor.new
-bdesc.label = WGPU.empty_string_view
-bdesc.usage = LibWGPU::BufferUsage::MapRead | LibWGPU::BufferUsage::CopyDst
-bdesc.size = buf_size
-bdesc.mapped_at_creation = 0_u32
-readback = LibWGPU.device_create_buffer(device, pointerof(bdesc))
-src = LibWGPU::TexelCopyTextureInfo.new
-src.texture = target_tex; src.mip_level = 0_u32
-src.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: 0_u32); src.aspect = LibWGPU::TextureAspect::All
-lay = LibWGPU::TexelCopyBufferLayout.new
-lay.offset = 0_u64; lay.bytes_per_row = row_bytes; lay.rows_per_image = SIZE
-dst = LibWGPU::TexelCopyBufferInfo.new; dst.layout = lay; dst.buffer = readback
-ext = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-edd = LibWGPU::CommandEncoderDescriptor.new; edd.label = WGPU.empty_string_view
-enc = LibWGPU.device_create_command_encoder(device, pointerof(edd))
-LibWGPU.command_encoder_copy_texture_to_buffer(enc, pointerof(src), pointerof(dst), pointerof(ext))
-cdd = LibWGPU::CommandBufferDescriptor.new; cdd.label = WGPU.empty_string_view
-cmd = LibWGPU.command_encoder_finish(enc, pointerof(cdd))
-cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
-LibWGPU.queue_submit(queue, 1_u64, cmds.to_unsafe)
-WGPU.map_buffer_read(instance, readback, buf_size)
-pixels = LibWGPU.buffer_get_mapped_range(readback, 0_u64, buf_size).as(UInt8*)
-co = 64 * row_bytes.to_i + 64 * 4
-center = {pixels[co].to_i, pixels[co + 1].to_i, pixels[co + 2].to_i}
-LibWGPU.buffer_unmap(readback)
+px = target.read
+center = px.rgb(64, 64)
 
 puts "center = #{center}"
 renders_ok = center[0] + center[1] + center[2] > 40 && center[1] > center[0] # greenish base
 ok = maps_ok && factors_ok && renders_ok
 
-LibWGPU.buffer_release(readback)
-LibWGPU.texture_view_release(target_view)
-LibWGPU.texture_release(target_tex)
+target.release
 pbr[:base_color].try &.release
 pbr[:metallic_roughness].try &.release
 pbr[:normal].try &.release

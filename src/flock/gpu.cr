@@ -13,6 +13,7 @@ require "./platform/audio"
 require "./platform/music"
 
 require "./render/texture"
+require "./render/render_target"
 require "./render/font"
 require "./render/mesh"
 require "./render/gltf_scene"

@@ -8,7 +8,7 @@
 require "../src/flock/gpu"
 require "base64"
 
-SIZE = 128_u32
+SIZE = 128
 
 # --- Build a quad's binary buffer: 4 positions (FLOAT VEC3) then 6 indices (USHORT). ---
 bin_io = IO::Memory.new
@@ -51,22 +51,9 @@ File.write(gltf_path, gltf_json)
 File.write(glb_path, build_glb(glb_json, bin))
 
 # --- GPU + offscreen target. ---
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
-
-tdesc = LibWGPU::TextureDescriptor.new
-tdesc.label = WGPU.empty_string_view
-tdesc.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::CopySrc
-tdesc.dimension = LibWGPU::TextureDimension::N2D
-tdesc.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-tdesc.format = LibWGPU::TextureFormat::RGBA8Unorm
-tdesc.mip_level_count = 1_u32
-tdesc.sample_count = 1_u32
-target_tex = LibWGPU.device_create_texture(device, pointerof(tdesc))
-target_view = LibWGPU.texture_create_view(target_tex, Pointer(LibWGPU::TextureViewDescriptor).null)
-
-row_bytes = SIZE * 4
-buf_size = (row_bytes * SIZE).to_u64
+target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
 
 # Render `mesh` and read back {center, corner}.
 render_sample = ->(mesh : Flock::Mesh) do
@@ -76,38 +63,11 @@ render_sample = ->(mesh : Flock::Mesh) do
   e = world.spawn
   world.add(e, Flock::Transform3D.new)
   world.add(e, Flock::MeshRenderer.new(mesh))
-  renderer.render_into(world, target_view)
+  renderer.render_into(world, target.view)
 
-  bdesc = LibWGPU::BufferDescriptor.new
-  bdesc.label = WGPU.empty_string_view
-  bdesc.usage = LibWGPU::BufferUsage::MapRead | LibWGPU::BufferUsage::CopyDst
-  bdesc.size = buf_size
-  bdesc.mapped_at_creation = 0_u32
-  readback = LibWGPU.device_create_buffer(device, pointerof(bdesc))
-
-  src = LibWGPU::TexelCopyTextureInfo.new
-  src.texture = target_tex; src.mip_level = 0_u32
-  src.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: 0_u32); src.aspect = LibWGPU::TextureAspect::All
-  lay = LibWGPU::TexelCopyBufferLayout.new
-  lay.offset = 0_u64; lay.bytes_per_row = row_bytes; lay.rows_per_image = SIZE
-  dst = LibWGPU::TexelCopyBufferInfo.new; dst.layout = lay; dst.buffer = readback
-  ext = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-  ed = LibWGPU::CommandEncoderDescriptor.new; ed.label = WGPU.empty_string_view
-  enc = LibWGPU.device_create_command_encoder(device, pointerof(ed))
-  LibWGPU.command_encoder_copy_texture_to_buffer(enc, pointerof(src), pointerof(dst), pointerof(ext))
-  cd = LibWGPU::CommandBufferDescriptor.new; cd.label = WGPU.empty_string_view
-  cmd = LibWGPU.command_encoder_finish(enc, pointerof(cd))
-  cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
-  LibWGPU.queue_submit(queue, 1_u64, cmds.to_unsafe)
-
-  WGPU.map_buffer_read(instance, readback, buf_size)
-  pixels = LibWGPU.buffer_get_mapped_range(readback, 0_u64, buf_size).as(UInt8*)
-  co = 64 * row_bytes.to_i + 64 * 4
-  ko = 2 * row_bytes.to_i + 2 * 4
-  center = {pixels[co], pixels[co + 1], pixels[co + 2]}
-  corner = {pixels[ko], pixels[ko + 1], pixels[ko + 2]}
-  LibWGPU.buffer_unmap(readback)
-  LibWGPU.buffer_release(readback)
+  px = target.read
+  center = px.rgb(64, 64)
+  corner = px.rgb(2, 2)
   {center, corner}
 end
 
@@ -122,14 +82,13 @@ glb_c, glb_k = render_sample.call(glb_mesh)
 puts ".gltf center = #{gltf_c}, corner = #{gltf_k}"
 puts ".glb  center = #{glb_c}, corner = #{glb_k}"
 
-lit = ->(c : Tuple(UInt8, UInt8, UInt8)) { c[0].to_i + c[1].to_i + c[2].to_i > 60 && c[0] > 40 }
-bg = ->(c : Tuple(UInt8, UInt8, UInt8)) { c[0] < 20 && c[1] < 20 && c[2] < 20 }
+lit = ->(c : Tuple(Int32, Int32, Int32)) { c[0].to_i + c[1].to_i + c[2].to_i > 60 && c[0] > 40 }
+bg = ->(c : Tuple(Int32, Int32, Int32)) { c[0] < 20 && c[1] < 20 && c[2] < 20 }
 ok = lit.call(gltf_c) && bg.call(gltf_k) && lit.call(glb_c) && bg.call(glb_k)
 
 gltf_mesh.release
 glb_mesh.release
-LibWGPU.texture_view_release(target_view)
-LibWGPU.texture_release(target_tex)
+target.release
 renderer.release
 gpu.release
 

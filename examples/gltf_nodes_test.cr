@@ -8,7 +8,7 @@
 require "../src/flock/gpu"
 require "base64"
 
-SIZE = 128_u32
+SIZE = 128
 
 bin_io = IO::Memory.new
 [-0.4f32, -0.4f32, 0.0f32, 0.4f32, -0.4f32, 0.0f32,
@@ -32,7 +32,7 @@ json = %({
 path = File.tempname("flock_nodes", ".gltf")
 File.write(path, json)
 
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 
 # RED fallback — the blue material must override it.
@@ -46,53 +46,14 @@ e = world.spawn
 world.add(e, Flock::Transform3D.new)
 world.add(e, Flock::MeshRenderer.new(mesh))
 
-tdesc = LibWGPU::TextureDescriptor.new
-tdesc.label = WGPU.empty_string_view
-tdesc.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::CopySrc
-tdesc.dimension = LibWGPU::TextureDimension::N2D
-tdesc.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-tdesc.format = LibWGPU::TextureFormat::RGBA8Unorm
-tdesc.mip_level_count = 1_u32
-tdesc.sample_count = 1_u32
-target_tex = LibWGPU.device_create_texture(device, pointerof(tdesc))
-target_view = LibWGPU.texture_create_view(target_tex, Pointer(LibWGPU::TextureViewDescriptor).null)
+target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
 
-renderer.render_into(world, target_view)
+renderer.render_into(world, target.view)
 
-row_bytes = SIZE * 4
-buf_size = (row_bytes * SIZE).to_u64
-bdesc = LibWGPU::BufferDescriptor.new
-bdesc.label = WGPU.empty_string_view
-bdesc.usage = LibWGPU::BufferUsage::MapRead | LibWGPU::BufferUsage::CopyDst
-bdesc.size = buf_size
-bdesc.mapped_at_creation = 0_u32
-readback = LibWGPU.device_create_buffer(device, pointerof(bdesc))
-src = LibWGPU::TexelCopyTextureInfo.new
-src.texture = target_tex; src.mip_level = 0_u32
-src.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: 0_u32); src.aspect = LibWGPU::TextureAspect::All
-lay = LibWGPU::TexelCopyBufferLayout.new
-lay.offset = 0_u64; lay.bytes_per_row = row_bytes; lay.rows_per_image = SIZE
-dst = LibWGPU::TexelCopyBufferInfo.new; dst.layout = lay; dst.buffer = readback
-ext = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-ed = LibWGPU::CommandEncoderDescriptor.new; ed.label = WGPU.empty_string_view
-enc = LibWGPU.device_create_command_encoder(device, pointerof(ed))
-LibWGPU.command_encoder_copy_texture_to_buffer(enc, pointerof(src), pointerof(dst), pointerof(ext))
-cd = LibWGPU::CommandBufferDescriptor.new; cd.label = WGPU.empty_string_view
-cmd = LibWGPU.command_encoder_finish(enc, pointerof(cd))
-cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
-LibWGPU.queue_submit(queue, 1_u64, cmds.to_unsafe)
-WGPU.map_buffer_read(instance, readback, buf_size)
-pixels = LibWGPU.buffer_get_mapped_range(readback, 0_u64, buf_size).as(UInt8*)
-
-def px(pixels : UInt8*, x : Int, y : Int, row_bytes : UInt32)
-  o = y * row_bytes.to_i + x * 4
-  {pixels[o], pixels[o + 1], pixels[o + 2]}
-end
-
-left = px(pixels, 15, 64, row_bytes)     # where the node-translated quad lands
-center = px(pixels, 64, 64, row_bytes)    # empty (quad moved left)
-corner = px(pixels, 120, 120, row_bytes)
-LibWGPU.buffer_unmap(readback)
+px = target.read
+left = px.rgb(15, 64)     # where the node-translated quad lands
+center = px.rgb(64, 64)    # empty (quad moved left)
+corner = px.rgb(120, 120)
 
 puts "left(quad)  = #{left}"
 puts "center      = #{center}"
@@ -102,9 +63,7 @@ ok = left[2] > 60 && left[2].to_i > left[0].to_i && # quad is blue (material), n
      center[0] < 20 && center[1] < 20 && center[2] < 20 && # node shifted it away from center
      corner[0] < 20 && corner[1] < 20 && corner[2] < 20
 
-LibWGPU.buffer_release(readback)
-LibWGPU.texture_view_release(target_view)
-LibWGPU.texture_release(target_tex)
+target.release
 mesh.release
 renderer.release
 gpu.release

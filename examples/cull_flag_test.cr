@@ -7,21 +7,13 @@
 #   crystal run examples/cull_flag_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
 
-SIZE = 64_u32
+SIZE = 64
 
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 cube = Flock::Mesh.cube(gpu)
 
-td = LibWGPU::TextureDescriptor.new
-td.label = WGPU.empty_string_view
-td.usage = LibWGPU::TextureUsage::RenderAttachment
-td.dimension = LibWGPU::TextureDimension::N2D
-td.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-td.format = LibWGPU::TextureFormat::RGBA8Unorm
-td.mip_level_count = 1_u32; td.sample_count = 1_u32
-tt = LibWGPU.device_create_texture(device, pointerof(td))
-tv = LibWGPU.texture_create_view(tt, Pointer(LibWGPU::TextureViewDescriptor).null)
+target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
 
 # Builds a world with one off-screen cube whose culling is toggled by `cull`.
 def make_world(cube, cull : Bool)
@@ -34,15 +26,15 @@ def make_world(cube, cull : Bool)
   world
 end
 
-renderer.render_into(make_world(cube, true), tv)
+renderer.render_into(make_world(cube, true), target.view)
 culled_drawn = renderer.last_drawn
 culled_culled = renderer.last_culled
 
-renderer.render_into(make_world(cube, false), tv)
+renderer.render_into(make_world(cube, false), target.view)
 nocull_drawn = renderer.last_drawn
 nocull_culled = renderer.last_culled
 
-LibWGPU.texture_view_release(tv); LibWGPU.texture_release(tt)
+target.release
 cube.release; renderer.release; gpu.release
 
 puts "cull:true  -> drawn=#{culled_drawn} culled=#{culled_culled}"

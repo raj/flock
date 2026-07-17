@@ -71,8 +71,8 @@ ok &&= check((cam.near - 0.5).abs < 1e-4 && (cam.far - 200.0).abs < 1e-4, "camer
 File.delete(path)
 
 # --- End-to-end: render a white sphere lit only by the imported directional (red) light. ---
-SIZE = 64_u32
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+SIZE = 64
+gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 sphere = Flock::Mesh.sphere(gpu, radius: 1.0, segments: 32, rings: 16, color: Flock::Color.new(0.9, 0.9, 0.9))
 
@@ -89,48 +89,16 @@ e = world.spawn
 world.add(e, Flock::Transform3D.new)
 world.add(e, Flock::MeshRenderer.new(sphere))
 
-td = LibWGPU::TextureDescriptor.new
-td.label = WGPU.empty_string_view
-td.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::CopySrc
-td.dimension = LibWGPU::TextureDimension::N2D
-td.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-td.format = LibWGPU::TextureFormat::RGBA8Unorm
-td.mip_level_count = 1_u32; td.sample_count = 1_u32
-tt = LibWGPU.device_create_texture(device, pointerof(td))
-tv = LibWGPU.texture_create_view(tt, Pointer(LibWGPU::TextureViewDescriptor).null)
-renderer.render_into(world, tv)
+target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
+renderer.render_into(world, target.view)
 
-rb = SIZE * 4
-bs = (rb * SIZE).to_u64
-bd = LibWGPU::BufferDescriptor.new
-bd.label = WGPU.empty_string_view
-bd.usage = LibWGPU::BufferUsage::MapRead | LibWGPU::BufferUsage::CopyDst
-bd.size = bs; bd.mapped_at_creation = 0_u32
-rbk = LibWGPU.device_create_buffer(device, pointerof(bd))
-src = LibWGPU::TexelCopyTextureInfo.new
-src.texture = tt; src.mip_level = 0_u32
-src.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: 0_u32); src.aspect = LibWGPU::TextureAspect::All
-lay = LibWGPU::TexelCopyBufferLayout.new
-lay.offset = 0_u64; lay.bytes_per_row = rb; lay.rows_per_image = SIZE
-dst = LibWGPU::TexelCopyBufferInfo.new; dst.layout = lay; dst.buffer = rbk
-ext = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-ed = LibWGPU::CommandEncoderDescriptor.new; ed.label = WGPU.empty_string_view
-enc = LibWGPU.device_create_command_encoder(device, pointerof(ed))
-LibWGPU.command_encoder_copy_texture_to_buffer(enc, pointerof(src), pointerof(dst), pointerof(ext))
-cd = LibWGPU::CommandBufferDescriptor.new; cd.label = WGPU.empty_string_view
-cmd = LibWGPU.command_encoder_finish(enc, pointerof(cd))
-cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
-LibWGPU.queue_submit(queue, 1_u64, cmds.to_unsafe)
-WGPU.map_buffer_read(instance, rbk, bs)
-px = LibWGPU.buffer_get_mapped_range(rbk, 0_u64, bs).as(UInt8*)
-o = 32 * rb.to_i + 32 * 4
-center = {px[o].to_i, px[o + 1].to_i, px[o + 2].to_i}
-LibWGPU.buffer_unmap(rbk)
+px = target.read
+center = px.rgb(32, 32)
 
 ok &&= check(center[0] > 60 && center[0] > center[1] * 2 && center[0] > center[2] * 2,
   "sphere lit red by imported light, got #{center}")
 
-LibWGPU.buffer_release(rbk); LibWGPU.texture_view_release(tv); LibWGPU.texture_release(tt)
+target.release
 sphere.release; renderer.release; gpu.release
 
 puts "imported #{lights.size} lights + #{cams.size} camera; lit-sphere center = #{center}"

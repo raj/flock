@@ -8,9 +8,9 @@
 #   crystal run examples/msaa_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
 
-SIZE = 128_u32
+SIZE = 128
 
-gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+gpu = Flock.headless_context(SIZE, SIZE)
 quad = Flock::Mesh.cube(gpu, color: Flock::Color.new(0.9, 0.9, 0.9))
 
 world = Flock::World.new
@@ -28,55 +28,19 @@ world.add(q, Flock::MeshRenderer.new(quad))
 # black background and the full quad color — for a renderer at the given sample count.
 def count_edge_pixels(gpu, world, sample_count : Int32) : Int32
   renderer = Flock::Renderer3D.new(gpu, sample_count)
-  tdesc = LibWGPU::TextureDescriptor.new
-  tdesc.label = WGPU.empty_string_view
-  tdesc.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::CopySrc
-  tdesc.dimension = LibWGPU::TextureDimension::N2D
-  tdesc.size = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-  tdesc.format = LibWGPU::TextureFormat::RGBA8Unorm
-  tdesc.mip_level_count = 1_u32
-  tdesc.sample_count = 1_u32
-  tt = LibWGPU.device_create_texture(gpu.device, pointerof(tdesc))
-  tv = LibWGPU.texture_create_view(tt, Pointer(LibWGPU::TextureViewDescriptor).null)
-  renderer.render_into(world, tv)
-
-  rb = SIZE * 4
-  bs = (rb * SIZE).to_u64
-  bd = LibWGPU::BufferDescriptor.new
-  bd.label = WGPU.empty_string_view
-  bd.usage = LibWGPU::BufferUsage::MapRead | LibWGPU::BufferUsage::CopyDst
-  bd.size = bs; bd.mapped_at_creation = 0_u32
-  rbk = LibWGPU.device_create_buffer(gpu.device, pointerof(bd))
-  src = LibWGPU::TexelCopyTextureInfo.new
-  src.texture = tt; src.mip_level = 0_u32
-  src.origin = LibWGPU::Origin3D.new(x: 0_u32, y: 0_u32, z: 0_u32); src.aspect = LibWGPU::TextureAspect::All
-  lay = LibWGPU::TexelCopyBufferLayout.new
-  lay.offset = 0_u64; lay.bytes_per_row = rb; lay.rows_per_image = SIZE
-  dst = LibWGPU::TexelCopyBufferInfo.new; dst.layout = lay; dst.buffer = rbk
-  ext = LibWGPU::Extent3D.new(width: SIZE, height: SIZE, depth_or_array_layers: 1_u32)
-  ed = LibWGPU::CommandEncoderDescriptor.new; ed.label = WGPU.empty_string_view
-  enc = LibWGPU.device_create_command_encoder(gpu.device, pointerof(ed))
-  LibWGPU.command_encoder_copy_texture_to_buffer(enc, pointerof(src), pointerof(dst), pointerof(ext))
-  cd = LibWGPU::CommandBufferDescriptor.new; cd.label = WGPU.empty_string_view
-  cmd = LibWGPU.command_encoder_finish(enc, pointerof(cd))
-  cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
-  LibWGPU.queue_submit(gpu.queue, 1_u64, cmds.to_unsafe)
-  WGPU.map_buffer_read(gpu.instance, rbk, bs)
-  px = LibWGPU.buffer_get_mapped_range(rbk, 0_u64, bs).as(UInt8*)
+  target = Flock::RenderTarget.new(gpu, SIZE, SIZE)
+  renderer.render_into(world, target.view)
+  px = target.read
 
   edge = 0
   (0...SIZE).each do |y|
     (0...SIZE).each do |x|
-      o = y.to_i * rb.to_i + x.to_i * 4
       # Green channel: 0 on background, ~230 on the quad. Partial coverage lands between.
-      g = px[o + 1].to_i
+      g = px.rgb(x, y)[1]
       edge += 1 if g > 30 && g < 200
     end
   end
-  LibWGPU.buffer_unmap(rbk)
-  LibWGPU.buffer_release(rbk)
-  LibWGPU.texture_view_release(tv)
-  LibWGPU.texture_release(tt)
+  target.release
   renderer.release
   edge
 end
