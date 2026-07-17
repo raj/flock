@@ -97,6 +97,8 @@ module Flock
     @group0 : LibWGPU::BindGroup
     # Custom per-sprite materials built via `build_material`, released on shutdown.
     @materials : Array(SpriteMaterial) = [] of SpriteMaterial
+    # Texture bank for backend-agnostic `Sprite2D` (id -> Texture; id 0 = white).
+    @texture_bank : Array(Texture) = [] of Texture
     # Per-viewport region-clear pipeline (fills the scissor rect with a color).
     @clear_shader : LibWGPU::ShaderModule
     @clear_pipeline : LibWGPU::RenderPipeline
@@ -119,6 +121,7 @@ module Flock
       @pipeline_layout = build_pipeline_layout
       @pipeline = build_pipeline(@shader)
       @white = Texture.white(@gpu)
+      @texture_bank << @white # id 0 = solid white
 
       @uniform_buf = make_buffer(64_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
       @instance_buf = make_buffer((@instance_capacity * BYTES_PER_INSTANCE).to_u64,
@@ -142,6 +145,14 @@ module Flock
       material = SpriteMaterial.new(build_pipeline(mod), mod)
       @materials << material
       material
+    end
+
+    # Registers a texture for backend-agnostic `Sprite2D` and returns its id. The
+    # renderer takes ownership (released on shutdown). id 0 is the built-in white.
+    def register_texture(texture : Texture) : Int32
+      id = @texture_bank.size
+      @texture_bank << texture
+      id
     end
 
     private def compile_shader(wgsl : String) : LibWGPU::ShaderModule
@@ -221,6 +232,8 @@ module Flock
       @samplers.clear
       @materials.each &.release
       @materials.clear
+      @texture_bank[1..].each &.release # id 0 = @white, released below
+      @texture_bank.clear
       LibWGPU.bind_group_release(@clear_group)
       LibWGPU.buffer_release(@clear_uniform)
       LibWGPU.bind_group_layout_release(@clear_layout)
@@ -487,6 +500,15 @@ module Flock
         # The shader quad is unit [-0.5, 0.5]: apply the sprite's size.
         model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
         sprites << {sp.value.z, mat_id, pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
+      end
+
+      # Backend-agnostic Sprite2D: texture is an id into the bank (0 = white). Lets the
+      # same game source render on native + web.
+      world.query(Transform2D, Sprite2D) do |_e, tf, sp|
+        id = sp.value.texture
+        texture = (0 <= id < @texture_bank.size) ? @texture_bank[id] : @white
+        model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
+        sprites << {sp.value.z, 0, @pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
       end
       # Sort by layer (z), then material, then texture: correct layering + batching.
       sprites.sort_by! { |s| {s[0], s[1], s[3].view.address} }

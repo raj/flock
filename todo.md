@@ -169,22 +169,59 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       from `Flock.request_device` so headless/readback usage is covered too. This surfaces the
       real cause behind terse "Validation Error" messages. Default (unset): no output.
 
-## Web / WASM export (later)
+## Web / WASM export (`web/`, branch `web-wasm`)
 
-Ship a Flock game as HTML/WebAssembly. Feasible but a real project, deferred.
-- [ ] **Toolchain**: Crystal → browser WASM is proven by the `wesh` shard
-      (`/Users/rajdeenoo/Documents/code/crystal/wesh`): `crystal-js` interop + `wasm-ld` +
-      `wasm-opt` + WASI sysroot. Confirmed: Flock's **headless core** (math/ECS/app/time, no
-      native deps) already cross-compiles to `wasm32-wasi`.
-- [ ] **Blocker**: rendering (wgpu-native) and platform (SDL3) are **native libs**, unavailable
-      in the browser. Need a browser backend: WebGPU (or WebGL2) on a `<canvas>`, DOM input +
-      Web Gamepad API, WebAudio, `requestAnimationFrame` — all via `crystal-js` JS interop.
-- [ ] **Approach**: write a `WebPlugins` backend paralleling `DefaultPlugins` (the plugin split
-      keeps game/ECS code unchanged). `wesh` binds the DOM (not canvas/WebGPU), so it only
-      helps with the toolchain + surrounding HTML UI, not the game rendering.
-- [ ] **Incremental spike**: (1) run the ECS core in-browser via the wesh toolchain (no render,
-      state to `console.log`); (2) minimal canvas-2D/WebGL2 sprite backend for Space Invaders;
-      (3) then WebGPU for parity with the native backend.
+Ship a Flock scene as HTML/WebAssembly. **Working spike done** (`web/`):
+- [x] **Toolchain**: `web/build.sh` compiles Flock's native-free core to `wasm32-wasi` via the
+      `wesh` shard's patched `crystal-js` (`wasm-ld` + `wasm-opt` + auto WASI sysroot) →
+      `app.wasm` + `app.mjs`.
+- [x] **ECS in the browser**: `web/main.cr` runs `Flock::World`/query/Component + math in WASM;
+      each frame it fills a sprite-instance buffer and hands it to JS via a `@[JS::Method]` that
+      reads WASM linear memory. `JS.export` exposes `flock_init`/`flock_frame`.
+- [x] **WebGPU renderer**: `web/renderer.js` draws the instances as instanced quads with WebGPU
+      (Chrome). Verified end-to-end in Chrome (screenshotted).
+- [x] **WebPlugins backend** (`web/web_backend.cr`): parallels `DefaultPlugins` — reuses the
+      native-free App/Plugin/Schedule/World/Time core and adds browser equivalents (2D sprite
+      components, a keyboard `Input` resource fed from DOM events, a `Render`-schedule system
+      that streams instances to WebGPU). Games keep the native structure: `App.new
+      .add_plugin(WebPlugins.new).add_startup{…}.add_system(Update){…}`, driven from
+      requestAnimationFrame. `web/main.cr` demos it (bouncing squares + arrow-key player);
+      verified in Chrome (input moves the player). One glue fix: `build.sh` patches the
+      generated `clock_time_get` to refresh a detached memory view after WASM heap growth.
+- [x] **Textures + text**: `Sprite#texture` (a renderer texture id); the render system groups
+      sprites by texture and the WebGPU renderer draws one batch per texture. `Flock::Web
+      .checkerboard` (procedural) and `.make_text(str)` (rasterized on a 2D canvas → texture)
+      register textures. Verified in Chrome (checkerboard sprites + a "FLOCK · WEB" text banner).
+- [x] **Web Gamepad**: `renderer.js` polls `navigator.getGamepads()` each frame → `flock_gamepad`
+      → the `Input` resource (`gamepad_x/y`, `gamepad_button?`); the demo player also moves with
+      the left stick. (Wired + headless-validated; a physical pad isn't exercised in CI.)
+- [x] **WebAudio**: `Flock::Web.beep(freq, ms)` plays a WebAudio oscillator (AudioContext created
+      on the first key gesture per autoplay policy). The demo beeps on Space / gamepad button 0.
+- [x] **Shared components**: `Color` + `Transform2D/3D` are now native-free core
+      (`src/flock/{color,transform}.cr`) used by both targets; web uses `Flock::Transform2D` +
+      `Flock::Color` (only `Flock::Web::Sprite`, which carries a texture id, stays web-specific).
+- [x] **Atlas UV + mipmaps**: `Sprite#uv_min/uv_size` (sub-rect sampling); textures upload with a
+      GPU-generated mip chain (verified in Chrome: a sprite showing a UV quarter of a test image).
+- [x] **Load files**: `Flock::Web.load_image(url)` (fetch → `createImageBitmap`, async, mipmapped)
+      and `load_sound(url)`/`play_sound(id)` (fetch → `decodeAudioData`). Demo loads
+      `assets/sprite.png` + `assets/blip.wav`.
+- [x] **Input/display**: pointer/touch drag → directional movement; HiDPI canvas
+      (`devicePixelRatio` backing store) + window resize handling.
+- [x] **Packaging**: `web/build.sh` auto-discovers the `wesh` checkout ($WESH or common paths),
+      reports wasm/gzip size, and supports `--release` (wasm-opt -Oz + JS mangle): ~156 KiB /
+      ~50 KiB gzip vs ~982 KiB debug.
+- [x] **Glyph/text cache**: `make_text` reuses one texture per repeated string.
+- [x] **Audio parity**: `play_sound(id, volume, loop)` → handle, `stop_sound`, `master_volume`,
+      mixing through a master GainNode.
+- [x] **Live-reload dev server**: `web/dev.mjs`/`dev.sh` serve + watch + rebuild on `.cr` + SSE reload.
+- [x] **Shared source on both targets**: `Flock::Sprite2D` (native-free, texture = an id) is rendered
+      by both the native `Renderer2D` (via a texture bank + `register_texture`) and the web backend.
+      `examples/shared_scene.cr` (components + spawn + system, core-only, with an injected texture
+      loader) runs unchanged on native (`examples/shared_scene_native.cr`) and web (`web/main.cr`).
+      Verified: native `examples/sprite2d_test.cr` (readback) + web (Chrome). **Web target: feature-complete.**
+      (Only cosmetic gap left: the native `Camera2D` is y-up / origin-center vs the web's top-left, so
+      framing is vertically mirrored — a shared 2D coordinate convention would unify it.)
+      wgpu-native + SDL3 remain native-only.
 
 ## Remaining work (open)
 
