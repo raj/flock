@@ -10,6 +10,16 @@ describe Flock::Mat4 do
     (m * Flock::Mat4.identity).m.should eq(m.m)
   end
 
+  it "M * M.inverse = identity for a non-trivial TRS matrix" do
+    m = Flock::Mat4.translation(Flock::Vec3.new(3, -2, 5)) *
+        Flock::Mat4.rotation_y(0.7) * Flock::Mat4.rotation_x(0.4) *
+        Flock::Mat4.scale(Flock::Vec3.new(2.0, 0.5, 1.5))
+    prod = (m * m.inverse).m
+    16.times do |i|
+      prod[i].should be_close((i % 5 == 0) ? 1.0f32 : 0.0f32, 1e-4) # diagonal 1, else 0
+    end
+  end
+
   it "orthographic maps [left,right]x[bottom,top] onto the clip cube" do
     m = Flock::Mat4.orthographic(0.0, 800.0, 0.0, 600.0)
     # x=400 (center) -> 0 in NDC; here we check the scale/translation terms.

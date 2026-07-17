@@ -120,8 +120,9 @@ module Flock
     getter weights : Array(Float32) # 4 per vertex
     getter joint_nodes : Array(Int32)
     getter inverse_binds : Array(Mat4)
+    getter mesh_node : Int32 # the skinned mesh node (its world transform is removed per spec)
 
-    def initialize(@mesh, @bind_verts, @joints, @weights, @joint_nodes, @inverse_binds)
+    def initialize(@mesh, @bind_verts, @joints, @weights, @joint_nodes, @inverse_binds, @mesh_node = 0)
     end
   end
 
@@ -272,13 +273,16 @@ module Flock
       new(scene, gpu)
     end
 
-    # CPU-skins every part at the current time and uploads the new vertices.
+    # CPU-skins every part at the current time and uploads the new vertices. Joint matrix
+    # per the glTF spec: inverse(worldMeshNode) · worldJoint · inverseBind (the mesh node's
+    # own transform is removed; the mesh renders at identity, so this yields world space).
     def apply : Nil
       worlds = @scene.world_matrices(@time, @clip)
       f = Mesh::FLOATS
       @scene.skins.each do |part|
+        inv_mesh = worlds[part.mesh_node].inverse
         jmats = Array(Mat4).new(part.joint_nodes.size) do |j|
-          worlds[part.joint_nodes[j]] * part.inverse_binds[j]
+          inv_mesh * worlds[part.joint_nodes[j]] * part.inverse_binds[j]
         end
         verts = part.bind_verts.dup
         vcount = part.bind_verts.size // f
@@ -408,25 +412,28 @@ module Flock
     def self.spawn(scene : GltfScene, world : World, renderer : Renderer3D, gpu : GpuContext) : GpuSkinnedModel
       skins = [] of GpuSkinnedMesh
       scene.skins.each do |part|
-        gsm = renderer.build_gpu_skin(part.mesh, part.joints, part.weights, part.joint_nodes, part.inverse_binds)
+        gsm = renderer.build_gpu_skin(part.mesh, part.joints, part.weights, part.joint_nodes, part.inverse_binds, part.mesh_node)
         world.add(world.spawn, gsm)
         skins << gsm
       end
       new(scene, gpu, skins)
     end
 
-    # Uploads joint matrices (worldJoint · inverseBind) for the current pose, and refreshes
-    # each skin's world-space AABB (union of the bind sphere transformed by every skinning
-    # matrix — a conservative bound of the deformed mesh, so the shadow frustum can fit it).
+    # Uploads joint matrices for the current pose and refreshes each skin's world-space AABB
+    # (union of the bind sphere transformed by every skinning matrix — a conservative bound of
+    # the deformed mesh, so the shadow frustum can fit it). Per the glTF spec the joint matrix
+    # is inverse(worldMeshNode) · worldJoint · inverseBind (the mesh node's own transform is
+    # removed — it's applied to the whole skin instead, which we keep at identity).
     def apply : Nil
       worlds = @scene.world_matrices(@time, @clip)
       @skins.each do |gsm|
+        inv_mesh = worlds[gsm.mesh_node].inverse
         mats = Array(Float32).new(gsm.joint_count * 16)
         gsm.bounds.reset
         c0 = gsm.mesh.bounds_center
         r0 = gsm.mesh.bounds_radius == Float32::MAX ? 1.0f32 : gsm.mesh.bounds_radius
         gsm.joint_count.times do |j|
-          sm = worlds[gsm.joint_nodes[j]] * gsm.inverse_binds[j]
+          sm = inv_mesh * worlds[gsm.joint_nodes[j]] * gsm.inverse_binds[j]
           mats.concat(sm.m)
           s = sm.scale_factors
           gsm.bounds.add(sm.transform_point(c0), r0 * Math.max(s.x, Math.max(s.y, s.z)))

@@ -197,7 +197,10 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       through both skin paths (see `examples/skinned_color_test.cr`). **GPU morph blending:**
       `GpuMorphModel` + `Renderer3D#build_gpu_morph` blend the target deltas in the vertex shader
       (deltas storage buffer indexed by `vertex_index`, per-target weights + model matrix in group2);
-      only weights + model are uploaded per frame (see `examples/morph_gpu_test.cr`). **Not yet:**
+      only weights + model are uploaded per frame (see `examples/morph_gpu_test.cr`). **Skinned
+      node transform:** both skin paths now use the spec joint matrix `inverse(worldMeshNode) ·
+      worldJoint · inverseBind` (`Mat4#inverse`), so a skinned mesh whose node has a non-identity
+      transform renders correctly (see `examples/skinned_node_transform_test.cr`). **Not yet:**
       assorted other KHR extensions (e.g. `KHR_texture_transform`, `KHR_materials_*`).
 - [x] **Camera / misc polish.** `OrbitCamera` (arcball: target/distance/yaw/pitch, dolly,
       clamps) and `FlyCamera` (position/yaw/pitch, WASD move + mouse look) controller helpers — pure,

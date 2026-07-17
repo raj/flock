@@ -393,9 +393,9 @@ module Flock
       end
 
       skins = [] of SkinnedPart
-      json_nodes.each do |n|
+      json_nodes.each_with_index do |n, ni|
         next unless n["skin"]? && n["mesh"]?
-        skins << gltf_build_skinned_part(gpu, doc, n, accessors, views, buffers, color)
+        skins << gltf_build_skinned_part(gpu, doc, n, ni, accessors, views, buffers, color)
       end
 
       # Morph parts: pair each morph mesh with the first node that references it (for its
@@ -416,7 +416,7 @@ module Flock
     # Builds a CPU-skinned part for a node that has both a mesh and a skin: the bind-pose
     # vertices (identity local space), per-vertex JOINTS_0/WEIGHTS_0, and the skin's joint
     # node indices + inverse-bind matrices.
-    private def self.gltf_build_skinned_part(gpu : GpuContext, doc : JSON::Any, node : JSON::Any,
+    private def self.gltf_build_skinned_part(gpu : GpuContext, doc : JSON::Any, node : JSON::Any, node_idx : Int32,
                                              accessors, views, buffers : Array(Bytes), color : Color) : SkinnedPart
       skin = doc["skins"].as_a[node["skin"].as_i]
       joint_nodes = skin["joints"].as_a.map(&.as_i)
@@ -443,7 +443,7 @@ module Flock
         weights.concat(gltf_read_floats(accessors, views, buffers, attrs["WEIGHTS_0"].as_i)[0])
       end
 
-      SkinnedPart.new(build(gpu, verts, indices), verts, joints, weights, joint_nodes, inverse_binds)
+      SkinnedPart.new(build(gpu, verts, indices), verts, joints, weights, joint_nodes, inverse_binds, node_idx)
     end
 
     # Like `load_gltf`, but also loads the first material's base-color texture (from an

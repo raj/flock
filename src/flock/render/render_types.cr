@@ -89,9 +89,10 @@ module Flock
     getter joint_count : Int32
     getter joint_nodes : Array(Int32)
     getter inverse_binds : Array(Mat4)
+    getter mesh_node : Int32 # the skinned mesh node (its world transform is removed per spec)
     getter bounds : SkinnedBounds = SkinnedBounds.new # shared, updated by GpuSkinnedModel
 
-    def initialize(@mesh, @skin_buf, @skin_bytes, @joint_buf, @joint_group, @joint_count, @joint_nodes, @inverse_binds)
+    def initialize(@mesh, @skin_buf, @skin_bytes, @joint_buf, @joint_group, @joint_count, @joint_nodes, @inverse_binds, @mesh_node = 0)
     end
 
     # Frees the skin GPU resources (not the shared bind-pose Mesh — release that separately).

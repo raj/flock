@@ -114,7 +114,7 @@ module Flock
     # (joints u32x4 + weights f32x4 per vertex) and allocates a joint-matrix storage
     # buffer (+ its bind group). Feed `joints`/`weights` 4-per-vertex, in mesh order.
     def build_gpu_skin(mesh : Mesh, joints : Array(Int32), weights : Array(Float32),
-                       joint_nodes : Array(Int32), inverse_binds : Array(Mat4)) : GpuSkinnedMesh
+                       joint_nodes : Array(Int32), inverse_binds : Array(Mat4), mesh_node : Int32 = 0) : GpuSkinnedMesh
       vcount = joints.size // 4
       skin = Array(UInt32).new(vcount * 8)
       vcount.times do |v|
@@ -138,7 +138,7 @@ module Flock
       bgd.entries = entries.to_unsafe
       joint_group = LibWGPU.device_create_bind_group(@gpu.device, pointerof(bgd))
 
-      GpuSkinnedMesh.new(mesh, skin_buf, skin_bytes, joint_buf, joint_group, jcount, joint_nodes, inverse_binds)
+      GpuSkinnedMesh.new(mesh, skin_buf, skin_bytes, joint_buf, joint_group, jcount, joint_nodes, inverse_binds, mesh_node)
     end
 
     # group2 for GPU morphing: deltas storage + weights storage (vertex) + model uniform.
