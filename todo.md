@@ -129,7 +129,39 @@ Sorted by impact. `[ ]` to do. Covers `flock/` and the neighboring shard `sdl3-c
       sky/horizon/ground environment; the PBR shader samples them (split-sum) via group2 when
       an `IblEnvironment` resource is present (flagged in globals; hemisphere ambient otherwise
       → no regression). Verified (`examples/ibl_test.cr`: a metallic sphere reflects the env).
-      **3D feature set complete.**
+      **The planned 3D roadmap above is complete; genuinely-missing 3D features are tracked
+      in "3D — remaining" below.**
+
+### 3D — remaining (not yet in the engine)
+
+Real 3D features never planned, ordered by rendering impact. Confirmed absent in the code.
+
+- [ ] **Lighting system.** The directional light is **hard-coded in the shader**
+      (`L = (0.4, 0.8, 0.6)` in `renderer3d.cr`). No light component, no color/intensity, a
+      single directional source, **no point or spot lights**. Add `Light` components (directional
+      / point / spot with color + intensity + range) uploaded to a lights storage buffer the PBR
+      shader loops over. *Highest impact — unblocks the rest.*
+- [ ] **Shadows (shadow mapping).** None. Add a depth-only pass from the light into a depth
+      texture + a comparison sampler in the main shader (directional first; spot/point later).
+- [ ] **Transparency / alpha blending.** The 3D color target is **opaque only** (no `BlendState`,
+      `write_mask = All`, depth-write on). Add an alpha-blended material flag + back-to-front
+      sorting for translucent meshes (blend enabled, depth-write off).
+- [ ] **Anti-aliasing (MSAA).** `sample_count = 1` everywhere — aliased edges. Add a multisampled
+      color (+ depth) target and a resolve to the surface; make the sample count configurable.
+- [ ] **Native texture mipmaps.** Native `Texture` is `mip_level_count = 1` (only the web target
+      generates mips) → minification aliasing. Generate a GPU mip chain on upload (mirror the web
+      mip generator), parity with the sampler's existing Nearest/Linear + Clamp/Repeat.
+- [ ] **Post-processing / tonemapping.** Renders straight to LDR RGBA8. Add an HDR (rgba16float)
+      offscreen target + a fullscreen post pass: tonemap (ACES/Reinhard), then optionally bloom /
+      FXAA. `material.cr` already notes post-process as intended.
+- [ ] **glTF completeness.** Loaded today: POSITION/NORMAL/TEXCOORD_0/JOINTS/WEIGHTS, base-color +
+      metallic-roughness + normal maps, `baseColorFactor`/`metallicFactor`/`roughnessFactor`, node
+      TRS animation + skinning. Not yet: **emissive** + **occlusion** textures, **alpha modes**
+      (MASK/BLEND), **morph targets** (vertex-morph animation), multiple UV sets, vertex colors on
+      skinned meshes, glTF cameras/lights (`KHR_lights_punctual`), other KHR extensions.
+- [ ] **Camera / misc polish.** Orbit / fly-camera controller helpers for `Camera3D` (exists but
+      has no controller); normal matrix for skinned normals (currently approximate); frustum
+      culling of skinned/animated meshes uses the bind-pose bounds (can under-cull when deformed).
 
 ## sdl3-cr
 
@@ -234,9 +266,10 @@ notes buried in the completed entries plus the two open sections:
 
 ### Polish left on shipped features
 - [ ] **Mouse**: cursor control (hide/capture/relative mode).
-- [ ] **Text**: per-string texture cache + glyph atlas (currently one texture per render).
-- [ ] **Sampler**: mipmap generation (needs level downsampling on upload).
-- [ ] **3D**: normal matrix for non-uniform scale; mesh loading (glTF/OBJ); instanced meshes.
+- [ ] **Text**: per-string texture cache + glyph atlas (native side; web already caches).
+- [ ] **Sampler**: mipmap generation (native `Texture` is single-mip — see "3D — remaining").
+- [ ] **3D**: see the dedicated **"3D — remaining"** section (lights, shadows, transparency,
+      MSAA, native mipmaps, post-processing/tonemapping, glTF emissive/occlusion/morph targets).
 - [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
 
 ### Cross-platform validation
