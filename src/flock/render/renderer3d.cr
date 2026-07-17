@@ -87,6 +87,15 @@ module Flock
     end
   end
 
+  # Tonemapping operator for the optional HDR post-processing pass. `None` keeps the
+  # direct LDR path (no post pass). `Aces`/`Reinhard` render the scene to an HDR
+  # (rgba16float) target and compress it to the display range in a fullscreen pass.
+  enum Tonemap
+    None
+    Aces     # Narkowicz ACES filmic approximation
+    Reinhard # c / (1 + c)
+  end
+
   # 3D mesh renderer consuming Camera3D. Draws entities with (Transform3D, MeshRenderer)
   # using per-mesh vertex/index buffers, a shared view-projection uniform + a storage
   # buffer of model matrices (indexed by @builtin(instance_index)), a depth buffer for
@@ -349,6 +358,43 @@ module Flock
     }
     SHADER
 
+    # Fullscreen post-processing pass: samples the HDR scene texture and tonemaps it to the
+    # display range. The `MODE` placeholder (0=Aces, 1=Reinhard) is substituted per operator.
+    POST_WGSL = <<-SHADER
+    @group(0) @binding(0) var hdr_tex : texture_2d<f32>;
+    @group(0) @binding(1) var hdr_samp : sampler;
+
+    struct VSOut { @builtin(position) clip : vec4<f32>, @location(0) uv : vec2<f32> };
+
+    @vertex
+    fn vs_main(@builtin(vertex_index) vi : u32) -> VSOut {
+      // Oversized triangle covering the screen (no vertex buffer).
+      var p = array<vec2<f32>, 3>(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+      var out : VSOut;
+      let xy = p[vi];
+      out.clip = vec4<f32>(xy, 0.0, 1.0);
+      out.uv = vec2<f32>((xy.x + 1.0) * 0.5, (1.0 - xy.y) * 0.5);
+      return out;
+    }
+
+    fn aces(x : vec3<f32>) -> vec3<f32> {
+      let a = 2.51; let b = 0.03; let c = 2.43; let d = 0.59; let e = 0.14;
+      return clamp((x * (a * x + b)) / (x * (c * x + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+
+    @fragment
+    fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
+      let hdr = textureSample(hdr_tex, hdr_samp, in.uv);
+      var mapped : vec3<f32>;
+      if (MODE == 0) {
+        mapped = aces(hdr.rgb);
+      } else {
+        mapped = hdr.rgb / (hdr.rgb + vec3<f32>(1.0));
+      }
+      return vec4<f32>(mapped, hdr.a);
+    }
+    SHADER
+
     @model_capacity : Int32 = 64
     @scratch : Array(Float32) = [] of Float32
     @scratch_n : Array(Float32) = [] of Float32
@@ -407,11 +453,25 @@ module Flock
     # buffer matches @sample_count. sample_count == 1 keeps the direct (non-resolved) path.
     @msaa_tex : LibWGPU::Texture
     @msaa_view : LibWGPU::TextureView
+    # Post-processing (@tonemap != None): the scene renders to an HDR (rgba16float) target
+    # (@hdr_view) which a fullscreen pass tonemaps into the frame target. @scene_format is
+    # the color format the geometry pipelines write (HDR when tonemapping, else @gpu.format).
+    @scene_format : LibWGPU::TextureFormat
+    @hdr_tex : LibWGPU::Texture
+    @hdr_view : LibWGPU::TextureView
+    @post_shader : LibWGPU::ShaderModule
+    @post_layout : LibWGPU::BindGroupLayout
+    @post_pipeline : LibWGPU::RenderPipeline
+    @post_sampler : LibWGPU::Sampler
+    @post_group : LibWGPU::BindGroup
 
     # `sample_count` controls MSAA (1 = off, 2/4/8 = multisampled with a resolve to the
     # frame target). Common values are 1 and 4. Render3DPlugin defaults to 4.
-    def initialize(@gpu : GpuContext, @sample_count : Int32 = 1)
+    # `tonemap` enables HDR rendering + a fullscreen tonemap pass (None keeps LDR direct).
+    def initialize(@gpu : GpuContext, @sample_count : Int32 = 1, @tonemap : Tonemap = Tonemap::None)
       raise "sample_count must be >= 1" if @sample_count < 1
+      # Geometry writes HDR (rgba16float) when tonemapping, else straight to the frame format.
+      @scene_format = @tonemap.none? ? @gpu.format : LibWGPU::TextureFormat::RGBA16Float
       # Explicit group0 (camera/models/globals/normals/params), group1 (textures) and
       # group2 (IBL) layouts so custom materials share the rigid pipeline layout.
       @group0_layout = build_group0_layout
@@ -457,6 +517,15 @@ module Flock
       @shadow_group3 = build_shadow_group3
       @shadow_pass_group = build_shadow_pass_group
 
+      # Post-processing (HDR target + fullscreen tonemap pass). Only when @tonemap != None.
+      @hdr_tex = Pointer(Void).null.as(LibWGPU::Texture)
+      @hdr_view = Pointer(Void).null.as(LibWGPU::TextureView)
+      @post_layout = build_post_layout
+      @post_sampler = build_sampler(SamplerFilter::Linear, SamplerWrap::Clamp)
+      @post_shader = build_shader(POST_WGSL.gsub("MODE", @tonemap.reinhard? ? "1" : "0"))
+      @post_pipeline = build_post_pipeline
+      @post_group = Pointer(Void).null.as(LibWGPU::BindGroup)
+
       # Depth + MSAA color targets (lazily sized to the surface on first render).
       @depth_tex = Pointer(Void).null.as(LibWGPU::Texture)
       @depth_view = Pointer(Void).null.as(LibWGPU::TextureView)
@@ -479,6 +548,13 @@ module Flock
       LibWGPU.texture_release(@depth_tex) unless @depth_tex.null?
       LibWGPU.texture_view_release(@msaa_view) unless @msaa_view.null?
       LibWGPU.texture_release(@msaa_tex) unless @msaa_tex.null?
+      LibWGPU.bind_group_release(@post_group) unless @post_group.null?
+      LibWGPU.texture_view_release(@hdr_view) unless @hdr_view.null?
+      LibWGPU.texture_release(@hdr_tex) unless @hdr_tex.null?
+      LibWGPU.render_pipeline_release(@post_pipeline)
+      LibWGPU.shader_module_release(@post_shader)
+      LibWGPU.sampler_release(@post_sampler)
+      LibWGPU.bind_group_layout_release(@post_layout)
       @materials.each &.release
       @tex_groups.each_value { |bg| LibWGPU.bind_group_release(bg) }
       @tex_groups.clear
@@ -806,6 +882,87 @@ module Flock
       LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
     end
 
+    # Post pass bind group layout: HDR scene texture + a filtering sampler.
+    private def build_post_layout : LibWGPU::BindGroupLayout
+      t = LibWGPU::TextureBindingLayout.new
+      t.sample_type = LibWGPU::TextureSampleType::Float
+      t.view_dimension = LibWGPU::TextureViewDimension::N2D
+      e0 = LibWGPU::BindGroupLayoutEntry.new
+      e0.binding = 0_u32; e0.visibility = LibWGPU::ShaderStage::Fragment; e0.texture = t
+      smp = LibWGPU::SamplerBindingLayout.new
+      smp.type_ = LibWGPU::SamplerBindingType::Filtering
+      e1 = LibWGPU::BindGroupLayoutEntry.new
+      e1.binding = 1_u32; e1.visibility = LibWGPU::ShaderStage::Fragment; e1.sampler = smp
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[2]
+      entries[0] = e0; entries[1] = e1
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 2_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
+    # Fullscreen tonemap pipeline: no vertex buffer, no depth, writes the frame format.
+    private def build_post_pipeline : LibWGPU::RenderPipeline
+      layouts = uninitialized LibWGPU::BindGroupLayout[1]
+      layouts[0] = @post_layout
+      pld = LibWGPU::PipelineLayoutDescriptor.new
+      pld.label = WGPU.empty_string_view
+      pld.bind_group_layout_count = 1_u64
+      pld.bind_group_layouts = layouts.to_unsafe
+      pl = LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(pld))
+
+      vertex = LibWGPU::VertexState.new
+      vertex.module_ = @post_shader
+      vertex.entry_point = WGPU.string_view("vs_main")
+      vertex.buffer_count = 0_u64
+
+      target = LibWGPU::ColorTargetState.new
+      target.format = @gpu.format
+      target.write_mask = LibWGPU::ColorWriteMask::All
+      fragment = LibWGPU::FragmentState.new
+      fragment.module_ = @post_shader
+      fragment.entry_point = WGPU.string_view("fs_main")
+      fragment.target_count = 1_u64
+      fragment.targets = pointerof(target)
+
+      primitive = LibWGPU::PrimitiveState.new
+      primitive.topology = LibWGPU::PrimitiveTopology::TriangleList
+      primitive.front_face = LibWGPU::FrontFace::CCW
+      primitive.cull_mode = LibWGPU::CullMode::None
+
+      multisample = LibWGPU::MultisampleState.new
+      multisample.count = 1_u32
+      multisample.mask = 0xFFFFFFFF_u32
+
+      desc = LibWGPU::RenderPipelineDescriptor.new
+      desc.label = WGPU.empty_string_view
+      desc.layout = pl
+      desc.vertex = vertex
+      desc.primitive = primitive
+      desc.depth_stencil = Pointer(LibWGPU::DepthStencilState).null
+      desc.multisample = multisample
+      desc.fragment = pointerof(fragment)
+      pipeline = LibWGPU.device_create_render_pipeline(@gpu.device, pointerof(desc))
+      LibWGPU.pipeline_layout_release(pl)
+      pipeline
+    end
+
+    private def build_post_group : LibWGPU::BindGroup
+      e0 = LibWGPU::BindGroupEntry.new
+      e0.binding = 0_u32; e0.texture_view = @hdr_view
+      e1 = LibWGPU::BindGroupEntry.new
+      e1.binding = 1_u32; e1.sampler = @post_sampler
+      entries = uninitialized LibWGPU::BindGroupEntry[2]
+      entries[0] = e0; entries[1] = e1
+      d = LibWGPU::BindGroupDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.layout = @post_layout
+      d.entry_count = 2_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
+    end
+
     # group2 (rigid pipeline): irradiance cube + prefiltered cube + BRDF LUT + sampler.
     private def build_ibl_layout : LibWGPU::BindGroupLayout
       cube = ->(binding : UInt32) do
@@ -1027,7 +1184,7 @@ module Flock
       vertex.buffers = pointerof(vlayout)
 
       target = LibWGPU::ColorTargetState.new
-      target.format = @gpu.format
+      target.format = @scene_format
       target.write_mask = LibWGPU::ColorWriteMask::All
       target.blend = pointerof(blend_state) if blend
 
@@ -1129,7 +1286,7 @@ module Flock
       vertex.buffers = layouts.to_unsafe
 
       target = LibWGPU::ColorTargetState.new
-      target.format = @gpu.format
+      target.format = @scene_format
       target.write_mask = LibWGPU::ColorWriteMask::All
       fragment = LibWGPU::FragmentState.new
       fragment.module_ = shader
@@ -1284,6 +1441,9 @@ module Flock
       LibWGPU.texture_release(@depth_tex) unless @depth_tex.null?
       LibWGPU.texture_view_release(@msaa_view) unless @msaa_view.null?
       LibWGPU.texture_release(@msaa_tex) unless @msaa_tex.null?
+      LibWGPU.texture_view_release(@hdr_view) unless @hdr_view.null?
+      LibWGPU.texture_release(@hdr_tex) unless @hdr_tex.null?
+      LibWGPU.bind_group_release(@post_group) unless @post_group.null?
 
       # Depth buffer, matched to the MSAA sample count so it can back the same pass.
       desc = LibWGPU::TextureDescriptor.new
@@ -1297,14 +1457,30 @@ module Flock
       @depth_tex = LibWGPU.device_create_texture(@gpu.device, pointerof(desc))
       @depth_view = LibWGPU.texture_create_view(@depth_tex, Pointer(LibWGPU::TextureViewDescriptor).null)
 
-      # Multisampled color target (resolved to the frame target). Only when MSAA is on.
+      # HDR scene target (single-sample) when tonemapping — the post pass samples it.
+      unless @tonemap.none?
+        hdesc = LibWGPU::TextureDescriptor.new
+        hdesc.label = WGPU.empty_string_view
+        hdesc.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::TextureBinding
+        hdesc.dimension = LibWGPU::TextureDimension::N2D
+        hdesc.size = LibWGPU::Extent3D.new(width: w, height: h, depth_or_array_layers: 1_u32)
+        hdesc.format = @scene_format
+        hdesc.mip_level_count = 1_u32
+        hdesc.sample_count = 1_u32
+        @hdr_tex = LibWGPU.device_create_texture(@gpu.device, pointerof(hdesc))
+        @hdr_view = LibWGPU.texture_create_view(@hdr_tex, Pointer(LibWGPU::TextureViewDescriptor).null)
+        @post_group = build_post_group
+      end
+
+      # Multisampled color target (resolved to the scene/frame target). Only when MSAA is on.
+      # Its format matches the geometry pipelines (@scene_format: HDR when tonemapping).
       if @sample_count > 1
         cdesc = LibWGPU::TextureDescriptor.new
         cdesc.label = WGPU.empty_string_view
         cdesc.usage = LibWGPU::TextureUsage::RenderAttachment
         cdesc.dimension = LibWGPU::TextureDimension::N2D
         cdesc.size = LibWGPU::Extent3D.new(width: w, height: h, depth_or_array_layers: 1_u32)
-        cdesc.format = @gpu.format
+        cdesc.format = @scene_format
         cdesc.mip_level_count = 1_u32
         cdesc.sample_count = @sample_count.to_u32
         @msaa_tex = LibWGPU.device_create_texture(@gpu.device, pointerof(cdesc))
@@ -1560,14 +1736,18 @@ module Flock
         render_shadow_pass(groups)
       end
 
+      # The scene's single-sample destination: the HDR target when tonemapping (the post
+      # pass reads it and writes `target`), otherwise the frame target directly.
+      scene_target = @tonemap.none? ? target : @hdr_view
+
       color_att = LibWGPU::RenderPassColorAttachment.new
-      # MSAA: render into the multisampled target and resolve into the frame target.
-      # Without MSAA, render straight into the frame target (no resolve).
+      # MSAA: render into the multisampled target and resolve into scene_target.
+      # Without MSAA, render straight into scene_target (no resolve).
       if @sample_count > 1
         color_att.view = @msaa_view
-        color_att.resolve_target = target
+        color_att.resolve_target = scene_target
       else
-        color_att.view = target
+        color_att.view = scene_target
       end
       color_att.depth_slice = 0xFFFFFFFF_u32
       color_att.load_op = LibWGPU::LoadOp::Clear
@@ -1649,6 +1829,27 @@ module Flock
       end
 
       LibWGPU.render_pass_encoder_end(pass)
+
+      # Post pass (same encoder, after the scene): tonemap the HDR target into `target`.
+      post = Pointer(Void).null.as(LibWGPU::RenderPassEncoder)
+      unless @tonemap.none?
+        pcol = LibWGPU::RenderPassColorAttachment.new
+        pcol.view = target
+        pcol.depth_slice = 0xFFFFFFFF_u32
+        pcol.load_op = LibWGPU::LoadOp::Clear
+        pcol.store_op = LibWGPU::StoreOp::Store
+        pcol.clear_value = LibWGPU::Color.new(r: 0.0, g: 0.0, b: 0.0, a: 1.0)
+        pdesc = LibWGPU::RenderPassDescriptor.new
+        pdesc.label = WGPU.empty_string_view
+        pdesc.color_attachment_count = 1_u64
+        pdesc.color_attachments = pointerof(pcol)
+        post = LibWGPU.command_encoder_begin_render_pass(encoder, pointerof(pdesc))
+        LibWGPU.render_pass_encoder_set_pipeline(post, @post_pipeline)
+        LibWGPU.render_pass_encoder_set_bind_group(post, 0_u32, @post_group, 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_draw(post, 3_u32, 1_u32, 0_u32, 0_u32)
+        LibWGPU.render_pass_encoder_end(post)
+      end
+
       cmd_desc = LibWGPU::CommandBufferDescriptor.new
       cmd_desc.label = WGPU.empty_string_view
       cmd = LibWGPU.command_encoder_finish(encoder, pointerof(cmd_desc))
@@ -1656,6 +1857,7 @@ module Flock
       LibWGPU.queue_submit(@gpu.queue, 1_u64, cmds.to_unsafe)
 
       LibWGPU.command_buffer_release(cmd)
+      LibWGPU.render_pass_encoder_release(post) unless post.null?
       LibWGPU.render_pass_encoder_release(pass)
       LibWGPU.command_encoder_release(encoder)
     end
@@ -1666,14 +1868,16 @@ module Flock
   # owns the whole frame): pair WindowPlugin + Render3DPlugin (+ Input/Audio) rather
   # than DefaultPlugins.
   class Render3DPlugin < Plugin
-    # `sample_count` sets MSAA (4 = 4x by default; 1 disables it).
-    def initialize(@sample_count : Int32 = 4)
+    # `sample_count` sets MSAA (4 = 4x by default; 1 disables it). `tonemap` enables the
+    # HDR post-processing pass (None by default).
+    def initialize(@sample_count : Int32 = 4, @tonemap : Tonemap = Tonemap::None)
     end
 
     def build(app : App) : Nil
       sc = @sample_count
+      tm = @tonemap
       app.add_startup do |world, _cmd|
-        world.insert_resource(Renderer3D.new(world.resource(GpuContext), sc))
+        world.insert_resource(Renderer3D.new(world.resource(GpuContext), sc, tm))
       end
       app.add_system(Schedule::Render) do |world, _cmd|
         world.resource?(Renderer3D).try &.render(world)

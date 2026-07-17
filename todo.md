@@ -169,9 +169,12 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       default to `mipmaps: true`; procedural/1×1 textures stay single-mip. The 3D sampler's
       `lod_max_clamp` was raised so the whole chain is usable (single-mip textures still sample
       level 0). See `examples/mipmap_test.cr` (minified checkerboard variance 3065 → 0 with mips).
-- [ ] **Post-processing / tonemapping.** Renders straight to LDR RGBA8. Add an HDR (rgba16float)
-      offscreen target + a fullscreen post pass: tonemap (ACES/Reinhard), then optionally bloom /
-      FXAA. `material.cr` already notes post-process as intended.
+- [x] **Post-processing / tonemapping.** Opt-in via `Renderer3D`/`Render3DPlugin` `tonemap:`
+      (`Tonemap::Aces` / `Reinhard`; `None` = the direct LDR path). When on, geometry renders to an
+      HDR `rgba16float` target (MSAA resolves into it) and a fullscreen triangle pass tonemaps it into
+      the frame target. `None` keeps the byte-for-byte LDR path (all readbacks unchanged). See
+      `examples/postprocess_test.cr` (a bright light blows 6852 pixels to white without tonemapping
+      vs 0 with ACES). *Bloom / FXAA / exposure control remain as future extensions of the post pass.*
 - [ ] **glTF completeness.** Loaded today: POSITION/NORMAL/TEXCOORD_0/JOINTS/WEIGHTS, base-color +
       metallic-roughness + normal maps, `baseColorFactor`/`metallicFactor`/`roughnessFactor`, node
       TRS animation + skinning. Not yet: **emissive** + **occlusion** textures, **alpha modes**
@@ -286,9 +289,9 @@ notes buried in the completed entries plus the two open sections:
 - [ ] **Mouse**: cursor control (hide/capture/relative mode).
 - [ ] **Text**: per-string texture cache + glyph atlas (native side; web already caches).
 - [ ] **Sampler**: mipmap generation (native `Texture` is single-mip — see "3D — remaining").
-- [ ] **3D**: see the dedicated **"3D — remaining"** section (post-processing/tonemapping,
-      glTF emissive/occlusion/morph targets). Lighting, directional shadow mapping,
-      transparency, MSAA and native mipmaps are done.
+- [ ] **3D**: see the dedicated **"3D — remaining"** section (glTF emissive/occlusion/morph
+      targets). Lighting, directional shadow mapping, transparency, MSAA, native mipmaps and
+      HDR post-processing/tonemapping are done.
 - [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
 
 ### Cross-platform validation
