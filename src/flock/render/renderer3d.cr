@@ -954,7 +954,9 @@ module Flock
       d.label = WGPU.empty_string_view
       d.address_mode_u = addr; d.address_mode_v = addr; d.address_mode_w = addr
       d.mag_filter = fmode; d.min_filter = fmode; d.mipmap_filter = mmode
-      d.lod_min_clamp = 0.0f32; d.lod_max_clamp = 1.0f32; d.max_anisotropy = 1_u16
+      # Allow the whole mip chain when a texture has one; single-mip textures always
+      # sample level 0 (LOD is clamped to the view's available levels), so this is safe.
+      d.lod_min_clamp = 0.0f32; d.lod_max_clamp = 32.0f32; d.max_anisotropy = 1_u16
       LibWGPU.device_create_sampler(@gpu.device, pointerof(d))
     end
 
