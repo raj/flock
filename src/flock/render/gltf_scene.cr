@@ -318,30 +318,35 @@ module Flock
   #
   #   scene = Flock::Mesh.load_gltf_scene(gpu, "face.glb")
   #   morph = Flock::MorphModel.spawn(scene, world, gpu)
-  #   app.add_system(Flock::Schedule::Update) { |w, _| morph.update(w.resource(Flock::Time).delta.to_f32) }
+  #   app.add_system(Flock::Schedule::Update) { |w, _| morph.update(w, w.resource(Flock::Time).delta.to_f32) }
   class MorphModel
     getter scene : GltfScene
     property time : Float32 = 0.0f32
     property clip : Int32 = 0
+    @entities : Hash(Int32, Entity)
 
-    def initialize(@scene : GltfScene, @gpu : GpuContext)
+    def initialize(@scene : GltfScene, @gpu : GpuContext, @entities : Hash(Int32, Entity))
     end
 
     def self.spawn(scene : GltfScene, world : World, gpu : GpuContext, tint : Color = Color::WHITE) : MorphModel
+      entities = {} of Int32 => Entity
       scene.morphs.each do |part|
         e = world.spawn
         world.add(e, Transform3D.new)
         # cull: false — morph blending moves vertices off the bind-pose bounds.
         world.add(e, MeshRenderer.new(part.mesh, tint: tint, cull: false))
+        entities[part.node] = e
       end
-      m = new(scene, gpu)
-      m.apply # pose at t=0 so a static (unanimated) morph still shows its default weights
+      m = new(scene, gpu, entities)
+      m.apply(world) # pose at t=0 so a static (unanimated) morph shows its default weights
       m
     end
 
-    # Blends every morph part at the current time/weights and uploads the vertices.
-    def apply : Nil
+    # Blends every morph part at the current time/weights, uploads the LOCAL-space vertices,
+    # and writes each part's node world matrix into its entity (matching the GPU path).
+    def apply(world : World) : Nil
       f = Mesh::FLOATS
+      worlds = @scene.world_matrices(@time, @clip)
       @scene.morphs.each do |part|
         w = @scene.node_weights(part.node, @time, @clip) || part.default_weights
         verts = part.base_verts.dup
@@ -361,14 +366,17 @@ module Flock
         end
         LibWGPU.queue_write_buffer(@gpu.queue, part.mesh.vertex_buf, 0_u64,
           verts.to_unsafe.as(Void*), (verts.size * 4).to_u64)
+        if (e = @entities[part.node]?) && (ptr = world.get_ptr(e, Transform3D))
+          ptr.value.matrix_override = worlds[part.node]
+        end
       end
     end
 
-    def update(dt : Float32) : Nil
+    def update(world : World, dt : Float32) : Nil
       d = (@scene.animations[@clip]?.try(&.duration)) || 0.0f32
       @time += dt
       @time = @time % d if d > 0 && @time > d
-      apply
+      apply(world)
     end
   end
 

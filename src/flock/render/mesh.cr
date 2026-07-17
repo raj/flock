@@ -408,11 +408,16 @@ module Flock
                                              accessors, views, buffers : Array(Bytes), color : Color) : SkinnedPart
       skin = doc["skins"].as_a[node["skin"].as_i]
       joint_nodes = skin["joints"].as_a.map(&.as_i)
-      ibm = gltf_read_floats(accessors, views, buffers, skin["inverseBindMatrices"].as_i)[0]
+      # inverseBindMatrices is optional: absent (or short) => identity for those joints.
+      ibm = (ibi = skin["inverseBindMatrices"]?) ? gltf_read_floats(accessors, views, buffers, ibi.as_i)[0] : [] of Float32
       inverse_binds = Array(Mat4).new(joint_nodes.size) do |j|
-        a = StaticArray(Float32, 16).new(0.0f32)
-        16.times { |k| a[k] = ibm[j * 16 + k] } # glTF matrices are column-major
-        Mat4.new(a)
+        if (j + 1) * 16 <= ibm.size
+          a = StaticArray(Float32, 16).new(0.0f32)
+          16.times { |k| a[k] = ibm[j * 16 + k] } # glTF matrices are column-major
+          Mat4.new(a)
+        else
+          Mat4.identity
+        end
       end
 
       verts = [] of Float32
@@ -745,15 +750,27 @@ module Flock
       end
     end
 
-    private def self.gltf_read_component(io : IO::Memory, ct : Int32) : Float32
+    # Reads one component. When `normalized`, integer types are mapped to [0,1] (unsigned)
+    # or [-1,1] (signed) per the glTF spec — required for ubyte/ushort COLOR_0, WEIGHTS_0, UVs.
+    private def self.gltf_read_component(io : IO::Memory, ct : Int32, normalized : Bool = false) : Float32
       case ct
       when 5126 then io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
-      when 5125 then io.read_bytes(UInt32, IO::ByteFormat::LittleEndian).to_f32
-      when 5123 then io.read_bytes(UInt16, IO::ByteFormat::LittleEndian).to_f32
-      when 5122 then io.read_bytes(Int16, IO::ByteFormat::LittleEndian).to_f32
-      when 5121 then (io.read_byte || 0_u8).to_f32
-      when 5120 then (io.read_byte || 0_u8).to_i8!.to_f32
-      else           0.0f32
+      when 5125
+        v = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian).to_f32
+        normalized ? v / 4294967295.0f32 : v
+      when 5123
+        v = io.read_bytes(UInt16, IO::ByteFormat::LittleEndian).to_f32
+        normalized ? v / 65535.0f32 : v
+      when 5122
+        v = io.read_bytes(Int16, IO::ByteFormat::LittleEndian).to_f32
+        normalized ? Math.max(v / 32767.0f32, -1.0f32) : v
+      when 5121
+        v = (io.read_byte || 0_u8).to_f32
+        normalized ? v / 255.0f32 : v
+      when 5120
+        v = (io.read_byte || 0_u8).to_i8!.to_f32
+        normalized ? Math.max(v / 127.0f32, -1.0f32) : v
+      else 0.0f32
       end
     end
 
@@ -764,6 +781,7 @@ module Flock
       ncomp = TYPE_COMPONENTS[acc["type"].as_s]
       ct = acc["componentType"].as_i
       count = acc["count"].as_i
+      normalized = acc["normalized"]?.try(&.as_bool) || false
       csize = gltf_component_size(ct)
       base = (bv["byteOffset"]?.try(&.as_i) || 0) + (acc["byteOffset"]?.try(&.as_i) || 0)
       stride = bv["byteStride"]?.try(&.as_i) || (ncomp * csize)
@@ -772,7 +790,7 @@ module Flock
       count.times do |e|
         ncomp.times do |c|
           io.pos = base + e * stride + c * csize
-          out << gltf_read_component(io, ct)
+          out << gltf_read_component(io, ct, normalized)
         end
       end
       {out, ncomp}

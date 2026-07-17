@@ -1890,8 +1890,8 @@ module Flock
       globals[0] = t
       globals[1] = ibl ? 1.0f32 : 0.0f32
       globals[2] = light_count.to_f32
-      # a.w = shadow caster index + 1 (0 = none); the shader shadows only that light.
-      globals[3] = shadow_index >= 0 ? (shadow_index + 1).to_f32 : 0.0f32
+      # a.w = shadow caster index + 1 (0 = none). Left 0 here and only set below once we
+      # know the shadow pass actually ran this frame (else the shader would sample a stale map).
       globals[4] = cam.position.x; globals[5] = cam.position.y; globals[6] = cam.position.z
       globals[8] = amb.sky.r; globals[9] = amb.sky.g; globals[10] = amb.sky.b
       globals[12] = amb.ground.r; globals[13] = amb.ground.g; globals[14] = amb.ground.b
@@ -2021,6 +2021,10 @@ module Flock
         light_vp = proj * view
         LibWGPU.queue_write_buffer(@gpu.queue, @shadow_vp_buf, 0_u64, light_vp.m.to_unsafe.as(Void*), 64_u64)
         render_shadow_pass(groups)
+        # Now that the shadow map holds this frame's depth, enable sampling for the caster
+        # (globals.a.w = index + 1, byte offset 12). Skipped scenes keep the safe 0.
+        sw = (shadow_index + 1).to_f32
+        LibWGPU.queue_write_buffer(@gpu.queue, @globals_buf, 12_u64, pointerof(sw).as(Void*), 4_u64)
       end
 
       # The scene's single-sample destination: the HDR target when tonemapping (the post
@@ -2118,6 +2122,9 @@ module Flock
       # a single-instance draw whose first_instance points at its model/param slot.
       unless transparent.empty?
         LibWGPU.render_pass_encoder_set_pipeline(pass, @transparent_pipeline)
+        # The skinned/morph loops above rebind group2 to their own (incompatible) layout;
+        # the transparent pipeline shares the rigid layout, so restore group2 = IBL first.
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 2_u32, ibl_group, 0_u64, Pointer(UInt32).null)
         tslot = total.to_u32
         transparent.each do |(mesh, base_tex, mr_tex, nrm_tex, em_tex, occ_tex, _model, _tint, _m, _r, _ef, _c, _uv, _d)|
           LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(base_tex, mr_tex, nrm_tex, em_tex, occ_tex), 0_u64, Pointer(UInt32).null)

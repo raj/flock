@@ -528,7 +528,11 @@ module Flock
       end
 
       cameras.each_with_index do |cam, ci|
-        vp = cam.view_projection(width.to_f32, height.to_f32)
+        # Project onto the camera's actual render target (its viewport, if any), not the
+        # whole framebuffer — otherwise a sub-viewport squashes the world by its aspect.
+        vw = cam.viewport.try(&.width) || width.to_f32
+        vh = cam.viewport.try(&.height) || height.to_f32
+        vp = cam.view_projection(vw, vh)
         LibWGPU.queue_write_buffer(@gpu.queue, @uniform_buf, 0_u64,
           vp.m.to_unsafe.as(Void*), 64_u64)
 

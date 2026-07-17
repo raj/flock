@@ -94,7 +94,7 @@ readback = LibWGPU.device_create_buffer(device, pointerof(bdesc))
 # Renders at morph time `t` and returns luminance at a left column and a right column.
 render_lr = ->(t : Float32) do
   morph.time = t
-  morph.apply
+  morph.apply(world)
   renderer.render_into(world, tv)
   src = LibWGPU::TexelCopyTextureInfo.new
   src.texture = tt; src.mip_level = 0_u32
