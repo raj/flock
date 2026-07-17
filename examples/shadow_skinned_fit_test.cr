@@ -45,13 +45,7 @@ json = %({
 path = File.tempname("flock_skinsh", ".gltf")
 File.write(path, json)
 
-instance = WGPU.create_instance
-adapter = WGPU.request_adapter(instance)
-device = Flock.request_device(instance, adapter)
-queue = LibWGPU.device_get_queue(device)
-gpu = Flock::GpuContext.new(instance, adapter, device, queue,
-  WGPU.null(LibWGPU::Surface), LibWGPU::TextureFormat::RGBA8Unorm,
-  SIZE, SIZE, Pointer(Void).null.as(LibSDL::Window), Pointer(Void).null.as(LibSDL::MetalView))
+gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 scene = Flock::Mesh.load_gltf_scene(gpu, path, Flock::Color.new(0.7, 0.7, 0.7))
 File.delete(path) rescue nil

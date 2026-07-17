@@ -3,13 +3,7 @@ require "../src/flock/gpu"
 
 FONT = "/System/Library/Fonts/Supplemental/Arial.ttf"
 
-instance = WGPU.create_instance
-adapter = WGPU.request_adapter(instance)
-device = Flock.request_device(instance, adapter)
-queue = LibWGPU.device_get_queue(device)
-gpu = Flock::GpuContext.new(instance, adapter, device, queue,
-  WGPU.null(LibWGPU::Surface), LibWGPU::TextureFormat::RGBA8Unorm,
-  1_u32, 1_u32, Pointer(Void).null.as(LibSDL::Window), Pointer(Void).null.as(LibSDL::MetalView))
+gpu, instance, device, queue = Flock.headless_context(1_u32, 1_u32)
 
 assets = Flock::Assets.new(gpu)
 a = assets.font(FONT, 24)

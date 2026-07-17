@@ -72,13 +72,7 @@ File.delete(path)
 
 # --- End-to-end: render a white sphere lit only by the imported directional (red) light. ---
 SIZE = 64_u32
-instance = WGPU.create_instance
-adapter = WGPU.request_adapter(instance)
-device = Flock.request_device(instance, adapter)
-queue = LibWGPU.device_get_queue(device)
-gpu = Flock::GpuContext.new(instance, adapter, device, queue,
-  WGPU.null(LibWGPU::Surface), LibWGPU::TextureFormat::RGBA8Unorm,
-  SIZE, SIZE, Pointer(Void).null.as(LibSDL::Window), Pointer(Void).null.as(LibSDL::MetalView))
+gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 sphere = Flock::Mesh.sphere(gpu, radius: 1.0, segments: 32, rings: 16, color: Flock::Color.new(0.9, 0.9, 0.9))
 

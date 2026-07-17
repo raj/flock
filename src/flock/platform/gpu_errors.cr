@@ -98,4 +98,21 @@ module Flock
     raise "Flock.request_device failed: #{result.status}" unless result.status.success?
     result.handle
   end
+
+  # Headless (no window/surface) GPU setup for offscreen rendering + readback tests.
+  # Creates the instance/adapter/device/queue and a surface-less `GpuContext`, and returns
+  # them as a tuple so a test can grab whichever handles it needs:
+  #   gpu, instance, device, queue = Flock.headless_context(SIZE, SIZE)
+  #   renderer = Flock::Renderer3D.new(gpu)
+  def self.headless_context(width : Int, height : Int,
+                            format : LibWGPU::TextureFormat = LibWGPU::TextureFormat::RGBA8Unorm)
+    instance = WGPU.create_instance
+    adapter = WGPU.request_adapter(instance)
+    device = Flock.request_device(instance, adapter)
+    queue = LibWGPU.device_get_queue(device)
+    gpu = GpuContext.new(instance, adapter, device, queue,
+      WGPU.null(LibWGPU::Surface), format, width.to_u32, height.to_u32,
+      Pointer(Void).null.as(LibSDL::Window), Pointer(Void).null.as(LibSDL::MetalView))
+    {gpu, instance, device, queue}
+  end
 end
