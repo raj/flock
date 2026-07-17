@@ -59,7 +59,7 @@ app.add_startup do |world, cmd|
   world.insert_resource(Flock::AmbientLight.new(
     sky: Flock::Color.new(0.35, 0.4, 0.5), ground: Flock::Color.new(0.12, 0.1, 0.09)))
   cmd.spawn(Flock::Transform3D.new,
-    Flock::Light.directional(Flock::Vec3.new(-0.4, -1.0, -0.35), Flock::Color.new(1.0, 0.97, 0.9), 1.4))
+    Flock::Light.directional(Flock::Vec3.new(-0.4, -1.0, -0.35), Flock::Color.new(1.0, 0.97, 0.9), 1.4, casts_shadows: true))
 
   # Ground slab.
   ground = Flock::Mesh.cube(gpu, color: Flock::Color.new(0.16, 0.18, 0.22))

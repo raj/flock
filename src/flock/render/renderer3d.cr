@@ -437,6 +437,20 @@ module Flock
     }
     SHADER
 
+    # Skinned depth-only shadow pass: skins the vertex with the joint matrices (group1),
+    # same as the main skinned shader, so GPU-skinned meshes cast correct shadows. Reuses
+    # group0 (light_vp + unused models slot) so it shares the rigid shadow bind group.
+    SHADOW_SKINNED_WGSL = <<-SHADER
+    @group(0) @binding(0) var<uniform> light_vp : mat4x4<f32>;
+    @group(1) @binding(0) var<storage, read> joints : array<mat4x4<f32>>;
+
+    @vertex
+    fn vs_main(@location(0) pos : vec3<f32>, @location(1) ji : vec4<u32>, @location(2) jw : vec4<f32>) -> @builtin(position) vec4<f32> {
+      let skin = jw.x * joints[ji.x] + jw.y * joints[ji.y] + jw.z * joints[ji.z] + jw.w * joints[ji.w];
+      return light_vp * skin * vec4<f32>(pos, 1.0);
+    }
+    SHADER
+
     # Fullscreen post-processing pass: samples the HDR scene texture and tonemaps it to the
     # display range. The `MODE` placeholder (0=Aces, 1=Reinhard) is substituted per operator.
     POST_WGSL = <<-SHADER
@@ -586,6 +600,8 @@ module Flock
     @shadow_pipeline_layout : LibWGPU::PipelineLayout
     @shadow_shader : LibWGPU::ShaderModule
     @shadow_pipeline : LibWGPU::RenderPipeline
+    @shadow_skinned_shader : LibWGPU::ShaderModule   # skinned depth pass (GPU-skinned casters)
+    @shadow_skinned_pipeline : LibWGPU::RenderPipeline
     @shadow_vp_buf : LibWGPU::Buffer                 # light view-projection (mat4)
     @shadow_sampler : LibWGPU::Sampler               # comparison sampler
     @shadow_tex : LibWGPU::Texture
@@ -661,6 +677,8 @@ module Flock
       @shadow_pipeline_layout = build_shadow_pipeline_layout
       @shadow_shader = build_shader(SHADOW_WGSL)
       @shadow_pipeline = build_shadow_pipeline
+      @shadow_skinned_shader = build_shader(SHADOW_SKINNED_WGSL)
+      @shadow_skinned_pipeline = build_shadow_skinned_pipeline
       @shadow_vp_buf = make_buffer(64_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
       @shadow_sampler = build_shadow_sampler
       @shadow_tex = Pointer(Void).null.as(LibWGPU::Texture)
@@ -720,6 +738,8 @@ module Flock
       LibWGPU.texture_release(@shadow_tex) unless @shadow_tex.null?
       LibWGPU.sampler_release(@shadow_sampler)
       LibWGPU.buffer_release(@shadow_vp_buf)
+      LibWGPU.render_pipeline_release(@shadow_skinned_pipeline)
+      LibWGPU.shader_module_release(@shadow_skinned_shader)
       LibWGPU.render_pipeline_release(@shadow_pipeline)
       LibWGPU.shader_module_release(@shadow_shader)
       LibWGPU.pipeline_layout_release(@shadow_pipeline_layout)
@@ -969,6 +989,79 @@ module Flock
       desc.multisample = multisample
       desc.fragment = Pointer(LibWGPU::FragmentState).null
       LibWGPU.device_create_render_pipeline(@gpu.device, pointerof(desc))
+    end
+
+    # Skinned depth-only pipeline for the shadow pass: base mesh (pos) in buffer 0, skin
+    # (joints/weights) in buffer 1, joint matrices in group1. group0 = the shadow bind group
+    # (light_vp). Depth-only, single-sample, no color target.
+    private def build_shadow_skinned_pipeline : LibWGPU::RenderPipeline
+      a0 = LibWGPU::VertexAttribute.new
+      a0.format = LibWGPU::VertexFormat::Float32x3; a0.offset = 0_u64; a0.shader_location = 0_u32
+      attrs0 = uninitialized LibWGPU::VertexAttribute[1]
+      attrs0[0] = a0
+      aj = LibWGPU::VertexAttribute.new
+      aj.format = LibWGPU::VertexFormat::Uint32x4; aj.offset = 0_u64; aj.shader_location = 1_u32
+      aw = LibWGPU::VertexAttribute.new
+      aw.format = LibWGPU::VertexFormat::Float32x4; aw.offset = 16_u64; aw.shader_location = 2_u32
+      attrs1 = uninitialized LibWGPU::VertexAttribute[2]
+      attrs1[0] = aj; attrs1[1] = aw
+
+      l0 = LibWGPU::VertexBufferLayout.new
+      l0.step_mode = LibWGPU::VertexStepMode::Vertex; l0.array_stride = Mesh::STRIDE
+      l0.attribute_count = 1_u64; l0.attributes = attrs0.to_unsafe
+      l1 = LibWGPU::VertexBufferLayout.new
+      l1.step_mode = LibWGPU::VertexStepMode::Vertex; l1.array_stride = 32_u64
+      l1.attribute_count = 2_u64; l1.attributes = attrs1.to_unsafe
+      layouts = uninitialized LibWGPU::VertexBufferLayout[2]
+      layouts[0] = l0; layouts[1] = l1
+
+      vertex = LibWGPU::VertexState.new
+      vertex.module_ = @shadow_skinned_shader
+      vertex.entry_point = WGPU.string_view("vs_main")
+      vertex.buffer_count = 2_u64
+      vertex.buffers = layouts.to_unsafe
+
+      primitive = LibWGPU::PrimitiveState.new
+      primitive.topology = LibWGPU::PrimitiveTopology::TriangleList
+      primitive.front_face = LibWGPU::FrontFace::CCW
+      primitive.cull_mode = LibWGPU::CullMode::None
+
+      face = LibWGPU::StencilFaceState.new
+      face.compare = LibWGPU::CompareFunction::Always
+      face.fail_op = LibWGPU::StencilOperation::Keep
+      face.depth_fail_op = LibWGPU::StencilOperation::Keep
+      face.pass_op = LibWGPU::StencilOperation::Keep
+      depth = LibWGPU::DepthStencilState.new
+      depth.format = LibWGPU::TextureFormat::Depth32Float
+      depth.depth_write_enabled = LibWGPU::OptionalBool::True
+      depth.depth_compare = LibWGPU::CompareFunction::Less
+      depth.stencil_front = face
+      depth.stencil_back = face
+
+      multisample = LibWGPU::MultisampleState.new
+      multisample.count = 1_u32
+      multisample.mask = 0xFFFFFFFF_u32
+
+      # group0 = shadow bind group (light_vp @0, models @1 unused), group1 = joint matrices.
+      pl_layouts = uninitialized LibWGPU::BindGroupLayout[2]
+      pl_layouts[0] = @shadow_pass_layout; pl_layouts[1] = @joint_layout
+      pld = LibWGPU::PipelineLayoutDescriptor.new
+      pld.label = WGPU.empty_string_view
+      pld.bind_group_layout_count = 2_u64
+      pld.bind_group_layouts = pl_layouts.to_unsafe
+      pl = LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(pld))
+
+      desc = LibWGPU::RenderPipelineDescriptor.new
+      desc.label = WGPU.empty_string_view
+      desc.layout = pl
+      desc.vertex = vertex
+      desc.primitive = primitive
+      desc.depth_stencil = pointerof(depth)
+      desc.multisample = multisample
+      desc.fragment = Pointer(LibWGPU::FragmentState).null
+      pipe = LibWGPU.device_create_render_pipeline(@gpu.device, pointerof(desc))
+      LibWGPU.pipeline_layout_release(pl)
+      pipe
     end
 
     private def build_shadow_texture : Nil
@@ -1845,7 +1938,7 @@ module Flock
     # same draw groups (identical instance base offsets as the main pass) so shadows match
     # the rendered geometry. Submitted before the main pass, so the queue orders the write
     # ahead of the sampling read.
-    private def render_shadow_pass(groups) : Nil
+    private def render_shadow_pass(groups, world : World) : Nil
       depth_att = LibWGPU::RenderPassDepthStencilAttachment.new
       depth_att.view = @shadow_view
       depth_att.depth_load_op = LibWGPU::LoadOp::Clear
@@ -1872,6 +1965,24 @@ module Flock
         LibWGPU.render_pass_encoder_draw_indexed(pass, mesh.index_count, count, 0_u32, 0, base)
         base += count
       end
+
+      # GPU-skinned casters: skin the vertices into the same depth map (group0 = light_vp,
+      # group1 = the mesh's joint matrices). Additive — no-op when the scene has none.
+      skinned_bound = false
+      world.query(GpuSkinnedMesh) do |_e, sk|
+        s = sk.value
+        unless skinned_bound
+          LibWGPU.render_pass_encoder_set_pipeline(pass, @shadow_skinned_pipeline)
+          LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @shadow_pass_group, 0_u64, Pointer(UInt32).null)
+          skinned_bound = true
+        end
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, s.joint_group, 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, s.mesh.vertex_buf, 0_u64, s.mesh.vertex_bytes)
+        LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 1_u32, s.skin_buf, 0_u64, s.skin_bytes)
+        LibWGPU.render_pass_encoder_set_index_buffer(pass, s.mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, s.mesh.index_bytes)
+        LibWGPU.render_pass_encoder_draw_indexed(pass, s.mesh.index_count, 1_u32, 0_u32, 0, 0_u32)
+      end
+
       LibWGPU.render_pass_encoder_end(pass)
       cmd_desc = LibWGPU::CommandBufferDescriptor.new
       cmd_desc.label = WGPU.empty_string_view
@@ -2037,7 +2148,7 @@ module Flock
         proj = Mat4.orthographic(-radius, radius, -radius, radius, 0.05, (2.0f32 * radius + 2.0f32))
         light_vp = proj * view
         LibWGPU.queue_write_buffer(@gpu.queue, @shadow_vp_buf, 0_u64, light_vp.m.to_unsafe.as(Void*), 64_u64)
-        render_shadow_pass(groups)
+        render_shadow_pass(groups, world)
         # Now that the shadow map holds this frame's depth, enable sampling for the caster
         # (globals.a.w = index + 1, byte offset 12). Skipped scenes keep the safe 0.
         sw = (shadow_index + 1).to_f32
