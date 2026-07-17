@@ -2,8 +2,8 @@ require "json"
 require "base64"
 
 module Flock
-  # A GPU mesh: interleaved vertex buffer (position + normal + color + uv, 11 floats /
-  # 44 bytes per vertex) + a UInt32 index buffer. Consumed by Renderer3D through a
+  # A GPU mesh: interleaved vertex buffer (position + normal + color + uv0 + uv1, 13 floats
+  # / 52 bytes per vertex) + a UInt32 index buffer. Consumed by Renderer3D through a
   # `MeshRenderer` component.
   class Mesh
     STRIDE  = 52_u64 # 13 f32 (pos3 + normal3 + color3 + uv2 + uv1_2)
@@ -39,7 +39,7 @@ module Flock
     end
 
     # AABB-derived bounding sphere from interleaved vertices (pos = first 3 floats,
-    # stride 9). Center = AABB midpoint, radius = half the diagonal (conservative).
+    # stride FLOATS). Center = AABB midpoint, radius = half the diagonal (conservative).
     private def self.bounding_sphere(vertices : Array(Float32)) : {Vec3, Float32}
       return {Vec3.new, 0.0f32} if vertices.size < FLOATS
       minx = miny = minz = Float32::MAX
@@ -356,8 +356,11 @@ module Flock
           else
             StaticArray[0.0f32, 0.0f32, 0.0f32, 1.0f32]
           end
-        # Skinned nodes are handled as SkinnedParts (below), not as rigid node meshes.
-        mesh = (n["skin"]?.nil? && (mi = n["mesh"]?)) ? local_mesh.call(mi.as_i) : nil
+        # Skinned nodes (SkinnedPart) and morph nodes (MorphPart) are driven by their own
+        # models, not as rigid node meshes — leave their `mesh` nil so AnimatedModel /
+        # mesh_nodes don't also spawn them (which would double-draw the morph mesh).
+        mi = n["mesh"]?
+        mesh = (n["skin"]?.nil? && mi && !morph_data.has_key?(mi.as_i)) ? local_mesh.call(mi.as_i) : nil
         children = n["children"]?.try(&.as_a.map(&.as_i)) || [] of Int32
         GltfNode.new(t, rot, s, mesh, children)
       end
@@ -456,7 +459,9 @@ module Flock
 
     # Full PBR (glTF metallic-roughness) loader. Returns the mesh plus the first
     # material's maps, scalar factors, emissive/occlusion and alpha mode, ready to feed a
-    # `MeshRenderer`:
+    # `MeshRenderer`. NOTE: map fields may ALIAS the same `Texture` when the material reuses
+    # one image across slots (e.g. a packed occlusion-roughness-metallic texture). Release
+    # the returned textures through a de-duplicating set, never once per field.
     #   m = Mesh.load_gltf_pbr(gpu, "model.glb")
     #   cmd.spawn(Transform3D.new, MeshRenderer.new(m[:mesh], texture: m[:base_color],
     #     metallic_roughness: m[:metallic_roughness], normal_map: m[:normal],
@@ -816,9 +821,12 @@ module Flock
 
     private def self.gltf_read_indices(accessors, views, buffers : Array(Bytes), ai : Int32) : Array(UInt32)
       acc = accessors[ai]
-      bv = views[acc["bufferView"].as_i]
-      ct = acc["componentType"].as_i
       count = acc["count"].as_i
+      raise "glTF sparse index accessors are not supported" if acc["sparse"]?
+      bvi = acc["bufferView"]?
+      return Array(UInt32).new(count, 0_u32) unless bvi # no bufferView -> zeros (spec)
+      bv = views[bvi.as_i]
+      ct = acc["componentType"].as_i
       csize = gltf_component_size(ct)
       base = (bv["byteOffset"]?.try(&.as_i) || 0) + (acc["byteOffset"]?.try(&.as_i) || 0)
       stride = bv["byteStride"]?.try(&.as_i) || csize

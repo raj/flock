@@ -88,6 +88,21 @@ describe "Events" do
     got.should eq([9, 9]) # still one event per frame (double-advance would drop them)
   end
 
+  it "EventReader delivers an event re-sent during read exactly once (never skipped)" do
+    w = Flock::World.new
+    reader = Flock::EventReader(PingEvent).new
+    w.send_event(PingEvent.new(1))
+    seen = [] of Int32
+    # First read processes event 1 and re-sends 2 from inside the handler.
+    reader.read(w.events(PingEvent)) do |e|
+      seen << e.n
+      w.send_event(PingEvent.new(2)) if e.n == 1
+    end
+    seen.should eq([1])           # the re-sent event is deferred, not seen this pass
+    reader.read(w.events(PingEvent)) { |e| seen << e.n }
+    seen.should eq([1, 2])        # ...and delivered exactly once on the next read
+  end
+
   it "each() does not loop forever when a handler sends the same event type" do
     w = Flock::World.new
     w.send_event(PingEvent.new(1))

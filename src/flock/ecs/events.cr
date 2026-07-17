@@ -27,7 +27,9 @@ module Flock
     end
 
     # This frame's events. Snapshots the count up front so a handler that sends the same
-    # event type does not extend this iteration (those land in the next frame's reads).
+    # event type does not extend this iteration (avoids an unbounded loop). Note: those
+    # re-sent events are NOT seen by `each` (this or next frame) — only an `EventReader`
+    # picks them up. If a handler resends its own event type, use an EventReader.
     def each(& : T ->) : Nil
       b = newer
       n = b.size
@@ -64,22 +66,29 @@ module Flock
     # Yields events with global index >= `from` (oldest buffer first); returns the
     # new cursor (total count). Used by EventReader.
     def read_from(from : Int32, & : T ->) : Int32
+      # Snapshot the target up front: only events that existed at entry (global index
+      # < target) are delivered now, and the cursor advances to exactly `target`. An event
+      # SENT by a handler during this read (index >= target) is deferred to the next read —
+      # delivered once, never skipped (returning the live @count would skip it).
+      target = @count
       if @a_newer
-        emit(@buf_b, @start_b, from) { |e| yield e }
-        emit(@buf_a, @start_a, from) { |e| yield e }
+        emit(@buf_b, @start_b, from, target) { |e| yield e }
+        emit(@buf_a, @start_a, from, target) { |e| yield e }
       else
-        emit(@buf_a, @start_a, from) { |e| yield e }
-        emit(@buf_b, @start_b, from) { |e| yield e }
+        emit(@buf_a, @start_a, from, target) { |e| yield e }
+        emit(@buf_b, @start_b, from, target) { |e| yield e }
       end
-      @count
+      target
     end
 
-    private def emit(buf : Array(T), start : Int32, from : Int32, & : T ->) : Nil
-      # Snapshot the length so a reader that sends the same type doesn't loop forever.
+    private def emit(buf : Array(T), start : Int32, from : Int32, target : Int32, & : T ->) : Nil
+      # Snapshot the length so a reader that sends the same type doesn't loop forever;
+      # the `gi < target` bound skips events appended during this read (delivered next read).
       n = buf.size
       i = 0
       while i < n
-        yield buf[i] if (start + i) >= from
+        gi = start + i
+        yield buf[i] if gi >= from && gi < target
         i += 1
       end
     end

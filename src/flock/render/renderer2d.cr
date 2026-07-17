@@ -274,7 +274,9 @@ module Flock
       d.min_filter = fmode
       d.mipmap_filter = mmode
       d.lod_min_clamp = 0.0f32
-      d.lod_max_clamp = 1.0f32
+      # Allow the whole mip chain when a texture has one (single-mip textures still sample
+      # level 0). Textures loaded via Texture.load are mipmapped by default.
+      d.lod_max_clamp = 32.0f32
       d.max_anisotropy = 1_u16
       LibWGPU.device_create_sampler(@gpu.device, pointerof(d))
     end

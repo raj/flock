@@ -275,15 +275,17 @@ module Flock
     # Starts the engine: startup then the installed runner's loop.
     def run : Nil
       raise "No runner installed: add WindowPlugin (SDL loop) or use run_headless." unless (runner = @runner)
-      startup
       begin
+        startup # inside begin/ensure: a startup system may allocate GPU/SDL resources
         runner.call(self)
       ensure
-        @world.shutdown # release GPU/SDL resources even if the runner raised
+        @world.shutdown # release GPU/SDL resources even if startup/runner raised
       end
     end
 
-    # Finite, deterministic loop, windowless — for tests and headless runs.
+    # Finite, deterministic loop, windowless — for tests and headless runs. Does NOT call
+    # `shutdown` (tests inspect world state afterwards, and the process exits regardless);
+    # call `world.shutdown` yourself if a long-lived headless run must release resources.
     def run_headless(ticks : Int32) : Nil
       startup
       ticks.times { update }

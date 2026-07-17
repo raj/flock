@@ -2251,8 +2251,11 @@ module Flock
       unless transparent.empty?
         LibWGPU.render_pass_encoder_set_pipeline(pass, @transparent_pipeline)
         # The skinned/morph loops above rebind group2 to their own (incompatible) layout;
-        # the transparent pipeline shares the rigid layout, so restore group2 = IBL first.
+        # the transparent pipeline shares the rigid 4-group layout, so restore group2 = IBL
+        # and group3 = shadow. (wgpu-native only invalidates group2 here, but a strict
+        # WebGPU impl invalidates every group >= the first incompatible index, incl. group3.)
         LibWGPU.render_pass_encoder_set_bind_group(pass, 2_u32, ibl_group, 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 3_u32, @shadow_group3, 0_u64, Pointer(UInt32).null)
         tslot = total.to_u32
         transparent.each do |(mesh, base_tex, mr_tex, nrm_tex, em_tex, occ_tex, _model, _tint, _m, _r, _ef, _c, _uv, _d)|
           LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(base_tex, mr_tex, nrm_tex, em_tex, occ_tex), 0_u64, Pointer(UInt32).null)
