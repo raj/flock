@@ -383,11 +383,14 @@ module Flock
     end
 
     # Full PBR (glTF metallic-roughness) loader. Returns the mesh plus the first
-    # material's maps and scalar factors, ready to feed a `MeshRenderer`:
+    # material's maps, scalar factors, emissive/occlusion and alpha mode, ready to feed a
+    # `MeshRenderer`:
     #   m = Mesh.load_gltf_pbr(gpu, "model.glb")
     #   cmd.spawn(Transform3D.new, MeshRenderer.new(m[:mesh], texture: m[:base_color],
     #     metallic_roughness: m[:metallic_roughness], normal_map: m[:normal],
-    #     metallic: m[:metallic], roughness: m[:roughness]))
+    #     metallic: m[:metallic], roughness: m[:roughness],
+    #     emissive: m[:emissive], emissive_factor: m[:emissive_factor],
+    #     occlusion: m[:occlusion], transparent: m[:transparent], alpha_cutoff: m[:alpha_cutoff]))
     def self.load_gltf_pbr(gpu : GpuContext, path : String, color : Color = Color::WHITE)
       mesh = load_gltf(gpu, path, color)
       json_text, glb_bin = read_gltf_container(path)
@@ -396,7 +399,10 @@ module Flock
       dir = File.dirname(path)
 
       base = nil.as(Texture?); mr = nil.as(Texture?); normal = nil.as(Texture?)
+      emissive = nil.as(Texture?); occlusion = nil.as(Texture?)
       metallic = 1.0f32; roughness = 1.0f32
+      emissive_factor = Color::BLACK
+      transparent = false; alpha_cutoff = 0.0f32
 
       if mats = doc["materials"]?
         mats.as_a.each do |m|
@@ -414,12 +420,30 @@ module Flock
           if nt = m["normalTexture"]?
             normal = gltf_texture_at(gpu, doc, buffers, dir, nt["index"].as_i)
           end
-          break if base || mr || normal
+          if et = m["emissiveTexture"]?
+            emissive = gltf_texture_at(gpu, doc, buffers, dir, et["index"].as_i)
+          end
+          if ef = m["emissiveFactor"]?.try(&.as_a)
+            emissive_factor = Color.new(ef[0].as_f, ef[1].as_f, ef[2].as_f)
+          end
+          if ot = m["occlusionTexture"]?
+            occlusion = gltf_texture_at(gpu, doc, buffers, dir, ot["index"].as_i)
+          end
+          # Alpha mode: BLEND -> transparent pass; MASK -> hard cutout (default cutoff 0.5).
+          case m["alphaMode"]?.try(&.as_s)
+          when "BLEND"
+            transparent = true
+          when "MASK"
+            alpha_cutoff = m["alphaCutoff"]?.try(&.as_f.to_f32) || 0.5f32
+          end
+          break if base || mr || normal || emissive || occlusion
         end
       end
 
       {mesh: mesh, base_color: base, metallic_roughness: mr, normal: normal,
-       metallic: metallic, roughness: roughness}
+       metallic: metallic, roughness: roughness, emissive: emissive,
+       emissive_factor: emissive_factor, occlusion: occlusion,
+       transparent: transparent, alpha_cutoff: alpha_cutoff}
     end
 
     private def self.gltf_texture_at(gpu : GpuContext, doc : JSON::Any, buffers : Array(Bytes),

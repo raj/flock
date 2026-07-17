@@ -175,11 +175,14 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       the frame target. `None` keeps the byte-for-byte LDR path (all readbacks unchanged). See
       `examples/postprocess_test.cr` (a bright light blows 6852 pixels to white without tonemapping
       vs 0 with ACES). *Bloom / FXAA / exposure control remain as future extensions of the post pass.*
-- [ ] **glTF completeness.** Loaded today: POSITION/NORMAL/TEXCOORD_0/JOINTS/WEIGHTS, base-color +
+- [~] **glTF completeness.** Loaded today: POSITION/NORMAL/TEXCOORD_0/JOINTS/WEIGHTS, base-color +
       metallic-roughness + normal maps, `baseColorFactor`/`metallicFactor`/`roughnessFactor`, node
-      TRS animation + skinning. Not yet: **emissive** + **occlusion** textures, **alpha modes**
-      (MASK/BLEND), **morph targets** (vertex-morph animation), multiple UV sets, vertex colors on
-      skinned meshes, glTF cameras/lights (`KHR_lights_punctual`), other KHR extensions.
+      TRS animation + skinning. **Done:** **emissive** (map + `emissiveFactor`) + **occlusion**
+      textures, **alpha modes** — `alphaMode: BLEND` maps to the transparent pass, `MASK` to a shader
+      alpha-cutoff discard (`MeshRenderer#emissive`/`emissive_factor`/`occlusion`/`alpha_cutoff`;
+      `Mesh.load_gltf_pbr` reads them). See `examples/gltf_material_test.cr`. **Not yet:** morph
+      targets (vertex-morph animation), multiple UV sets, vertex colors on skinned meshes, glTF
+      cameras/lights (`KHR_lights_punctual`), other KHR extensions.
 - [ ] **Camera / misc polish.** Orbit / fly-camera controller helpers for `Camera3D` (exists but
       has no controller); normal matrix for skinned normals (currently approximate); frustum
       culling of skinned/animated meshes uses the bind-pose bounds (can under-cull when deformed).

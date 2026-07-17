@@ -17,6 +17,13 @@ module Flock
     property normal_map : Texture?
     property metallic : Float32
     property roughness : Float32
+    # Emissive (glTF `KHR` emissive): `emissive` map (nil = white) multiplied by
+    # `emissive_factor` (default black = no emission) and added to the final color.
+    property emissive : Texture?
+    property emissive_factor : Color
+    # Ambient occlusion map (glTF): its R channel modulates the ambient/indirect term.
+    # nil = white = no occlusion.
+    property occlusion : Texture?
     # Per-instance tint (multiplied into the mesh's vertex color) + alpha. Lets many
     # entities share one mesh yet render in different colors within a single draw.
     property tint : Color
@@ -25,11 +32,16 @@ module Flock
     # other translucent meshes). The `tint`/base-texture alpha then controls opacity.
     # Opaque meshes (the default) are unaffected and still batched/instanced.
     property transparent : Bool
+    # Alpha MASK cutoff (glTF `alphaMode: "MASK"`): when > 0, fragments whose final alpha
+    # is below this threshold are discarded (hard-edged cutout). 0 disables masking.
+    property alpha_cutoff : Float32
 
     def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil,
                    @tint : Color = Color::WHITE, @metallic_roughness : Texture? = nil,
                    @normal_map : Texture? = nil, @metallic : Float32 = 0.0f32, @roughness : Float32 = 1.0f32,
-                   @transparent : Bool = false)
+                   @transparent : Bool = false, @emissive : Texture? = nil,
+                   @emissive_factor : Color = Color::BLACK, @occlusion : Texture? = nil,
+                   @alpha_cutoff : Float32 = 0.0f32)
     end
   end
 
