@@ -6,8 +6,8 @@ module Flock
   # 44 bytes per vertex) + a UInt32 index buffer. Consumed by Renderer3D through a
   # `MeshRenderer` component.
   class Mesh
-    STRIDE  = 44_u64 # 11 f32 (pos3 + normal3 + color3 + uv2)
-    FLOATS  =    11  # floats per vertex
+    STRIDE  = 52_u64 # 13 f32 (pos3 + normal3 + color3 + uv2 + uv1_2)
+    FLOATS  =    13  # floats per vertex (two UV sets; uv1 defaults to uv0)
 
     getter vertex_buf : LibWGPU::Buffer
     getter index_buf : LibWGPU::Buffer
@@ -77,7 +77,8 @@ module Flock
         base = (verts.size // FLOATS).to_u32
         corners.each_with_index do |c, k|
           verts.push(c[0].to_f32, c[1].to_f32, c[2].to_f32,
-            normal[0].to_f32, normal[1].to_f32, normal[2].to_f32, r, g, b, uvs[k][0], uvs[k][1])
+            normal[0].to_f32, normal[1].to_f32, normal[2].to_f32, r, g, b,
+            uvs[k][0], uvs[k][1], uvs[k][0], uvs[k][1]) # uv1 = uv0
         end
         indices.push(base, base + 1, base + 2, base, base + 2, base + 3)
       end
@@ -102,7 +103,7 @@ module Flock
           ny = Math.cos(phi)
           nz = Math.sin(phi) * Math.sin(theta)
           verts.push((nx * radius).to_f32, (ny * radius).to_f32, (nz * radius).to_f32,
-            nx.to_f32, ny.to_f32, nz.to_f32, r, g, b, u.to_f32, v.to_f32)
+            nx.to_f32, ny.to_f32, nz.to_f32, r, g, b, u.to_f32, v.to_f32, u.to_f32, v.to_f32)
         end
       end
 
@@ -179,7 +180,7 @@ module Flock
                 pos = positions[pi]
                 nrm = ni >= 0 ? normals[ni] : flat.not_nil!
                 uv = ti >= 0 ? texcoords[ti] : {0.0f32, 0.0f32}
-                verts.push(pos[0], pos[1], pos[2], nrm[0], nrm[1], nrm[2], r, g, b, uv[0], uv[1])
+                verts.push(pos[0], pos[1], pos[2], nrm[0], nrm[1], nrm[2], r, g, b, uv[0], uv[1], uv[0], uv[1])
                 idx = (verts.size // FLOATS - 1).to_u32
                 # Don't cache flat-normal verts (normal is face-specific, key ni=-1 collides).
                 cache[key] = idx if ni >= 0
@@ -234,6 +235,7 @@ module Flock
       nrm = (ni = attrs["NORMAL"]?) ? gltf_read_floats(accessors, views, buffers, ni.as_i)[0] : nil
       colf, cn = (ci = attrs["COLOR_0"]?) ? gltf_read_floats(accessors, views, buffers, ci.as_i) : {nil, 0}
       uvf = (ti = attrs["TEXCOORD_0"]?) ? gltf_read_floats(accessors, views, buffers, ti.as_i)[0] : nil
+      uvf1 = (ti1 = attrs["TEXCOORD_1"]?) ? gltf_read_floats(accessors, views, buffers, ti1.as_i)[0] : nil
       mr, mg, mb = gltf_material_rgb(doc, prim, color)
 
       prim_indices =
@@ -259,7 +261,10 @@ module Flock
         end
         u = uvf ? uvf[v * 2] : 0.0f32
         vv = uvf ? uvf[v * 2 + 1] : 0.0f32
-        verts.push(p.x, p.y, p.z, nx, ny, nz, r, g, b, u, vv)
+        # Second UV set (TEXCOORD_1); falls back to uv0 so texCoord:1 lookups stay sane.
+        u1 = uvf1 ? uvf1[v * 2] : u
+        vv1 = uvf1 ? uvf1[v * 2 + 1] : vv
+        verts.push(p.x, p.y, p.z, nx, ny, nz, r, g, b, u, vv, u1, vv1)
       end
       prim_indices.each { |i| indices << base + i }
 
@@ -456,31 +461,36 @@ module Flock
       metallic = 1.0f32; roughness = 1.0f32
       emissive_factor = Color::BLACK
       transparent = false; alpha_cutoff = 0.0f32
+      tex_coords = 0_u32 # UV-set bitmask (bit i set = texture i uses TEXCOORD_1)
 
       if mats = doc["materials"]?
         mats.as_a.each do |m|
+          # A texture reference using TEXCOORD_1 sets its bit in `tex_coords`.
+          uvbit = ->(ref : JSON::Any, bit : UInt32) do
+            tex_coords |= bit if (ref["texCoord"]?.try(&.as_i) || 0) == 1
+          end
           pbr = m["pbrMetallicRoughness"]?
           if pbr
             metallic = pbr["metallicFactor"]?.try(&.as_f.to_f32) || 1.0f32
             roughness = pbr["roughnessFactor"]?.try(&.as_f.to_f32) || 1.0f32
             if bc = pbr["baseColorTexture"]?
-              base = gltf_texture_at(gpu, doc, buffers, dir, bc["index"].as_i)
+              base = gltf_texture_at(gpu, doc, buffers, dir, bc["index"].as_i); uvbit.call(bc, 1_u32)
             end
             if m2 = pbr["metallicRoughnessTexture"]?
-              mr = gltf_texture_at(gpu, doc, buffers, dir, m2["index"].as_i)
+              mr = gltf_texture_at(gpu, doc, buffers, dir, m2["index"].as_i); uvbit.call(m2, 2_u32)
             end
           end
           if nt = m["normalTexture"]?
-            normal = gltf_texture_at(gpu, doc, buffers, dir, nt["index"].as_i)
+            normal = gltf_texture_at(gpu, doc, buffers, dir, nt["index"].as_i); uvbit.call(nt, 4_u32)
           end
           if et = m["emissiveTexture"]?
-            emissive = gltf_texture_at(gpu, doc, buffers, dir, et["index"].as_i)
+            emissive = gltf_texture_at(gpu, doc, buffers, dir, et["index"].as_i); uvbit.call(et, 8_u32)
           end
           if ef = m["emissiveFactor"]?.try(&.as_a)
             emissive_factor = Color.new(ef[0].as_f, ef[1].as_f, ef[2].as_f)
           end
           if ot = m["occlusionTexture"]?
-            occlusion = gltf_texture_at(gpu, doc, buffers, dir, ot["index"].as_i)
+            occlusion = gltf_texture_at(gpu, doc, buffers, dir, ot["index"].as_i); uvbit.call(ot, 16_u32)
           end
           # Alpha mode: BLEND -> transparent pass; MASK -> hard cutout (default cutoff 0.5).
           case m["alphaMode"]?.try(&.as_s)
@@ -496,7 +506,7 @@ module Flock
       {mesh: mesh, base_color: base, metallic_roughness: mr, normal: normal,
        metallic: metallic, roughness: roughness, emissive: emissive,
        emissive_factor: emissive_factor, occlusion: occlusion,
-       transparent: transparent, alpha_cutoff: alpha_cutoff}
+       transparent: transparent, alpha_cutoff: alpha_cutoff, tex_coords: tex_coords}
     end
 
     private def self.gltf_texture_at(gpu : GpuContext, doc : JSON::Any, buffers : Array(Bytes),

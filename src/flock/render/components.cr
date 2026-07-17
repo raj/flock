@@ -35,13 +35,17 @@ module Flock
     # Alpha MASK cutoff (glTF `alphaMode: "MASK"`): when > 0, fragments whose final alpha
     # is below this threshold are discarded (hard-edged cutout). 0 disables masking.
     property alpha_cutoff : Float32
+    # UV-set selector bitmask (glTF `texCoord`): bit i set -> texture i samples the mesh's
+    # second UV set (TEXCOORD_1). Bits: 0=base, 1=metallic-roughness, 2=normal, 3=emissive,
+    # 4=occlusion. 0 (default) = every texture uses TEXCOORD_0.
+    property tex_coords : UInt32
 
     def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil,
                    @tint : Color = Color::WHITE, @metallic_roughness : Texture? = nil,
                    @normal_map : Texture? = nil, @metallic : Float32 = 0.0f32, @roughness : Float32 = 1.0f32,
                    @transparent : Bool = false, @emissive : Texture? = nil,
                    @emissive_factor : Color = Color::BLACK, @occlusion : Texture? = nil,
-                   @alpha_cutoff : Float32 = 0.0f32)
+                   @alpha_cutoff : Float32 = 0.0f32, @tex_coords : UInt32 = 0_u32)
     end
   end
 
