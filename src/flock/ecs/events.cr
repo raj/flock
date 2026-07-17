@@ -26,9 +26,16 @@ module Flock
       @count += 1
     end
 
-    # This frame's events.
+    # This frame's events. Snapshots the count up front so a handler that sends the same
+    # event type does not extend this iteration (those land in the next frame's reads).
     def each(& : T ->) : Nil
-      newer.each { |e| yield e }
+      b = newer
+      n = b.size
+      i = 0
+      while i < n
+        yield b[i]
+        i += 1
+      end
     end
 
     def size : Int32
@@ -68,8 +75,12 @@ module Flock
     end
 
     private def emit(buf : Array(T), start : Int32, from : Int32, & : T ->) : Nil
-      buf.each_with_index do |e, i|
-        yield e if (start + i) >= from
+      # Snapshot the length so a reader that sends the same type doesn't loop forever.
+      n = buf.size
+      i = 0
+      while i < n
+        yield buf[i] if (start + i) >= from
+        i += 1
       end
     end
   end

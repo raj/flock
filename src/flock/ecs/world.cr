@@ -72,6 +72,9 @@ module Flock
     end
 
     def add(entity : Entity, component : T) : Nil forall T
+      # Ignore inserts for dead handles (e.g. a deferred `cmd.despawn(e)` then
+      # `cmd.add(e, …)` in the same frame) — they would orphan an unreachable dense entry.
+      return unless alive?(entity)
       {% if T < Flock::Bundle %}
         # A bundle expands into its individual components (each keeps its concrete
         # type, so it reaches the right storage). Bundles nest recursively.
@@ -142,9 +145,16 @@ module Flock
     # `pos.value.x = pos.value.x + dx` also works.
     #
     # Drives over the smallest set of entities and does a single lookup per
-    # component. Iteration runs over a copy (`dup`): the block may therefore
-    # despawn without corrupting the traversal (prefer Commands for additions,
-    # which may reallocate the dense arrays and invalidate the pointers).
+    # component. Iteration runs over a copy (`dup`), so the traversal itself is
+    # safe against structural changes in the block.
+    #
+    # POINTER VALIDITY: the yielded `Pointer(T)`s point into the dense arrays and
+    # are invalidated by ANY structural mutation during the SAME iteration —
+    # `add` (may reallocate) OR `despawn` (swap-and-pop moves another entity into
+    # the freed slot, so a stale pointer then aliases an unrelated live entity).
+    # Do NOT read or write through a component pointer after despawning/adding in
+    # the block. Read what you need first, then defer the mutation via `Commands`
+    # (applied after the schedule) — that is the intended pattern.
     #
     # (Macros cannot be invoked on an instance in Crystal: so we generate a
     # real `query` method overload per arity, 1 to 8 components.)

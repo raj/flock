@@ -40,6 +40,9 @@ module Flock
     # OnEnter/OnExit systems keyed by "State(S)=value".
     @on_enter : Hash(String, Array(System)) = {} of String => Array(System)
     @on_exit : Hash(String, Array(System)) = {} of String => Array(System)
+    # Event types already registered, so add_event is idempotent (a duplicate updater
+    # would double-advance the buffers and destroy the frame's events).
+    @registered_events : Set(String) = Set(String).new
 
     def initialize
       @world = World.new
@@ -107,7 +110,11 @@ module Flock
     # so events remain readable for one extra frame (see Events(T)/EventReader).
     def add_event(type : T.class) : self forall T
       @world.events(T)
-      register(Schedule::Last, ->(w : World, _c : Commands) { w.events(T).update; nil })
+      # Idempotent: registering the same event type twice would run two updaters in Last,
+      # advancing the double buffer twice per frame and dropping that frame's events.
+      if @registered_events.add?(T.name)
+        register(Schedule::Last, ->(w : World, _c : Commands) { w.events(T).update; nil })
+      end
       self
     end
 
@@ -267,13 +274,13 @@ module Flock
 
     # Starts the engine: startup then the installed runner's loop.
     def run : Nil
+      raise "No runner installed: add WindowPlugin (SDL loop) or use run_headless." unless (runner = @runner)
       startup
-      if runner = @runner
+      begin
         runner.call(self)
-      else
-        raise "No runner installed: add WindowPlugin (SDL loop) or use run_headless."
+      ensure
+        @world.shutdown # release GPU/SDL resources even if the runner raised
       end
-      @world.shutdown # releases GPU/SDL resources on shutdown
     end
 
     # Finite, deterministic loop, windowless — for tests and headless runs.

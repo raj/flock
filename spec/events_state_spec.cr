@@ -75,6 +75,30 @@ describe "Events" do
     app.run_headless(3)
     seen.should eq([7]) # caught once, on the frame after it was sent
   end
+
+  it "add_event is idempotent: a duplicate registration doesn't double-advance the buffers" do
+    app = Flock::App.new
+    app.add_event(PingEvent)
+    app.add_event(PingEvent) # duplicate: must NOT register a second Last updater
+    got = [] of Int32
+    app.add_system(Flock::Schedule::Update) { |world, _c| world.send_event(PingEvent.new(9)) }
+    app.add_system(Flock::Schedule::Render) { |world, _c| world.each_event(PingEvent) { |e| got << e.n } }
+
+    app.run_headless(2)
+    got.should eq([9, 9]) # still one event per frame (double-advance would drop them)
+  end
+
+  it "each() does not loop forever when a handler sends the same event type" do
+    w = Flock::World.new
+    w.send_event(PingEvent.new(1))
+    seen = [] of Int32
+    # A reader that re-sends: the resend must land in a later frame, not extend this loop.
+    w.each_event(PingEvent) do |e|
+      seen << e.n
+      w.send_event(PingEvent.new(e.n + 1)) if e.n < 3
+    end
+    seen.should eq([1]) # only the pre-existing event is iterated this pass (no infinite growth)
+  end
 end
 
 describe "State" do
