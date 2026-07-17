@@ -11,6 +11,44 @@ module Flock
     end
   end
 
+  enum LightKind : Int32
+    Directional # infinitely far; only `direction` matters
+    Point       # omni, positioned (Transform3D.position), falls off within `range`
+    Spot        # positioned + `direction` + a cone (`inner`/`outer` half-angles, radians)
+  end
+
+  # A light source. Attach it (with a `Transform3D` for position) to an entity; Renderer3D
+  # collects all lights each frame and the PBR shader accumulates them. With no `Light`
+  # entities, the renderer falls back to its legacy single hard-coded directional light.
+  struct Light
+    include Component
+    property kind : LightKind
+    property color : Color
+    property intensity : Float32
+    property direction : Vec3 # directional/spot aim (world space)
+    property range : Float32  # point/spot falloff radius
+    property inner : Float32  # spot inner cone half-angle (radians)
+    property outer : Float32  # spot outer cone half-angle (radians)
+
+    def initialize(@kind : LightKind = LightKind::Directional, @color : Color = Color::WHITE,
+                   @intensity : Float32 = 1.0f32, @direction : Vec3 = Vec3.new(0, -1, 0),
+                   @range : Float32 = 10.0f32, @inner : Float32 = 0.3f32, @outer : Float32 = 0.5f32)
+    end
+
+    def self.directional(direction : Vec3, color : Color = Color::WHITE, intensity : Number = 1.0) : Light
+      new(LightKind::Directional, color, intensity.to_f32, direction)
+    end
+
+    def self.point(color : Color = Color::WHITE, intensity : Number = 1.0, range : Number = 10.0) : Light
+      new(LightKind::Point, color, intensity.to_f32, Vec3.new, range.to_f32)
+    end
+
+    def self.spot(direction : Vec3, color : Color = Color::WHITE, intensity : Number = 1.0,
+                  range : Number = 10.0, inner : Number = 0.3, outer : Number = 0.5) : Light
+      new(LightKind::Spot, color, intensity.to_f32, direction, range.to_f32, inner.to_f32, outer.to_f32)
+    end
+  end
+
   # A GPU-skinned mesh instance (drawn with Renderer3D's skinned pipeline): it reuses a
   # bind-pose `Mesh` for slot 0, plus a skin vertex buffer (joints+weights) for slot 1
   # and a joint-matrix storage buffer updated each frame. Built via
@@ -60,17 +98,24 @@ module Flock
     MODEL_BYTES   = 64 # mat4 (16 f32)
     GLOBALS_BYTES = 64 # time / camera position / ambient sky / ambient ground (4 vec4)
     PARAM_BYTES   = 32 # per-instance: tint vec4 + {metallic, roughness, _, _} vec4
+    MAX_LIGHTS    = 16 # storage-buffer capacity; extra lights are dropped
+    LIGHT_BYTES   = 64 # per light: 4 vec4 (pos+kind / dir+range / color+intensity / cones)
 
     WGSL = <<-SHADER
     struct Camera { view_proj : mat4x4<f32> };
     // std uniform layout: a.x=time, b.xyz=camera pos, c.rgb=ambient sky, d.rgb=ambient ground.
     struct Globals { a : vec4<f32>, b : vec4<f32>, c : vec4<f32>, d : vec4<f32> };
+    // a.x=time, a.y=ibl flag, a.z=light count. b.xyz=camera pos. c/d=ambient sky/ground.
     struct Inst { tint : vec4<f32>, mr : vec4<f32> }; // mr.x=metallic, mr.y=roughness
+    // GPU light: v0=(pos.xyz, kind), v1=(dir.xyz, range), v2=(color.rgb, intensity),
+    // v3=(cos(inner), cos(outer), _, _). kind: 0=directional, 1=point, 2=spot.
+    struct Light { v0 : vec4<f32>, v1 : vec4<f32>, v2 : vec4<f32>, v3 : vec4<f32> };
     @group(0) @binding(0) var<uniform> cam : Camera;
     @group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
     @group(0) @binding(2) var<uniform> globals : Globals;
     @group(0) @binding(3) var<storage, read> normals : array<mat4x4<f32>>;
     @group(0) @binding(4) var<storage, read> params : array<Inst>;
+    @group(0) @binding(5) var<storage, read> lights : array<Light>;
     @group(1) @binding(0) var base_tex : texture_2d<f32>;
     @group(1) @binding(1) var samp : sampler;
     @group(1) @binding(2) var mr_tex : texture_2d<f32>;   // metallic-roughness (G=rough, B=metal)
@@ -123,24 +168,14 @@ module Flock
       return normalize(T * (inv * m.x) + B * (inv * m.y) + nn * m.z);
     }
 
-    @fragment
-    fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
-      let btex = textureSample(base_tex, samp, in.uv);
-      let base = in.color * btex.rgb;
-      let mrs = textureSample(mr_tex, samp, in.uv);
-      let metal = clamp(mrs.b * in.mr.x, 0.0, 1.0);
-      let rough = clamp(mrs.g * in.mr.y, 0.045, 1.0);
-
-      let N = perturb_normal(normalize(in.normal), in.world, in.uv);
-      let L = normalize(vec3<f32>(0.4, 0.8, 0.6));
-      let V = normalize(globals.b.xyz - in.world);
+    // GGX / Cook-Torrance BRDF for one light direction L, returns (diffuse + spec) * NdotL.
+    fn shade(N : vec3<f32>, V : vec3<f32>, L : vec3<f32>, base : vec3<f32>,
+             metal : f32, rough : f32) -> vec3<f32> {
       let H = normalize(L + V);
       let NdotL = max(dot(N, L), 0.0);
       let NdotV = max(dot(N, V), 1e-3);
       let NdotH = max(dot(N, H), 0.0);
       let VdotH = max(dot(V, H), 0.0);
-
-      // GGX / Cook-Torrance specular for one directional light.
       let a = rough * rough;
       let a2 = a * a;
       let dn = NdotH * NdotH * (a2 - 1.0) + 1.0;
@@ -150,13 +185,59 @@ module Flock
       let F0 = mix(vec3<f32>(0.04, 0.04, 0.04), base, metal);
       let F = F0 + (vec3<f32>(1.0, 1.0, 1.0) - F0) * pow(1.0 - VdotH, 5.0);
       let spec = (D * G) * F / (4.0 * NdotV * NdotL + 1e-4);
-
       let diffuse = base * (1.0 - metal);
-      let lit = (diffuse + spec) * NdotL;
+      return (diffuse + spec) * NdotL;
+    }
+
+    @fragment
+    fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
+      let btex = textureSample(base_tex, samp, in.uv);
+      let base = in.color * btex.rgb;
+      let mrs = textureSample(mr_tex, samp, in.uv);
+      let metal = clamp(mrs.b * in.mr.x, 0.0, 1.0);
+      let rough = clamp(mrs.g * in.mr.y, 0.045, 1.0);
+
+      let N = perturb_normal(normalize(in.normal), in.world, in.uv);
+      let V = normalize(globals.b.xyz - in.world);
+      let NdotV = max(dot(N, V), 1e-3);
+
+      // Direct lighting. With no Light entities (count 0) fall back to the legacy
+      // single hard-coded directional light, so scenes without lights look unchanged.
+      let count = u32(globals.a.z + 0.5);
+      var lit = vec3<f32>(0.0);
+      if (count == 0u) {
+        lit = shade(N, V, normalize(vec3<f32>(0.4, 0.8, 0.6)), base, metal, rough);
+      } else {
+        for (var i = 0u; i < count; i = i + 1u) {
+          let lg = lights[i];
+          let kind = i32(lg.v0.w + 0.5);
+          var L : vec3<f32>;
+          var atten = 1.0;
+          if (kind == 0) {
+            // Directional: v1.xyz is the direction the light travels; L points toward it.
+            L = normalize(-lg.v1.xyz);
+          } else {
+            // Point / spot: positioned at v0.xyz, falls off within v1.w (range).
+            let to_light = lg.v0.xyz - in.world;
+            let dist = length(to_light);
+            L = to_light / max(dist, 1e-4);
+            let range = max(lg.v1.w, 1e-4);
+            let f = clamp(1.0 - dist / range, 0.0, 1.0);
+            atten = f * f;
+            if (kind == 2) {
+              // Spot cone: smooth falloff between inner (v3.x) and outer (v3.y) cosines.
+              let cd = dot(-L, normalize(lg.v1.xyz));
+              atten = atten * clamp((cd - lg.v3.y) / max(lg.v3.x - lg.v3.y, 1e-4), 0.0, 1.0);
+            }
+          }
+          lit = lit + shade(N, V, L, base, metal, rough) * lg.v2.rgb * lg.v2.w * atten;
+        }
+      }
 
       var ambient : vec3<f32>;
       if (globals.a.y > 0.5) {
         // Prefiltered image-based lighting (split-sum).
+        let F0 = mix(vec3<f32>(0.04, 0.04, 0.04), base, metal);
         let fr = F0 + (max(vec3<f32>(1.0 - rough), F0) - F0) * pow(1.0 - NdotV, 5.0);
         let kd = (vec3<f32>(1.0) - fr) * (1.0 - metal);
         let irr = textureSampleLevel(irr_cube, ibl_samp, N, 0.0).rgb;
@@ -222,6 +303,7 @@ module Flock
     @scratch : Array(Float32) = [] of Float32
     @scratch_n : Array(Float32) = [] of Float32
     @scratch_p : Array(Float32) = [] of Float32
+    @scratch_l : Array(Float32) = [] of Float32
     @depth_w : UInt32 = 0
     @depth_h : UInt32 = 0
     # Frustum-culling stats from the last render_into (drawn vs. culled instances).
@@ -251,6 +333,7 @@ module Flock
     @normal_buf : LibWGPU::Buffer
     @param_buf : LibWGPU::Buffer
     @globals_buf : LibWGPU::Buffer
+    @lights_buf : LibWGPU::Buffer
     @group0 : LibWGPU::BindGroup
     @materials : Array(Material3D) = [] of Material3D
     @depth_tex : LibWGPU::Texture
@@ -283,6 +366,8 @@ module Flock
       @param_buf = make_buffer((@model_capacity * PARAM_BYTES).to_u64,
         LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       @globals_buf = make_buffer(GLOBALS_BYTES.to_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
+      @lights_buf = make_buffer((MAX_LIGHTS * LIGHT_BYTES).to_u64,
+        LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
       @group0 = build_group0
 
       # Depth texture (lazily sized to the surface on first render).
@@ -311,6 +396,7 @@ module Flock
       @white.release
       @flat_normal.release
       LibWGPU.bind_group_release(@group0)
+      LibWGPU.buffer_release(@lights_buf)
       LibWGPU.buffer_release(@globals_buf)
       LibWGPU.buffer_release(@param_buf)
       LibWGPU.buffer_release(@normal_buf)
@@ -375,15 +461,23 @@ module Flock
       e4.visibility = LibWGPU::ShaderStage::Vertex
       e4.buffer = pbuf
 
-      entries = uninitialized LibWGPU::BindGroupLayoutEntry[5]
+      lbuf = LibWGPU::BufferBindingLayout.new
+      lbuf.type_ = LibWGPU::BufferBindingType::ReadOnlyStorage
+      e5 = LibWGPU::BindGroupLayoutEntry.new
+      e5.binding = 5_u32
+      e5.visibility = LibWGPU::ShaderStage::Fragment
+      e5.buffer = lbuf
+
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[6]
       entries[0] = e0
       entries[1] = e1
       entries[2] = e2
       entries[3] = e3
       entries[4] = e4
+      entries[5] = e5
       d = LibWGPU::BindGroupLayoutDescriptor.new
       d.label = WGPU.empty_string_view
-      d.entry_count = 5_u64
+      d.entry_count = 6_u64
       d.entries = entries.to_unsafe
       LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
     end
@@ -844,16 +938,22 @@ module Flock
       e4.buffer = @param_buf
       e4.offset = 0_u64
       e4.size = (@model_capacity * PARAM_BYTES).to_u64
-      entries = uninitialized LibWGPU::BindGroupEntry[5]
+      e5 = LibWGPU::BindGroupEntry.new
+      e5.binding = 5_u32
+      e5.buffer = @lights_buf
+      e5.offset = 0_u64
+      e5.size = (MAX_LIGHTS * LIGHT_BYTES).to_u64
+      entries = uninitialized LibWGPU::BindGroupEntry[6]
       entries[0] = e0
       entries[1] = e1
       entries[2] = e2
       entries[3] = e3
       entries[4] = e4
+      entries[5] = e5
       d = LibWGPU::BindGroupDescriptor.new
       d.label = WGPU.empty_string_view
       d.layout = @group0_layout
-      d.entry_count = 5_u64
+      d.entry_count = 6_u64
       d.entries = entries.to_unsafe
       LibWGPU.device_create_bind_group(@gpu.device, pointerof(d))
     end
@@ -917,6 +1017,35 @@ module Flock
 
     # Renders the world's meshes into an arbitrary target (surface or offscreen),
     # with its own depth buffer. Used by `render` and by readback tests.
+    # Packs every (Transform3D, Light) entity into the lights storage buffer and returns
+    # the count (capped at MAX_LIGHTS). Layout per light: 4 vec4 matching the WGSL `Light`.
+    private def upload_lights(world : World) : Int32
+      @scratch_l.clear
+      count = 0
+      world.query(Transform3D, Light) do |_e, tf, lt|
+        next if count >= MAX_LIGHTS
+        l = lt.value
+        pos = tf.value.position
+        d = l.direction
+        len = Math.sqrt(d.x * d.x + d.y * d.y + d.z * d.z).to_f32
+        len = 1.0f32 if len < 1e-6f32
+        # v0: position + kind
+        @scratch_l << pos.x << pos.y << pos.z << l.kind.value.to_f32
+        # v1: normalized direction + range
+        @scratch_l << d.x / len << d.y / len << d.z / len << l.range
+        # v2: color + intensity
+        @scratch_l << l.color.r << l.color.g << l.color.b << l.intensity
+        # v3: cone cosines (spot) + padding
+        @scratch_l << Math.cos(l.inner).to_f32 << Math.cos(l.outer).to_f32 << 0.0f32 << 0.0f32
+        count += 1
+      end
+      if count > 0
+        LibWGPU.queue_write_buffer(@gpu.queue, @lights_buf, 0_u64,
+          @scratch_l.to_unsafe.as(Void*), (count * LIGHT_BYTES).to_u64)
+      end
+      count
+    end
+
     def render_into(world : World, target : LibWGPU::TextureView) : Nil
       ensure_depth(@gpu.width, @gpu.height)
 
@@ -931,9 +1060,14 @@ module Flock
       amb = world.resource?(AmbientLight) || AmbientLight.new
       ibl = world.resource?(IblEnvironment)
       ibl_group = ibl ? ibl.group : @default_ibl.group
+      # Collect lights (Transform3D + Light) into the lights storage buffer. With none,
+      # the shader keeps its legacy hard-coded directional light (count stays 0).
+      light_count = upload_lights(world)
+
       globals = StaticArray(Float32, 16).new(0.0f32)
       globals[0] = t
       globals[1] = ibl ? 1.0f32 : 0.0f32
+      globals[2] = light_count.to_f32
       globals[4] = cam.position.x; globals[5] = cam.position.y; globals[6] = cam.position.z
       globals[8] = amb.sky.r; globals[9] = amb.sky.g; globals[10] = amb.sky.b
       globals[12] = amb.ground.r; globals[13] = amb.ground.g; globals[14] = amb.ground.b
