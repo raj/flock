@@ -1691,7 +1691,7 @@ module Flock
         mesh = m.mesh
         model = tf.value.matrix
 
-        if @cull && mesh.bounds_radius != Float32::MAX
+        if @cull && m.cull && mesh.bounds_radius != Float32::MAX
           center = model.transform_point(mesh.bounds_center)
           s = model.scale_factors
           radius = mesh.bounds_radius * Math.max(s.x, Math.max(s.y, s.z))

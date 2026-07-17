@@ -39,13 +39,17 @@ module Flock
     # second UV set (TEXCOORD_1). Bits: 0=base, 1=metallic-roughness, 2=normal, 3=emissive,
     # 4=occlusion. 0 (default) = every texture uses TEXCOORD_0.
     property tex_coords : UInt32
+    # Frustum culling. Skinned/morphed meshes deform away from their bind-pose bounds, so
+    # culling by those bounds can wrongly drop (or keep) them. Set false to always draw the
+    # instance regardless of its bounding sphere. The CPU skinning/morph models set this.
+    property cull : Bool
 
     def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil,
                    @tint : Color = Color::WHITE, @metallic_roughness : Texture? = nil,
                    @normal_map : Texture? = nil, @metallic : Float32 = 0.0f32, @roughness : Float32 = 1.0f32,
                    @transparent : Bool = false, @emissive : Texture? = nil,
                    @emissive_factor : Color = Color::BLACK, @occlusion : Texture? = nil,
-                   @alpha_cutoff : Float32 = 0.0f32, @tex_coords : UInt32 = 0_u32)
+                   @alpha_cutoff : Float32 = 0.0f32, @tex_coords : UInt32 = 0_u32, @cull : Bool = true)
     end
   end
 

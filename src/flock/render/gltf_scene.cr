@@ -263,7 +263,8 @@ module Flock
       scene.skins.each do |part|
         e = world.spawn
         world.add(e, Transform3D.new)
-        world.add(e, MeshRenderer.new(part.mesh, tint: tint))
+        # cull: false — the deformed vertices leave the bind-pose bounds.
+        world.add(e, MeshRenderer.new(part.mesh, tint: tint, cull: false))
       end
       new(scene, gpu)
     end
@@ -330,7 +331,8 @@ module Flock
       scene.morphs.each do |part|
         e = world.spawn
         world.add(e, Transform3D.new)
-        world.add(e, MeshRenderer.new(part.mesh, tint: tint))
+        # cull: false — morph blending moves vertices off the bind-pose bounds.
+        world.add(e, MeshRenderer.new(part.mesh, tint: tint, cull: false))
       end
       m = new(scene, gpu)
       m.apply # pose at t=0 so a static (unanimated) morph still shows its default weights

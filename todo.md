@@ -189,14 +189,16 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       re-uploads the vertex buffer each frame (see `examples/morph_test.cr`). **Multiple UV sets:**
       the vertex format carries a second UV (TEXCOORD_1, defaults to uv0); `MeshRenderer#tex_coords`
       is a per-texture bitmask (also read from glTF `texCoord`) selecting uv0/uv1 per map in the PBR
-      shader (see `examples/uvsets_test.cr`). **Not yet:** vertex colors on skinned meshes, GPU morph
-      blending, other KHR extensions.
-- [~] **Camera / misc polish.** **Done:** `OrbitCamera` (arcball: target/distance/yaw/pitch, dolly,
+      shader (see `examples/uvsets_test.cr`). **Vertex colors on skinned meshes:** COLOR_0 flows
+      through both skin paths (see `examples/skinned_color_test.cr`). **Not yet:** GPU morph blending
+      (currently CPU), other KHR extensions.
+- [x] **Camera / misc polish.** `OrbitCamera` (arcball: target/distance/yaw/pitch, dolly,
       clamps) and `FlyCamera` (position/yaw/pitch, WASD move + mouse look) controller helpers — pure,
       input-agnostic structs that write into a `Camera3D` (see `spec/camera_controller_spec.cr` and
       `examples/orbit_camera.cr`). Skinned normals now use the inverse-transpose of the skin 3×3
-      (correct under non-uniform scale, was approximate). **Not yet:** frustum culling of
-      skinned/animated meshes still uses the bind-pose bounds (can mis-cull when heavily deformed).
+      (correct under non-uniform scale, was approximate). Deformed-mesh culling: `MeshRenderer#cull`
+      opts an instance out of frustum culling, and the CPU skinning/morph models set it (so
+      bind-pose bounds no longer mis-cull deformed meshes — see `examples/cull_flag_test.cr`).
 
 ## sdl3-cr
 
@@ -302,11 +304,12 @@ notes buried in the completed entries plus the two open sections:
 ### Polish left on shipped features
 - [ ] **Mouse**: cursor control (hide/capture/relative mode).
 - [ ] **Text**: per-string texture cache + glyph atlas (native side; web already caches).
-- [ ] **3D**: see the dedicated **"3D — remaining"** section. Lighting, directional shadow
-      mapping, transparency, MSAA, native mipmaps, HDR post-processing/tonemapping, glTF
-      material completeness (emissive/occlusion/alpha modes) and camera controllers + skinned
-      normal matrix are done. Left: glTF morph targets / multiple UVs / `KHR_lights_punctual`,
-      and deformed-mesh frustum culling.
+- [~] **3D**: see the dedicated **"3D — remaining"** section. Done: lighting, directional shadow
+      mapping, transparency, MSAA, native mipmaps, HDR post-processing/tonemapping, glTF material
+      completeness (emissive/occlusion/alpha modes), scene import (`KHR_lights_punctual` + cameras),
+      morph targets, multiple UV sets, vertex colors on skinned meshes, camera controllers, skinned
+      normal matrix, and deformed-mesh cull opt-out. Left only: **GPU** morph blending (CPU works)
+      and assorted other KHR extensions.
 - [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
 
 ### Cross-platform validation
