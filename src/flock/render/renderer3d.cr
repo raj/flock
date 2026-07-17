@@ -71,6 +71,25 @@ module Flock
     end
   end
 
+  # A GPU morph-target mesh (drawn with Renderer3D's morph pipeline): the base `Mesh` plus a
+  # storage buffer of per-vertex target deltas, a weights storage buffer + a model-matrix
+  # uniform (both updated each frame), and its bind group. Built via
+  # `Renderer3D#build_gpu_morph`, driven by `Flock::GpuMorphModel`.
+  struct GpuMorphMesh
+    include Component
+    getter mesh : Mesh
+    getter deltas_buf : LibWGPU::Buffer
+    getter weights_buf : LibWGPU::Buffer
+    getter model_buf : LibWGPU::Buffer
+    getter group : LibWGPU::BindGroup
+    getter target_count : Int32
+    getter node : Int32
+    getter default_weights : Array(Float32)
+
+    def initialize(@mesh, @deltas_buf, @weights_buf, @model_buf, @group, @target_count, @node, @default_weights)
+    end
+  end
+
   # A custom 3D material: a render pipeline built from user WGSL by
   # `Renderer3D#build_material`, sharing the renderer's pipeline layout (group0 =
   # camera + models + globals) and vertex layout (pos/normal/color). Assign to
@@ -440,6 +459,69 @@ module Flock
     }
     SHADER
 
+    # GPU morph-target shader: blends the base vertex with weighted target deltas read from
+    # a storage buffer (indexed by @builtin(vertex_index)), then applies the node's model
+    # matrix. Weights + deltas live in group2; targetCount = arrayLength(&weights). Simple
+    # diffuse + hemisphere ambient like the skinned shader.
+    MORPH_WGSL = <<-SHADER
+    struct Camera { view_proj : mat4x4<f32> };
+    struct Globals { a : vec4<f32>, b : vec4<f32>, c : vec4<f32>, d : vec4<f32> };
+    @group(0) @binding(0) var<uniform> cam : Camera;
+    @group(0) @binding(2) var<uniform> globals : Globals;
+    @group(1) @binding(0) var base_tex : texture_2d<f32>;
+    @group(1) @binding(1) var samp : sampler;
+    @group(2) @binding(0) var<storage, read> deltas : array<f32>;  // [(vi*tc + t)*6 + k]
+    @group(2) @binding(1) var<storage, read> weights : array<f32>; // one per target
+    @group(2) @binding(2) var<uniform> model : mat4x4<f32>;
+
+    struct VSOut {
+      @builtin(position) clip : vec4<f32>,
+      @location(0) normal : vec3<f32>,
+      @location(1) color : vec3<f32>,
+      @location(2) uv : vec2<f32>,
+    };
+
+    fn normal_matrix(m : mat3x3<f32>) -> mat3x3<f32> {
+      let c0 = cross(m[1], m[2]); let c1 = cross(m[2], m[0]); let c2 = cross(m[0], m[1]);
+      let det = dot(m[0], c0);
+      if (abs(det) < 1e-8) { return m; }
+      let inv = 1.0 / det;
+      return mat3x3<f32>(c0 * inv, c1 * inv, c2 * inv);
+    }
+
+    @vertex
+    fn vs_main(@location(0) pos : vec3<f32>, @location(1) nrm : vec3<f32>,
+               @location(2) col : vec3<f32>, @location(3) uv : vec2<f32>,
+               @builtin(vertex_index) vi : u32) -> VSOut {
+      let tc = arrayLength(&weights);
+      var p = pos;
+      var n = nrm;
+      for (var t = 0u; t < tc; t = t + 1u) {
+        let w = weights[t];
+        let o = (vi * tc + t) * 6u;
+        p = p + w * vec3<f32>(deltas[o], deltas[o + 1u], deltas[o + 2u]);
+        n = n + w * vec3<f32>(deltas[o + 3u], deltas[o + 4u], deltas[o + 5u]);
+      }
+      var out : VSOut;
+      let wp = model * vec4<f32>(p, 1.0);
+      out.clip = cam.view_proj * wp;
+      let nm = normal_matrix(mat3x3<f32>(model[0].xyz, model[1].xyz, model[2].xyz));
+      out.normal = normalize(nm * n);
+      out.color = col;
+      out.uv = uv;
+      return out;
+    }
+
+    @fragment
+    fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
+      let base = in.color * textureSample(base_tex, samp, in.uv).rgb;
+      let nn = normalize(in.normal);
+      let d = max(dot(nn, normalize(vec3<f32>(0.4, 0.8, 0.6))), 0.0);
+      let amb = mix(globals.d.rgb, globals.c.rgb, nn.y * 0.5 + 0.5);
+      return vec4<f32>(base * (amb + d), 1.0);
+    }
+    SHADER
+
     @model_capacity : Int32 = 64
     @scratch : Array(Float32) = [] of Float32
     @scratch_n : Array(Float32) = [] of Float32
@@ -463,6 +545,11 @@ module Flock
     @joint_layout : LibWGPU::BindGroupLayout
     @skinned_shader : LibWGPU::ShaderModule
     @skinned_pipeline : LibWGPU::RenderPipeline
+    # GPU morph targets: group2 layout (deltas storage + weights storage + model uniform) +
+    # a dedicated morph pipeline.
+    @morph_layout : LibWGPU::BindGroupLayout
+    @morph_shader : LibWGPU::ShaderModule
+    @morph_pipeline : LibWGPU::RenderPipeline
     # IBL: group2 layout (2 cubemaps + LUT + sampler) + a default (unused) environment.
     @ibl_layout : LibWGPU::BindGroupLayout
     @default_ibl : IblEnvironment
@@ -536,6 +623,11 @@ module Flock
       @joint_layout = build_joint_layout
       @skinned_shader = build_shader(SKINNED_WGSL)
       @skinned_pipeline = build_skinned_pipeline(@skinned_shader)
+
+      # GPU morph pipeline (group0 + group1 + deltas/weights/model in group2).
+      @morph_layout = build_morph_layout
+      @morph_shader = build_shader(MORPH_WGSL)
+      @morph_pipeline = build_morph_pipeline(@morph_shader)
 
       @uniform_buf = make_buffer(64_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
       @model_buf = make_buffer((@model_capacity * MODEL_BYTES).to_u64,
@@ -627,6 +719,9 @@ module Flock
       LibWGPU.buffer_release(@uniform_buf)
       @default_ibl.release
       LibWGPU.bind_group_layout_release(@ibl_layout)
+      LibWGPU.render_pipeline_release(@morph_pipeline)
+      LibWGPU.shader_module_release(@morph_shader)
+      LibWGPU.bind_group_layout_release(@morph_layout)
       LibWGPU.render_pipeline_release(@skinned_pipeline)
       LibWGPU.shader_module_release(@skinned_shader)
       LibWGPU.bind_group_layout_release(@joint_layout)
@@ -1420,6 +1515,137 @@ module Flock
       GpuSkinnedMesh.new(mesh, skin_buf, skin_bytes, joint_buf, joint_group, jcount, joint_nodes, inverse_binds)
     end
 
+    # group2 for GPU morphing: deltas storage + weights storage (vertex) + model uniform.
+    private def build_morph_layout : LibWGPU::BindGroupLayout
+      sb = LibWGPU::BufferBindingLayout.new
+      sb.type_ = LibWGPU::BufferBindingType::ReadOnlyStorage
+      e0 = LibWGPU::BindGroupLayoutEntry.new
+      e0.binding = 0_u32; e0.visibility = LibWGPU::ShaderStage::Vertex; e0.buffer = sb
+      e1 = LibWGPU::BindGroupLayoutEntry.new
+      e1.binding = 1_u32; e1.visibility = LibWGPU::ShaderStage::Vertex; e1.buffer = sb
+      ub = LibWGPU::BufferBindingLayout.new
+      ub.type_ = LibWGPU::BufferBindingType::Uniform
+      e2 = LibWGPU::BindGroupLayoutEntry.new
+      e2.binding = 2_u32; e2.visibility = LibWGPU::ShaderStage::Vertex; e2.buffer = ub
+      entries = uninitialized LibWGPU::BindGroupLayoutEntry[3]
+      entries[0] = e0; entries[1] = e1; entries[2] = e2
+      d = LibWGPU::BindGroupLayoutDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.entry_count = 3_u64
+      d.entries = entries.to_unsafe
+      LibWGPU.device_create_bind_group_layout(@gpu.device, pointerof(d))
+    end
+
+    # Morph pipeline: single base vertex buffer (pos/normal/color/uv), group0 + group1 +
+    # morph group2. Deltas are fetched in the vertex shader by @builtin(vertex_index).
+    private def build_morph_pipeline(shader : LibWGPU::ShaderModule) : LibWGPU::RenderPipeline
+      a0 = LibWGPU::VertexAttribute.new; a0.format = LibWGPU::VertexFormat::Float32x3; a0.offset = 0_u64; a0.shader_location = 0_u32
+      a1 = LibWGPU::VertexAttribute.new; a1.format = LibWGPU::VertexFormat::Float32x3; a1.offset = 12_u64; a1.shader_location = 1_u32
+      a2 = LibWGPU::VertexAttribute.new; a2.format = LibWGPU::VertexFormat::Float32x3; a2.offset = 24_u64; a2.shader_location = 2_u32
+      a3 = LibWGPU::VertexAttribute.new; a3.format = LibWGPU::VertexFormat::Float32x2; a3.offset = 36_u64; a3.shader_location = 3_u32
+      attrs = uninitialized LibWGPU::VertexAttribute[4]
+      attrs[0] = a0; attrs[1] = a1; attrs[2] = a2; attrs[3] = a3
+      vlayout = LibWGPU::VertexBufferLayout.new
+      vlayout.step_mode = LibWGPU::VertexStepMode::Vertex
+      vlayout.array_stride = Mesh::STRIDE
+      vlayout.attribute_count = 4_u64
+      vlayout.attributes = attrs.to_unsafe
+
+      vertex = LibWGPU::VertexState.new
+      vertex.module_ = shader
+      vertex.entry_point = WGPU.string_view("vs_main")
+      vertex.buffer_count = 1_u64
+      vertex.buffers = pointerof(vlayout)
+
+      target = LibWGPU::ColorTargetState.new
+      target.format = @scene_format
+      target.write_mask = LibWGPU::ColorWriteMask::All
+      fragment = LibWGPU::FragmentState.new
+      fragment.module_ = shader
+      fragment.entry_point = WGPU.string_view("fs_main")
+      fragment.target_count = 1_u64
+      fragment.targets = pointerof(target)
+
+      primitive = LibWGPU::PrimitiveState.new
+      primitive.topology = LibWGPU::PrimitiveTopology::TriangleList
+      primitive.front_face = LibWGPU::FrontFace::CCW
+      primitive.cull_mode = LibWGPU::CullMode::None
+
+      face = LibWGPU::StencilFaceState.new
+      face.compare = LibWGPU::CompareFunction::Always
+      face.fail_op = LibWGPU::StencilOperation::Keep
+      face.depth_fail_op = LibWGPU::StencilOperation::Keep
+      face.pass_op = LibWGPU::StencilOperation::Keep
+      depth = LibWGPU::DepthStencilState.new
+      depth.format = LibWGPU::TextureFormat::Depth32Float
+      depth.depth_write_enabled = LibWGPU::OptionalBool::True
+      depth.depth_compare = LibWGPU::CompareFunction::Less
+      depth.stencil_front = face
+      depth.stencil_back = face
+
+      multisample = LibWGPU::MultisampleState.new
+      multisample.count = @sample_count.to_u32
+      multisample.mask = 0xFFFFFFFF_u32
+
+      pl_layouts = uninitialized LibWGPU::BindGroupLayout[3]
+      pl_layouts[0] = @group0_layout; pl_layouts[1] = @group1_layout; pl_layouts[2] = @morph_layout
+      pld = LibWGPU::PipelineLayoutDescriptor.new
+      pld.label = WGPU.empty_string_view
+      pld.bind_group_layout_count = 3_u64
+      pld.bind_group_layouts = pl_layouts.to_unsafe
+      ml = LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(pld))
+
+      desc = LibWGPU::RenderPipelineDescriptor.new
+      desc.label = WGPU.empty_string_view
+      desc.layout = ml
+      desc.vertex = vertex
+      desc.primitive = primitive
+      desc.depth_stencil = pointerof(depth)
+      desc.multisample = multisample
+      desc.fragment = pointerof(fragment)
+      pipe = LibWGPU.device_create_render_pipeline(@gpu.device, pointerof(desc))
+      LibWGPU.pipeline_layout_release(ml)
+      pipe
+    end
+
+    # Builds a GPU morph mesh: uploads the interleaved per-vertex target deltas
+    # ([(vertex*targetCount + target)*6] = {dpos.xyz, dnrm.xyz}), allocates the weights +
+    # model-matrix buffers, and assembles the group2 bind group. `targets[t]` holds 6 floats
+    # per vertex (dpos + dnrm), matching `MorphPart`.
+    def build_gpu_morph(mesh : Mesh, targets : Array(Array(Float32)), node : Int32,
+                        default_weights : Array(Float32)) : GpuMorphMesh
+      tc = targets.size
+      vcount = tc > 0 ? targets[0].size // 6 : 0
+      interleaved = Array(Float32).new(vcount * tc * 6)
+      vcount.times do |v|
+        tc.times do |t|
+          6.times { |k| interleaved << targets[t][v * 6 + k] }
+        end
+      end
+      dbytes = (interleaved.size * 4).to_u64
+      dbytes = 4_u64 if dbytes == 0
+      deltas_buf = make_buffer(dbytes, LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
+      LibWGPU.queue_write_buffer(@gpu.queue, deltas_buf, 0_u64, interleaved.to_unsafe.as(Void*), (interleaved.size * 4).to_u64) unless interleaved.empty?
+
+      wbytes = (Math.max(tc, 1) * 4).to_u64
+      weights_buf = make_buffer(wbytes, LibWGPU::BufferUsage::Storage | LibWGPU::BufferUsage::CopyDst)
+      model_buf = make_buffer(64_u64, LibWGPU::BufferUsage::Uniform | LibWGPU::BufferUsage::CopyDst)
+
+      e0 = LibWGPU::BindGroupEntry.new; e0.binding = 0_u32; e0.buffer = deltas_buf; e0.offset = 0_u64; e0.size = dbytes
+      e1 = LibWGPU::BindGroupEntry.new; e1.binding = 1_u32; e1.buffer = weights_buf; e1.offset = 0_u64; e1.size = wbytes
+      e2 = LibWGPU::BindGroupEntry.new; e2.binding = 2_u32; e2.buffer = model_buf; e2.offset = 0_u64; e2.size = 64_u64
+      entries = uninitialized LibWGPU::BindGroupEntry[3]
+      entries[0] = e0; entries[1] = e1; entries[2] = e2
+      bgd = LibWGPU::BindGroupDescriptor.new
+      bgd.label = WGPU.empty_string_view
+      bgd.layout = @morph_layout
+      bgd.entry_count = 3_u64
+      bgd.entries = entries.to_unsafe
+      group = LibWGPU.device_create_bind_group(@gpu.device, pointerof(bgd))
+
+      GpuMorphMesh.new(mesh, deltas_buf, weights_buf, model_buf, group, tc, node, default_weights)
+    end
+
     private def build_group0 : LibWGPU::BindGroup
       e0 = LibWGPU::BindGroupEntry.new
       e0.binding = 0_u32
@@ -1872,6 +2098,19 @@ module Flock
         LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 1_u32, s.skin_buf, 0_u64, s.skin_bytes)
         LibWGPU.render_pass_encoder_set_index_buffer(pass, s.mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, s.mesh.index_bytes)
         LibWGPU.render_pass_encoder_draw_indexed(pass, s.mesh.index_count, 1_u32, 0_u32, 0, 0_u32)
+      end
+
+      # GPU morph meshes (own pipeline; deltas + weights + model in group2). Additive.
+      world.query(GpuMorphMesh) do |_e, mm|
+        g = mm.value
+        white_group ||= tex_group(@white, @white, @flat_normal, @white, @white)
+        LibWGPU.render_pass_encoder_set_pipeline(pass, @morph_pipeline)
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, white_group.not_nil!, 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_set_bind_group(pass, 2_u32, g.group, 0_u64, Pointer(UInt32).null)
+        LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, g.mesh.vertex_buf, 0_u64, g.mesh.vertex_bytes)
+        LibWGPU.render_pass_encoder_set_index_buffer(pass, g.mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, g.mesh.index_bytes)
+        LibWGPU.render_pass_encoder_draw_indexed(pass, g.mesh.index_count, 1_u32, 0_u32, 0, 0_u32)
       end
 
       # Transparent pass: after all opaque geometry, draw the sorted translucent instances

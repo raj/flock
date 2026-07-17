@@ -190,8 +190,11 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       the vertex format carries a second UV (TEXCOORD_1, defaults to uv0); `MeshRenderer#tex_coords`
       is a per-texture bitmask (also read from glTF `texCoord`) selecting uv0/uv1 per map in the PBR
       shader (see `examples/uvsets_test.cr`). **Vertex colors on skinned meshes:** COLOR_0 flows
-      through both skin paths (see `examples/skinned_color_test.cr`). **Not yet:** GPU morph blending
-      (currently CPU), other KHR extensions.
+      through both skin paths (see `examples/skinned_color_test.cr`). **GPU morph blending:**
+      `GpuMorphModel` + `Renderer3D#build_gpu_morph` blend the target deltas in the vertex shader
+      (deltas storage buffer indexed by `vertex_index`, per-target weights + model matrix in group2);
+      only weights + model are uploaded per frame (see `examples/morph_gpu_test.cr`). **Not yet:**
+      assorted other KHR extensions (e.g. `KHR_texture_transform`, `KHR_materials_*`).
 - [x] **Camera / misc polish.** `OrbitCamera` (arcball: target/distance/yaw/pitch, dolly,
       clamps) and `FlyCamera` (position/yaw/pitch, WASD move + mouse look) controller helpers — pure,
       input-agnostic structs that write into a `Camera3D` (see `spec/camera_controller_spec.cr` and
@@ -307,9 +310,9 @@ notes buried in the completed entries plus the two open sections:
 - [~] **3D**: see the dedicated **"3D — remaining"** section. Done: lighting, directional shadow
       mapping, transparency, MSAA, native mipmaps, HDR post-processing/tonemapping, glTF material
       completeness (emissive/occlusion/alpha modes), scene import (`KHR_lights_punctual` + cameras),
-      morph targets, multiple UV sets, vertex colors on skinned meshes, camera controllers, skinned
-      normal matrix, and deformed-mesh cull opt-out. Left only: **GPU** morph blending (CPU works)
-      and assorted other KHR extensions.
+      morph targets (CPU + GPU), multiple UV sets, vertex colors on skinned meshes, camera
+      controllers, skinned normal matrix, and deformed-mesh cull opt-out. Left only: assorted other
+      KHR extensions.
 - [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
 
 ### Cross-platform validation

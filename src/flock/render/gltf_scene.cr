@@ -411,4 +411,47 @@ module Flock
       apply
     end
   end
+
+  # GPU variant of MorphModel: the weighted target blend runs in the vertex shader, so each
+  # frame only the per-target weights and the node's model matrix are uploaded (not the
+  # deformed vertices). Renderer3D draws the meshes with its morph pipeline.
+  class GpuMorphModel
+    getter scene : GltfScene
+    property time : Float32 = 0.0f32
+    property clip : Int32 = 0
+    @morphs : Array(GpuMorphMesh)
+
+    def initialize(@scene : GltfScene, @gpu : GpuContext, @morphs : Array(GpuMorphMesh))
+    end
+
+    def self.spawn(scene : GltfScene, world : World, renderer : Renderer3D, gpu : GpuContext) : GpuMorphModel
+      morphs = [] of GpuMorphMesh
+      scene.morphs.each do |part|
+        gm = renderer.build_gpu_morph(part.mesh, part.targets, part.node, part.default_weights)
+        world.add(world.spawn, gm)
+        morphs << gm
+      end
+      m = new(scene, gpu, morphs)
+      m.apply # pose at t=0 so a static morph shows its default weights
+      m
+    end
+
+    # Uploads per-target weights + the node's world matrix for the current time.
+    def apply : Nil
+      worlds = @scene.world_matrices(@time, @clip)
+      @morphs.each do |gm|
+        w = @scene.node_weights(gm.node, @time, @clip) || gm.default_weights
+        ws = Array(Float32).new(gm.target_count) { |i| w[i]? || 0.0f32 }
+        LibWGPU.queue_write_buffer(@gpu.queue, gm.weights_buf, 0_u64, ws.to_unsafe.as(Void*), (ws.size * 4).to_u64) unless ws.empty?
+        LibWGPU.queue_write_buffer(@gpu.queue, gm.model_buf, 0_u64, worlds[gm.node].m.to_unsafe.as(Void*), 64_u64)
+      end
+    end
+
+    def update(dt : Float32) : Nil
+      d = (@scene.animations[@clip]?.try(&.duration)) || 0.0f32
+      @time += dt
+      @time = @time % d if d > 0 && @time > d
+      apply
+    end
+  end
 end
