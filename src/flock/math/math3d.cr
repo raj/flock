@@ -11,9 +11,26 @@ module Flock
     def +(o : Vec2); Vec2.new(@x + o.x, @y + o.y); end
     def -(o : Vec2); Vec2.new(@x - o.x, @y - o.y); end
     def *(s : Number); Vec2.new(@x * s, @y * s); end
+    def /(s : Number); Vec2.new(@x / s, @y / s); end
+
+    def dot(o : Vec2) : Float32
+      @x * o.x + @y * o.y
+    end
+
+    # 2D cross product: the z-component of the 3D cross of (x,y,0) vectors.
+    # A scalar — the signed area of the parallelogram — used for torque and
+    # winding tests in 2D dynamics.
+    def cross(o : Vec2) : Float32
+      @x * o.y - @y * o.x
+    end
 
     def length : Float32
-      Math.sqrt(@x * @x + @y * @y).to_f32
+      Math.sqrt(dot(self)).to_f32
+    end
+
+    def normalize : Vec2
+      len = length
+      len == 0 ? self : self * (1.0f32 / len)
     end
   end
 
@@ -245,6 +262,111 @@ module Flock
     # Flat view for uploading into a wgpu uniform buffer.
     def to_slice : Slice(Float32)
       @m.to_slice
+    end
+  end
+
+  # Unit quaternion (x, y, z, w) with w the scalar part — same layout as
+  # `Mat4.rotation_quaternion` and glTF node rotations. Preferred orientation
+  # representation for 3D rigid-body dynamics: it composes without gimbal lock
+  # and integrates cleanly from an angular velocity.
+  #
+  # Convention: the product `a * b` applies `b` first, then `a` (like matrices),
+  # and `rotate` assumes a unit quaternion.
+  struct Quaternion
+    property x : Float32
+    property y : Float32
+    property z : Float32
+    property w : Float32
+
+    # Defaults to the identity rotation (0, 0, 0, 1), not the zero quaternion.
+    def initialize(x : Number = 0, y : Number = 0, z : Number = 0, w : Number = 1)
+      @x = x.to_f32
+      @y = y.to_f32
+      @z = z.to_f32
+      @w = w.to_f32
+    end
+
+    def self.identity : Quaternion
+      Quaternion.new(0, 0, 0, 1)
+    end
+
+    # Rotation of `rad` radians about `axis` (normalized internally).
+    def self.from_axis_angle(axis : Vec3, rad : Number) : Quaternion
+      half = rad.to_f32 * 0.5f32
+      s = Math.sin(half).to_f32
+      n = axis.normalize
+      Quaternion.new(n.x * s, n.y * s, n.z * s, Math.cos(half).to_f32)
+    end
+
+    # Euler angles (radians) in the engine's Z*Y*X order — matches
+    # `Transform3D#matrix` (rotation_z * rotation_y * rotation_x).
+    def self.from_euler(x : Number, y : Number, z : Number) : Quaternion
+      qx = from_axis_angle(Vec3.new(1, 0, 0), x)
+      qy = from_axis_angle(Vec3.new(0, 1, 0), y)
+      qz = from_axis_angle(Vec3.new(0, 0, 1), z)
+      qz * qy * qx
+    end
+
+    def +(o : Quaternion); Quaternion.new(@x + o.x, @y + o.y, @z + o.z, @w + o.w); end
+    def -(o : Quaternion); Quaternion.new(@x - o.x, @y - o.y, @z - o.z, @w - o.w); end
+    def *(s : Number); Quaternion.new(@x * s, @y * s, @z * s, @w * s); end
+
+    # Hamilton product (composition of rotations): `self` after `o`.
+    def *(o : Quaternion) : Quaternion
+      Quaternion.new(
+        @w * o.x + @x * o.w + @y * o.z - @z * o.y,
+        @w * o.y - @x * o.z + @y * o.w + @z * o.x,
+        @w * o.z + @x * o.y - @y * o.x + @z * o.w,
+        @w * o.w - @x * o.x - @y * o.y - @z * o.z,
+      )
+    end
+
+    def dot(o : Quaternion) : Float32
+      @x * o.x + @y * o.y + @z * o.z + @w * o.w
+    end
+
+    def length_squared : Float32
+      dot(self)
+    end
+
+    def length : Float32
+      Math.sqrt(length_squared).to_f32
+    end
+
+    def normalize : Quaternion
+      len = length
+      len == 0 ? Quaternion.identity : self * (1.0f32 / len)
+    end
+
+    # Conjugate = inverse for a unit quaternion (negated vector part).
+    def conjugate : Quaternion
+      Quaternion.new(-@x, -@y, -@z, @w)
+    end
+
+    # General inverse (conjugate / |q|^2); equals `conjugate` when unit-length.
+    def inverse : Quaternion
+      lsq = length_squared
+      lsq == 0 ? Quaternion.identity : conjugate * (1.0f32 / lsq)
+    end
+
+    # Rotates a vector by this (unit) quaternion.
+    def rotate(v : Vec3) : Vec3
+      qv = Vec3.new(@x, @y, @z)
+      t = qv.cross(v) * 2.0f32
+      v + t * @w + qv.cross(t)
+    end
+
+    # Integrates the orientation by angular velocity `omega` (rad/s, world space)
+    # over `dt` seconds: q' = normalize(q + 0.5 * dt * omega_quat * q). This is
+    # the core orientation update of a 3D rigid body.
+    def integrate(omega : Vec3, dt : Number) : Quaternion
+      wq = Quaternion.new(omega.x, omega.y, omega.z, 0)
+      (self + (wq * self) * (0.5f32 * dt.to_f32)).normalize
+    end
+
+    # Rotation matrix for this quaternion (delegates to Mat4).
+    def to_mat4 : Mat4
+      Mat4.rotation_quaternion(@x, @y, @z, @w)
     end
   end
 

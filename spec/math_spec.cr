@@ -81,3 +81,90 @@ describe Flock::Vec3 do
     Flock::Vec3.new(3, 4, 0).normalize.length.should be_close(1.0f32, 1e-6)
   end
 end
+
+describe Flock::Vec2 do
+  it "dot" do
+    Flock::Vec2.new(1, 0).dot(Flock::Vec2.new(0, 1)).should eq(0.0f32)
+    Flock::Vec2.new(2, 3).dot(Flock::Vec2.new(4, 5)).should be_close(23.0f32, 1e-6)
+  end
+
+  it "cross is the signed z of the 3D cross" do
+    # x cross y = +1 (counter-clockwise), y cross x = -1
+    Flock::Vec2.new(1, 0).cross(Flock::Vec2.new(0, 1)).should be_close(1.0f32, 1e-6)
+    Flock::Vec2.new(0, 1).cross(Flock::Vec2.new(1, 0)).should be_close(-1.0f32, 1e-6)
+  end
+
+  it "division scales down component-wise" do
+    v = Flock::Vec2.new(6, 8) / 2
+    v.x.should be_close(3.0f32, 1e-6)
+    v.y.should be_close(4.0f32, 1e-6)
+  end
+
+  it "normalize gives a unit length and length is a 3-4-5" do
+    Flock::Vec2.new(3, 4).length.should be_close(5.0f32, 1e-6)
+    Flock::Vec2.new(3, 4).normalize.length.should be_close(1.0f32, 1e-6)
+  end
+end
+
+describe Flock::Quaternion do
+  it "identity leaves a vector unchanged" do
+    v = Flock::Quaternion.identity.rotate(Flock::Vec3.new(1, 2, 3))
+    v.x.should be_close(1.0f32, 1e-6)
+    v.y.should be_close(2.0f32, 1e-6)
+    v.z.should be_close(3.0f32, 1e-6)
+  end
+
+  it "from_axis_angle rotates 90deg about Z: x -> y" do
+    q = Flock::Quaternion.from_axis_angle(Flock::Vec3.new(0, 0, 1), Math::PI / 2)
+    v = q.rotate(Flock::Vec3.new(1, 0, 0))
+    v.x.should be_close(0.0f32, 1e-5)
+    v.y.should be_close(1.0f32, 1e-5)
+    v.z.should be_close(0.0f32, 1e-5)
+  end
+
+  it "product composes rotations (self after o), 90+90 = 180 about Z" do
+    q90 = Flock::Quaternion.from_axis_angle(Flock::Vec3.new(0, 0, 1), Math::PI / 2)
+    v = (q90 * q90).rotate(Flock::Vec3.new(1, 0, 0))
+    v.x.should be_close(-1.0f32, 1e-5)
+    v.y.should be_close(0.0f32, 1e-5)
+  end
+
+  it "rotate agrees with to_mat4.transform_direction" do
+    q = Flock::Quaternion.from_axis_angle(Flock::Vec3.new(1, 1, 0), 0.7).normalize
+    v = Flock::Vec3.new(0.3, -1.2, 2.0)
+    a = q.rotate(v)
+    b = q.to_mat4.transform_direction(v)
+    a.x.should be_close(b.x, 1e-5)
+    a.y.should be_close(b.y, 1e-5)
+    a.z.should be_close(b.z, 1e-5)
+  end
+
+  it "from_euler matches the engine's Z*Y*X matrix order" do
+    ex, ey, ez = 0.3f32, -0.5f32, 1.1f32
+    q = Flock::Quaternion.from_euler(ex, ey, ez)
+    m = Flock::Mat4.rotation_z(ez) * Flock::Mat4.rotation_y(ey) * Flock::Mat4.rotation_x(ex)
+    v = Flock::Vec3.new(1, 2, 3)
+    a = q.rotate(v)
+    b = m.transform_direction(v)
+    a.x.should be_close(b.x, 1e-5)
+    a.y.should be_close(b.y, 1e-5)
+    a.z.should be_close(b.z, 1e-5)
+  end
+
+  it "conjugate undoes the rotation (q.conjugate * q = identity)" do
+    q = Flock::Quaternion.from_axis_angle(Flock::Vec3.new(0, 1, 0), 1.3).normalize
+    v = Flock::Vec3.new(2, 0, -1)
+    back = q.conjugate.rotate(q.rotate(v))
+    back.x.should be_close(2.0f32, 1e-5)
+    back.y.should be_close(0.0f32, 1e-5)
+    back.z.should be_close(-1.0f32, 1e-5)
+  end
+
+  it "integrate stays unit-length and advances about the omega axis" do
+    q = Flock::Quaternion.identity.integrate(Flock::Vec3.new(0, 0, 1), 0.1)
+    q.length.should be_close(1.0f32, 1e-6)
+    # small rotation about +Z tilts x slightly toward +y
+    v = q.rotate(Flock::Vec3.new(1, 0, 0))
+    v.y.should be_close(Math.sin(0.1).to_f32, 1e-3)
+  end
+end
