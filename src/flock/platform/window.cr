@@ -191,6 +191,8 @@ module Flock
           a.update
           LibWGPU.instance_process_events(gpu.instance) # flush the wgpu error callbacks
           frame += 1
+          # Let a system request quit programmatically (e.g. Escape) via WindowState.
+          running = false if win.try(&.close_requested?)
         end
 
         # The release (wgpu + SDL) is done by App#run -> World#shutdown ->

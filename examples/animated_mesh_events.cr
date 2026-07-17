@@ -139,4 +139,11 @@ app.add_system(Flock::Schedule::Update) do |world, _cmd|
   world.query(Flock::Camera3D) { |_e, cam| orbit.apply(cam) }
 end
 
+# Esc quits (the runner honors WindowState#close_requested).
+app.add_system(Flock::Schedule::Update) do |world, _cmd|
+  if world.resource(Flock::Input).pressed?(Flock::Key::Escape)
+    world.resource?(Flock::WindowState).try &.on_close_requested
+  end
+end
+
 app.run
