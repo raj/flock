@@ -402,8 +402,16 @@ module Flock
     @materials : Array(Material3D) = [] of Material3D
     @depth_tex : LibWGPU::Texture
     @depth_view : LibWGPU::TextureView
+    # MSAA: when @sample_count > 1, geometry renders into a multisampled color target
+    # (@msaa_view) that is resolved into the frame's single-sample target. The depth
+    # buffer matches @sample_count. sample_count == 1 keeps the direct (non-resolved) path.
+    @msaa_tex : LibWGPU::Texture
+    @msaa_view : LibWGPU::TextureView
 
-    def initialize(@gpu : GpuContext)
+    # `sample_count` controls MSAA (1 = off, 2/4/8 = multisampled with a resolve to the
+    # frame target). Common values are 1 and 4. Render3DPlugin defaults to 4.
+    def initialize(@gpu : GpuContext, @sample_count : Int32 = 1)
+      raise "sample_count must be >= 1" if @sample_count < 1
       # Explicit group0 (camera/models/globals/normals/params), group1 (textures) and
       # group2 (IBL) layouts so custom materials share the rigid pipeline layout.
       @group0_layout = build_group0_layout
@@ -449,9 +457,11 @@ module Flock
       @shadow_group3 = build_shadow_group3
       @shadow_pass_group = build_shadow_pass_group
 
-      # Depth texture (lazily sized to the surface on first render).
+      # Depth + MSAA color targets (lazily sized to the surface on first render).
       @depth_tex = Pointer(Void).null.as(LibWGPU::Texture)
       @depth_view = Pointer(Void).null.as(LibWGPU::TextureView)
+      @msaa_tex = Pointer(Void).null.as(LibWGPU::Texture)
+      @msaa_view = Pointer(Void).null.as(LibWGPU::TextureView)
     end
 
     # Builds a custom material from WGSL. It must declare the shared group0
@@ -467,6 +477,8 @@ module Flock
     def release : Nil
       LibWGPU.texture_view_release(@depth_view) unless @depth_view.null?
       LibWGPU.texture_release(@depth_tex) unless @depth_tex.null?
+      LibWGPU.texture_view_release(@msaa_view) unless @msaa_view.null?
+      LibWGPU.texture_release(@msaa_tex) unless @msaa_tex.null?
       @materials.each &.release
       @tex_groups.each_value { |bg| LibWGPU.bind_group_release(bg) }
       @tex_groups.clear
@@ -1043,7 +1055,7 @@ module Flock
       depth.stencil_back = face
 
       multisample = LibWGPU::MultisampleState.new
-      multisample.count = 1_u32
+      multisample.count = @sample_count.to_u32
       multisample.mask = 0xFFFFFFFF_u32
 
       desc = LibWGPU::RenderPipelineDescriptor.new
@@ -1141,7 +1153,7 @@ module Flock
       depth.stencil_back = face
 
       multisample = LibWGPU::MultisampleState.new
-      multisample.count = 1_u32
+      multisample.count = @sample_count.to_u32
       multisample.mask = 0xFFFFFFFF_u32
 
       pl_layouts = uninitialized LibWGPU::BindGroupLayout[3]
@@ -1268,7 +1280,10 @@ module Flock
       return if w == @depth_w && h == @depth_h && !@depth_view.null?
       LibWGPU.texture_view_release(@depth_view) unless @depth_view.null?
       LibWGPU.texture_release(@depth_tex) unless @depth_tex.null?
+      LibWGPU.texture_view_release(@msaa_view) unless @msaa_view.null?
+      LibWGPU.texture_release(@msaa_tex) unless @msaa_tex.null?
 
+      # Depth buffer, matched to the MSAA sample count so it can back the same pass.
       desc = LibWGPU::TextureDescriptor.new
       desc.label = WGPU.empty_string_view
       desc.usage = LibWGPU::TextureUsage::RenderAttachment
@@ -1276,9 +1291,23 @@ module Flock
       desc.size = LibWGPU::Extent3D.new(width: w, height: h, depth_or_array_layers: 1_u32)
       desc.format = LibWGPU::TextureFormat::Depth32Float
       desc.mip_level_count = 1_u32
-      desc.sample_count = 1_u32
+      desc.sample_count = @sample_count.to_u32
       @depth_tex = LibWGPU.device_create_texture(@gpu.device, pointerof(desc))
       @depth_view = LibWGPU.texture_create_view(@depth_tex, Pointer(LibWGPU::TextureViewDescriptor).null)
+
+      # Multisampled color target (resolved to the frame target). Only when MSAA is on.
+      if @sample_count > 1
+        cdesc = LibWGPU::TextureDescriptor.new
+        cdesc.label = WGPU.empty_string_view
+        cdesc.usage = LibWGPU::TextureUsage::RenderAttachment
+        cdesc.dimension = LibWGPU::TextureDimension::N2D
+        cdesc.size = LibWGPU::Extent3D.new(width: w, height: h, depth_or_array_layers: 1_u32)
+        cdesc.format = @gpu.format
+        cdesc.mip_level_count = 1_u32
+        cdesc.sample_count = @sample_count.to_u32
+        @msaa_tex = LibWGPU.device_create_texture(@gpu.device, pointerof(cdesc))
+        @msaa_view = LibWGPU.texture_create_view(@msaa_tex, Pointer(LibWGPU::TextureViewDescriptor).null)
+      end
       @depth_w = w
       @depth_h = h
     end
@@ -1530,7 +1559,14 @@ module Flock
       end
 
       color_att = LibWGPU::RenderPassColorAttachment.new
-      color_att.view = target
+      # MSAA: render into the multisampled target and resolve into the frame target.
+      # Without MSAA, render straight into the frame target (no resolve).
+      if @sample_count > 1
+        color_att.view = @msaa_view
+        color_att.resolve_target = target
+      else
+        color_att.view = target
+      end
       color_att.depth_slice = 0xFFFFFFFF_u32
       color_att.load_op = LibWGPU::LoadOp::Clear
       color_att.store_op = LibWGPU::StoreOp::Store
@@ -1628,9 +1664,14 @@ module Flock
   # owns the whole frame): pair WindowPlugin + Render3DPlugin (+ Input/Audio) rather
   # than DefaultPlugins.
   class Render3DPlugin < Plugin
+    # `sample_count` sets MSAA (4 = 4x by default; 1 disables it).
+    def initialize(@sample_count : Int32 = 4)
+    end
+
     def build(app : App) : Nil
+      sc = @sample_count
       app.add_startup do |world, _cmd|
-        world.insert_resource(Renderer3D.new(world.resource(GpuContext)))
+        world.insert_resource(Renderer3D.new(world.resource(GpuContext), sc))
       end
       app.add_system(Schedule::Render) do |world, _cmd|
         world.resource?(Renderer3D).try &.render(world)

@@ -157,8 +157,12 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       `tint`/base-texture alpha drives opacity. See `examples/transparency_test.cr` (transparent
       vs opaque readback proving the panel behind shows through). *Transparent meshes don't cast
       shadows and always use the built-in shader (custom materials render opaque) — future work.*
-- [ ] **Anti-aliasing (MSAA).** `sample_count = 1` everywhere — aliased edges. Add a multisampled
-      color (+ depth) target and a resolve to the surface; make the sample count configurable.
+- [x] **Anti-aliasing (MSAA).** Configurable sample count on `Renderer3D` (`Render3DPlugin`
+      defaults to 4×; `sample_count: 1` disables). When on, all rigid/transparent/skinned pipelines
+      and the depth buffer are multisampled, geometry renders into an internal MSAA color target
+      and resolves into the frame target each frame. `sample_count = 1` keeps the direct
+      (non-resolved) path, so readback tests are unchanged. The shadow depth pass stays single-sample.
+      See `examples/msaa_test.cr` (0 partial-coverage edge pixels aliased vs 220 at 4×).
 - [ ] **Native texture mipmaps.** Native `Texture` is `mip_level_count = 1` (only the web target
       generates mips) → minification aliasing. Generate a GPU mip chain on upload (mirror the web
       mip generator), parity with the sampler's existing Nearest/Linear + Clamp/Repeat.
@@ -279,9 +283,9 @@ notes buried in the completed entries plus the two open sections:
 - [ ] **Mouse**: cursor control (hide/capture/relative mode).
 - [ ] **Text**: per-string texture cache + glyph atlas (native side; web already caches).
 - [ ] **Sampler**: mipmap generation (native `Texture` is single-mip — see "3D — remaining").
-- [ ] **3D**: see the dedicated **"3D — remaining"** section (MSAA, native mipmaps,
+- [ ] **3D**: see the dedicated **"3D — remaining"** section (native mipmaps,
       post-processing/tonemapping, glTF emissive/occlusion/morph targets). Lighting,
-      directional shadow mapping and transparency are done.
+      directional shadow mapping, transparency and MSAA are done.
 - [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
 
 ### Cross-platform validation
