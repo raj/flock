@@ -69,6 +69,13 @@ module Flock
 
     def initialize(@mesh, @skin_buf, @skin_bytes, @joint_buf, @joint_group, @joint_count, @joint_nodes, @inverse_binds)
     end
+
+    # Frees the skin GPU resources (not the shared bind-pose Mesh — release that separately).
+    def release : Nil
+      LibWGPU.bind_group_release(@joint_group)
+      LibWGPU.buffer_release(@joint_buf)
+      LibWGPU.buffer_release(@skin_buf)
+    end
   end
 
   # A GPU morph-target mesh (drawn with Renderer3D's morph pipeline): the base `Mesh` plus a
@@ -87,6 +94,14 @@ module Flock
     getter default_weights : Array(Float32)
 
     def initialize(@mesh, @deltas_buf, @weights_buf, @model_buf, @group, @target_count, @node, @default_weights)
+    end
+
+    # Frees the morph GPU resources (not the shared bind-pose Mesh — release that separately).
+    def release : Nil
+      LibWGPU.bind_group_release(@group)
+      LibWGPU.buffer_release(@model_buf)
+      LibWGPU.buffer_release(@weights_buf)
+      LibWGPU.buffer_release(@deltas_buf)
     end
   end
 
@@ -1781,9 +1796,11 @@ module Flock
         LibWGPU.texture_view_release(target)
         LibWGPU.texture_release(st.texture)
       when .outdated?, .lost?
+        # Some backends still hand back a texture with a non-success status; release it.
+        LibWGPU.texture_release(st.texture) unless st.texture.null?
         @gpu.reconfigure_to_window
       else
-        # skip
+        LibWGPU.texture_release(st.texture) unless st.texture.null?
       end
     end
 

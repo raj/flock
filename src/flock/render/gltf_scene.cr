@@ -189,13 +189,16 @@ module Flock
       end
 
       worlds = Array(Mat4).new(@nodes.size) { Mat4.identity }
-      @roots.each { |r| accumulate_world(r, Mat4.identity, locals, worlds) }
+      seen = Set(Int32).new
+      @roots.each { |r| accumulate_world(r, Mat4.identity, locals, worlds, seen) }
       worlds
     end
 
-    private def accumulate_world(idx : Int32, parent : Mat4, locals : Array(Mat4), worlds : Array(Mat4)) : Nil
+    # `seen` guards a malformed cyclic / multi-parent hierarchy against infinite recursion.
+    private def accumulate_world(idx : Int32, parent : Mat4, locals : Array(Mat4), worlds : Array(Mat4), seen : Set(Int32)) : Nil
+      return unless seen.add?(idx)
       worlds[idx] = parent * locals[idx]
-      @nodes[idx].children.each { |c| accumulate_world(c, worlds[idx], locals, worlds) }
+      @nodes[idx].children.each { |c| accumulate_world(c, worlds[idx], locals, worlds, seen) }
     end
   end
 
@@ -362,6 +365,16 @@ module Flock
             verts[vo + 3] += wt * tgt[to + 3]
             verts[vo + 4] += wt * tgt[to + 4]
             verts[vo + 5] += wt * tgt[to + 5]
+          end
+        end
+        # Renormalize the blended normals (target deltas are unnormalized), matching the
+        # GPU path and the CPU-skinning path.
+        vcount.times do |v|
+          vo = v * f
+          nx = verts[vo + 3]; ny = verts[vo + 4]; nz = verts[vo + 5]
+          nl = Math.sqrt(nx * nx + ny * ny + nz * nz)
+          if nl > 1e-8
+            verts[vo + 3] = nx / nl; verts[vo + 4] = ny / nl; verts[vo + 5] = nz / nl
           end
         end
         LibWGPU.queue_write_buffer(@gpu.queue, part.mesh.vertex_buf, 0_u64,

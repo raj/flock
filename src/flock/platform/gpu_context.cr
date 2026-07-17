@@ -32,6 +32,7 @@ module Flock
       LibWGPU.device_release(@device)
       LibWGPU.adapter_release(@adapter)
       LibWGPU.instance_release(@instance)
+      LibSDL.metal_destroy_view(@view) unless @view.null?
       LibSDL.destroy_window(@window) unless @window.null?
       LibSDL.quit
     end

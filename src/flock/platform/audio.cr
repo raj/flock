@@ -68,6 +68,17 @@ module Flock
       LibSDL.resume_audio_stream_device(@main)
     end
 
+    # Release before GpuContext (which calls SDL_Quit): stop live playbacks + the device.
+    def release_order : Int32
+      50
+    end
+
+    def release : Nil
+      stop_all
+      LibSDL.destroy_audio_stream(@main) unless @main.null?
+      @main = Pointer(Void).null.as(LibSDL::AudioStream)
+    end
+
     def load(path : String) : Sound
       Sound.load(path)
     end

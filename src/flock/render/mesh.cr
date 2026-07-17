@@ -297,23 +297,32 @@ module Flock
         next unless prims.any? { |p| p["targets"]? }
         verts = [] of Float32
         indices = [] of UInt32
-        targets = [] of Array(Float32)
+        # Every target must cover ALL vertices (across primitives), with zero deltas where a
+        # given primitive lacks that target — otherwise the per-vertex blend goes out of bounds.
+        ntargets = prims.map { |p| p["targets"]?.try(&.as_a.size) || 0 }.max? || 0
+        targets = Array(Array(Float32)).new(ntargets) { [] of Float32 }
         prims.each do |prim|
+          vstart = verts.size // FLOATS
           gltf_append_primitive(prim, Mat4.identity, doc, accessors, views, buffers, color, verts, indices)
-          (prim["targets"]?.try(&.as_a) || [] of JSON::Any).each_with_index do |tg, ti|
-            while targets.size <= ti
-              targets << [] of Float32
-            end
+          pvc = verts.size // FLOATS - vstart
+          ptargets = prim["targets"]?.try(&.as_a) || [] of JSON::Any
+          ntargets.times do |ti|
             acc = targets[ti]
-            pos = gltf_read_floats(accessors, views, buffers, tg["POSITION"].as_i)[0]
-            nrm = (ni = tg["NORMAL"]?) ? gltf_read_floats(accessors, views, buffers, ni.as_i)[0] : nil
-            (pos.size // 3).times do |v|
-              acc << pos[v * 3] << pos[v * 3 + 1] << pos[v * 3 + 2]
-              if nrm
-                acc << nrm[v * 3] << nrm[v * 3 + 1] << nrm[v * 3 + 2]
-              else
-                acc << 0.0f32 << 0.0f32 << 0.0f32
+            (acc.size...(vstart * 6)).each { acc << 0.0f32 } # pad earlier primitives' gap
+            if ti < ptargets.size
+              tg = ptargets[ti]
+              pos = gltf_read_floats(accessors, views, buffers, tg["POSITION"].as_i)[0]
+              nrm = (ni = tg["NORMAL"]?) ? gltf_read_floats(accessors, views, buffers, ni.as_i)[0] : nil
+              pvc.times do |v|
+                acc << pos[v * 3] << pos[v * 3 + 1] << pos[v * 3 + 2]
+                if nrm
+                  acc << nrm[v * 3] << nrm[v * 3 + 1] << nrm[v * 3 + 2]
+                else
+                  acc << 0.0f32 << 0.0f32 << 0.0f32
+                end
               end
+            else
+              (pvc * 6).times { acc << 0.0f32 } # this primitive has no such target
             end
           end
         end
@@ -468,43 +477,43 @@ module Flock
       transparent = false; alpha_cutoff = 0.0f32
       tex_coords = 0_u32 # UV-set bitmask (bit i set = texture i uses TEXCOORD_1)
 
-      if mats = doc["materials"]?
-        mats.as_a.each do |m|
-          # A texture reference using TEXCOORD_1 sets its bit in `tex_coords`.
-          uvbit = ->(ref : JSON::Any, bit : UInt32) do
-            tex_coords |= bit if (ref["texCoord"]?.try(&.as_i) || 0) == 1
+      # This convenience loader returns ONE material's worth of maps/factors: the first.
+      # (Multi-material meshes need per-primitive handling — use load_gltf_scene.) Reading a
+      # single material keeps the factors, maps, and alpha mode mutually consistent, and a
+      # per-index cache avoids uploading the same image twice (e.g. shared base/emissive).
+      if (mats = doc["materials"]?) && (m = mats.as_a[0]?)
+        cache = {} of Int32 => Texture
+        tex = ->(ref : JSON::Any, bit : UInt32) do
+          tex_coords |= bit if (ref["texCoord"]?.try(&.as_i) || 0) == 1
+          ti = ref["index"].as_i
+          cache[ti] ||= gltf_texture_at(gpu, doc, buffers, dir, ti)
+        end
+        if pbr = m["pbrMetallicRoughness"]?
+          metallic = pbr["metallicFactor"]?.try(&.as_f.to_f32) || 1.0f32
+          roughness = pbr["roughnessFactor"]?.try(&.as_f.to_f32) || 1.0f32
+          if bc = pbr["baseColorTexture"]?
+            base = tex.call(bc, 1_u32)
           end
-          pbr = m["pbrMetallicRoughness"]?
-          if pbr
-            metallic = pbr["metallicFactor"]?.try(&.as_f.to_f32) || 1.0f32
-            roughness = pbr["roughnessFactor"]?.try(&.as_f.to_f32) || 1.0f32
-            if bc = pbr["baseColorTexture"]?
-              base = gltf_texture_at(gpu, doc, buffers, dir, bc["index"].as_i); uvbit.call(bc, 1_u32)
-            end
-            if m2 = pbr["metallicRoughnessTexture"]?
-              mr = gltf_texture_at(gpu, doc, buffers, dir, m2["index"].as_i); uvbit.call(m2, 2_u32)
-            end
+          if m2 = pbr["metallicRoughnessTexture"]?
+            mr = tex.call(m2, 2_u32)
           end
-          if nt = m["normalTexture"]?
-            normal = gltf_texture_at(gpu, doc, buffers, dir, nt["index"].as_i); uvbit.call(nt, 4_u32)
-          end
-          if et = m["emissiveTexture"]?
-            emissive = gltf_texture_at(gpu, doc, buffers, dir, et["index"].as_i); uvbit.call(et, 8_u32)
-          end
-          if ef = m["emissiveFactor"]?.try(&.as_a)
-            emissive_factor = Color.new(ef[0].as_f, ef[1].as_f, ef[2].as_f)
-          end
-          if ot = m["occlusionTexture"]?
-            occlusion = gltf_texture_at(gpu, doc, buffers, dir, ot["index"].as_i); uvbit.call(ot, 16_u32)
-          end
-          # Alpha mode: BLEND -> transparent pass; MASK -> hard cutout (default cutoff 0.5).
-          case m["alphaMode"]?.try(&.as_s)
-          when "BLEND"
-            transparent = true
-          when "MASK"
-            alpha_cutoff = m["alphaCutoff"]?.try(&.as_f.to_f32) || 0.5f32
-          end
-          break if base || mr || normal || emissive || occlusion
+        end
+        if nt = m["normalTexture"]?
+          normal = tex.call(nt, 4_u32)
+        end
+        if et = m["emissiveTexture"]?
+          emissive = tex.call(et, 8_u32)
+        end
+        if ot = m["occlusionTexture"]?
+          occlusion = tex.call(ot, 16_u32)
+        end
+        if ef = m["emissiveFactor"]?.try(&.as_a)
+          emissive_factor = Color.new(ef[0].as_f, ef[1].as_f, ef[2].as_f)
+        end
+        # Alpha mode: BLEND -> transparent pass; MASK -> hard cutout (default cutoff 0.5).
+        case m["alphaMode"]?.try(&.as_s)
+        when "BLEND" then transparent = true
+        when "MASK"  then alpha_cutoff = m["alphaCutoff"]?.try(&.as_f.to_f32) || 0.5f32
         end
       end
 
@@ -572,14 +581,16 @@ module Flock
     end
 
     # Recursively accumulates {mesh index, world matrix} for a node and its children.
+    # `seen` guards against a malformed cyclic / multi-parent graph (glTF must be a forest).
     private def self.gltf_visit_node(nodes : Array(JSON::Any), idx : Int32, parent : Mat4,
-                                     acc : Array({Int32, Mat4})) : Nil
+                                     acc : Array({Int32, Mat4}), seen = Set(Int32).new) : Nil
+      return unless seen.add?(idx)
       node = nodes[idx]
       world = parent * gltf_node_matrix(node)
       if mi = node["mesh"]?
         acc << {mi.as_i, world}
       end
-      node["children"]?.try &.as_a.each { |c| gltf_visit_node(nodes, c.as_i, world, acc) }
+      node["children"]?.try &.as_a.each { |c| gltf_visit_node(nodes, c.as_i, world, acc, seen) }
     end
 
     # Walks the scene graph and returns every {node JSON, world matrix} pair (all nodes,
@@ -593,12 +604,15 @@ module Flock
         else
           (0...nodes.size).to_a
         end
+      seen = Set(Int32).new
       visit = uninitialized Int32, Mat4 -> Nil
       visit = ->(idx : Int32, parent : Mat4) do
-        node = nodes[idx]
-        world = parent * gltf_node_matrix(node)
-        acc << {node, world}
-        node["children"]?.try &.as_a.each { |c| visit.call(c.as_i, world) }
+        if seen.add?(idx) # guard cycles / shared children
+          node = nodes[idx]
+          world = parent * gltf_node_matrix(node)
+          acc << {node, world}
+          node["children"]?.try &.as_a.each { |c| visit.call(c.as_i, world) }
+        end
         nil
       end
       roots.each { |r| visit.call(r, Mat4.identity) }
@@ -777,10 +791,14 @@ module Flock
     # Reads an accessor as a flat Float32 array; returns {data, components_per_element}.
     private def self.gltf_read_floats(accessors, views, buffers : Array(Bytes), ai : Int32) : {Array(Float32), Int32}
       acc = accessors[ai]
-      bv = views[acc["bufferView"].as_i]
       ncomp = TYPE_COMPONENTS[acc["type"].as_s]
       ct = acc["componentType"].as_i
       count = acc["count"].as_i
+      raise "glTF sparse accessors are not supported" if acc["sparse"]?
+      # An accessor with no bufferView is defined as all-zero (per spec).
+      bvi = acc["bufferView"]?
+      return {Array(Float32).new(count * ncomp, 0.0f32), ncomp} unless bvi
+      bv = views[bvi.as_i]
       normalized = acc["normalized"]?.try(&.as_bool) || false
       csize = gltf_component_size(ct)
       base = (bv["byteOffset"]?.try(&.as_i) || 0) + (acc["byteOffset"]?.try(&.as_i) || 0)
