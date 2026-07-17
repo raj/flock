@@ -514,6 +514,90 @@ module Flock
       node["children"]?.try &.as_a.each { |c| gltf_visit_node(nodes, c.as_i, world, acc) }
     end
 
+    # Walks the scene graph and returns every {node JSON, world matrix} pair (all nodes,
+    # not just meshes). Falls back to a flat list at identity when there are no nodes.
+    private def self.gltf_scene_nodes(doc : JSON::Any) : Array({JSON::Any, Mat4})
+      acc = [] of {JSON::Any, Mat4}
+      nodes = doc["nodes"]?.try(&.as_a) || return acc
+      roots =
+        if (scene = doc["scene"]?) && (scenes = doc["scenes"]?)
+          scenes.as_a[scene.as_i]["nodes"].as_a.map(&.as_i)
+        else
+          (0...nodes.size).to_a
+        end
+      visit = uninitialized Int32, Mat4 -> Nil
+      visit = ->(idx : Int32, parent : Mat4) do
+        node = nodes[idx]
+        world = parent * gltf_node_matrix(node)
+        acc << {node, world}
+        node["children"]?.try &.as_a.each { |c| visit.call(c.as_i, world) }
+        nil
+      end
+      roots.each { |r| visit.call(r, Mat4.identity) }
+      acc
+    end
+
+    # Loads the glTF `KHR_lights_punctual` lights as `{Light, position}` pairs with world
+    # transforms applied. Spawn them with a `Transform3D` at the returned position:
+    #   Mesh.load_gltf_lights(path).each do |light, pos|
+    #     cmd.spawn(Transform3D.new(position: pos), light)
+    #   end
+    def self.load_gltf_lights(path : String) : Array({Light, Vec3})
+      json_text, _ = read_gltf_container(path)
+      doc = JSON.parse(json_text)
+      defs = doc.dig?("extensions", "KHR_lights_punctual", "lights").try(&.as_a) || return [] of {Light, Vec3}
+
+      out = [] of {Light, Vec3}
+      gltf_scene_nodes(doc).each do |node, world|
+        li = node.dig?("extensions", "KHR_lights_punctual", "light") || next
+        ld = defs[li.as_i]
+        color = (c = ld["color"]?) ? Color.new(c[0].as_f, c[1].as_f, c[2].as_f) : Color::WHITE
+        intensity = ld["intensity"]?.try(&.as_f.to_f32) || 1.0f32
+        range = ld["range"]?.try(&.as_f.to_f32) || 0.0f32
+        pos = world.transform_point(Vec3.new)
+        # glTF lights aim along their node's local -Z.
+        dir = world.transform_direction(Vec3.new(0, 0, -1)).normalize
+        light =
+          case ld["type"].as_s
+          when "point"
+            Light.point(color, intensity, range > 0 ? range : 10.0)
+          when "spot"
+            spot = ld["spot"]?
+            inner = spot.try(&.["innerConeAngle"]?).try(&.as_f.to_f32) || 0.0f32
+            outer = spot.try(&.["outerConeAngle"]?).try(&.as_f.to_f32) || (Math::PI / 4).to_f32
+            Light.spot(dir, color, intensity, range > 0 ? range : 10.0, inner, outer)
+          else # "directional"
+            Light.directional(dir, color, intensity)
+          end
+        out << {light, pos}
+      end
+      out
+    end
+
+    # Loads the glTF cameras placed in the scene as ready-to-use `Camera3D`s (world
+    # position + orientation applied; perspective yfov/near/far, or a sensible fov for
+    # orthographic cameras which Camera3D approximates as perspective).
+    def self.load_gltf_cameras(path : String) : Array(Camera3D)
+      json_text, _ = read_gltf_container(path)
+      doc = JSON.parse(json_text)
+      cams = doc["cameras"]?.try(&.as_a) || return [] of Camera3D
+
+      out = [] of Camera3D
+      gltf_scene_nodes(doc).each do |node, world|
+        ci = node["camera"]? || next
+        cd = cams[ci.as_i]
+        pos = world.transform_point(Vec3.new)
+        fwd = world.transform_direction(Vec3.new(0, 0, -1)).normalize
+        up = world.transform_direction(Vec3.new(0, 1, 0)).normalize
+        persp = cd["perspective"]?
+        fov = persp.try(&.["yfov"]?).try(&.as_f.to_f32) || 1.0f32
+        near = persp.try(&.["znear"]?).try(&.as_f.to_f32) || 0.1f32
+        far = persp.try(&.["zfar"]?).try(&.as_f.to_f32) || 1000.0f32
+        out << Camera3D.new(position: pos, target: pos + fwd, up: up, fov_y: fov, near: near, far: far)
+      end
+      out
+    end
+
     private def self.gltf_node_matrix(node : JSON::Any) : Mat4
       if m = node["matrix"]?
         a = StaticArray(Float32, 16).new(0.0f32)
