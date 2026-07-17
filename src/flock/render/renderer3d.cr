@@ -335,6 +335,19 @@ module Flock
       @location(2) uv : vec2<f32>,
     };
 
+    // Inverse-transpose of a 3x3 (cofactor matrix / det) — transforms normals correctly
+    // under non-uniform scale. Column-major mat3x3.
+    fn normal_matrix(m : mat3x3<f32>) -> mat3x3<f32> {
+      let c0 = cross(m[1], m[2]);
+      let c1 = cross(m[2], m[0]);
+      let c2 = cross(m[0], m[1]);
+      let det = dot(m[0], c0);
+      if (abs(det) < 1e-8) { return m; } // degenerate -> fall back to the matrix itself
+      let inv = 1.0 / det;
+      // Rows of the cofactor matrix become columns of its transpose.
+      return mat3x3<f32>(c0 * inv, c1 * inv, c2 * inv);
+    }
+
     @vertex
     fn vs_main(@location(0) pos : vec3<f32>, @location(1) nrm : vec3<f32>,
                @location(2) col : vec3<f32>, @location(3) uv : vec2<f32>,
@@ -343,7 +356,9 @@ module Flock
       var out : VSOut;
       let wp = skin * vec4<f32>(pos, 1.0);
       out.clip = cam.view_proj * wp;
-      out.normal = normalize((skin * vec4<f32>(nrm, 0.0)).xyz);
+      // Skin the normal with the inverse-transpose of the skin's 3x3 (correct under scale).
+      let nm = normal_matrix(mat3x3<f32>(skin[0].xyz, skin[1].xyz, skin[2].xyz));
+      out.normal = normalize(nm * nrm);
       out.color = col;
       out.uv = uv;
       return out;

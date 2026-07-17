@@ -81,4 +81,101 @@ module Flock
       proj * view
     end
   end
+
+  # Orbit (arcball-style) controller for a Camera3D: keeps the camera looking at `target`
+  # while it orbits at `distance` with `yaw`/`pitch` (radians). Input-agnostic — drive it
+  # from your input each frame, then write it into the camera:
+  #
+  #   orbit.rotate(input.mouse_wheel.x * 0.01, 0)      # or mouse-drag deltas
+  #   orbit.dolly(1.0 - input.mouse_wheel.y * 0.1)
+  #   world.query(Camera3D) { |_e, cam| orbit.apply(cam) }
+  struct OrbitCamera
+    property target : Vec3
+    property distance : Float32
+    property yaw : Float32
+    property pitch : Float32
+    property min_pitch : Float32
+    property max_pitch : Float32
+    property min_distance : Float32
+    property max_distance : Float32
+
+    def initialize(@target : Vec3 = Vec3.new, @distance : Float32 = 5.0f32,
+                   @yaw : Float32 = 0.0f32, @pitch : Float32 = 0.3f32,
+                   @min_pitch : Float32 = -1.5f32, @max_pitch : Float32 = 1.5f32,
+                   @min_distance : Float32 = 0.5f32, @max_distance : Float32 = 100.0f32)
+    end
+
+    # Accumulates orbit angles; pitch is clamped to avoid flipping over the poles.
+    def rotate(dyaw : Number, dpitch : Number) : Nil
+      @yaw += dyaw.to_f32
+      @pitch = (@pitch + dpitch.to_f32).clamp(@min_pitch, @max_pitch)
+    end
+
+    # Multiplies the orbit distance (factor < 1 zooms in), clamped to [min, max].
+    def dolly(factor : Number) : Nil
+      @distance = (@distance * factor.to_f32).clamp(@min_distance, @max_distance)
+    end
+
+    # The camera eye position for the current orbit angles/distance.
+    def eye : Vec3
+      cp = Math.cos(@pitch); sp = Math.sin(@pitch)
+      cy = Math.cos(@yaw); sy = Math.sin(@yaw)
+      @target + Vec3.new(@distance * cp * sy, @distance * sp, @distance * cp * cy)
+    end
+
+    # Writes eye + target into a Camera3D (via the query pointer).
+    def apply(cam : Pointer(Camera3D)) : Nil
+      cam.value.position = eye
+      cam.value.target = @target
+    end
+  end
+
+  # First-person fly controller for a Camera3D: free `position` with `yaw`/`pitch` look
+  # (radians). Input-agnostic:
+  #
+  #   fly.look(dx * 0.003, -dy * 0.003)                    # mouse look
+  #   fly.move(fwd, right, up, dt)                         # keyboard axes in [-1, 1]
+  #   world.query(Camera3D) { |_e, cam| fly.apply(cam) }
+  struct FlyCamera
+    property position : Vec3
+    property yaw : Float32
+    property pitch : Float32
+    property speed : Float32
+    property min_pitch : Float32
+    property max_pitch : Float32
+
+    def initialize(@position : Vec3 = Vec3.new(0, 0, 5), @yaw : Float32 = 0.0f32,
+                   @pitch : Float32 = 0.0f32, @speed : Float32 = 5.0f32,
+                   @min_pitch : Float32 = -1.5f32, @max_pitch : Float32 = 1.5f32)
+    end
+
+    def look(dyaw : Number, dpitch : Number) : Nil
+      @yaw += dyaw.to_f32
+      @pitch = (@pitch + dpitch.to_f32).clamp(@min_pitch, @max_pitch)
+    end
+
+    # Forward (view) direction. Faces -Z at yaw = pitch = 0 (matches look_at convention).
+    def forward : Vec3
+      cp = Math.cos(@pitch); sp = Math.sin(@pitch)
+      cy = Math.cos(@yaw); sy = Math.sin(@yaw)
+      Vec3.new(cp * sy, sp, -cp * cy).normalize
+    end
+
+    # The rightward direction on the ground plane (world up = +Y).
+    def right : Vec3
+      forward.cross(Vec3.new(0, 1, 0)).normalize
+    end
+
+    # Moves along the local basis: `fwd`/`rgt`/`up` in [-1, 1], scaled by speed * dt.
+    def move(fwd : Number, rgt : Number, up : Number, dt : Number) : Nil
+      step = @speed * dt.to_f32
+      @position = @position + forward * (fwd.to_f32 * step) +
+                  right * (rgt.to_f32 * step) + Vec3.new(0, 1, 0) * (up.to_f32 * step)
+    end
+
+    def apply(cam : Pointer(Camera3D)) : Nil
+      cam.value.position = @position
+      cam.value.target = @position + forward
+    end
+  end
 end

@@ -183,9 +183,12 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       `Mesh.load_gltf_pbr` reads them). See `examples/gltf_material_test.cr`. **Not yet:** morph
       targets (vertex-morph animation), multiple UV sets, vertex colors on skinned meshes, glTF
       cameras/lights (`KHR_lights_punctual`), other KHR extensions.
-- [ ] **Camera / misc polish.** Orbit / fly-camera controller helpers for `Camera3D` (exists but
-      has no controller); normal matrix for skinned normals (currently approximate); frustum
-      culling of skinned/animated meshes uses the bind-pose bounds (can under-cull when deformed).
+- [~] **Camera / misc polish.** **Done:** `OrbitCamera` (arcball: target/distance/yaw/pitch, dolly,
+      clamps) and `FlyCamera` (position/yaw/pitch, WASD move + mouse look) controller helpers — pure,
+      input-agnostic structs that write into a `Camera3D` (see `spec/camera_controller_spec.cr` and
+      `examples/orbit_camera.cr`). Skinned normals now use the inverse-transpose of the skin 3×3
+      (correct under non-uniform scale, was approximate). **Not yet:** frustum culling of
+      skinned/animated meshes still uses the bind-pose bounds (can mis-cull when heavily deformed).
 
 ## sdl3-cr
 
