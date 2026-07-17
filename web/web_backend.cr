@@ -12,21 +12,10 @@ module Flock::Web
 
   MAX = 512 # max sprites per frame
 
-  # A sprite: `color` tints, `texture` (a JS renderer texture id; 0 = solid white),
-  # `uv_min`/`uv_size` select a sub-rectangle of the texture (atlas). Uses the shared,
-  # native-free `Flock::Transform2D` for placement.
-  struct Sprite
-    include Flock::Component
-    property size : Flock::Vec2
-    property color : Flock::Color
-    property texture : Int32
-    property uv_min : Flock::Vec2
-    property uv_size : Flock::Vec2
-
-    def initialize(@size : Flock::Vec2, @color : Flock::Color = Flock::Color::WHITE, @texture : Int32 = 0,
-                   @uv_min : Flock::Vec2 = Flock::Vec2.new(0, 0), @uv_size : Flock::Vec2 = Flock::Vec2.new(1, 1))
-    end
-  end
+  # Sprites use the shared, native-free `Flock::Sprite2D` (+ `Flock::Transform2D`), so the
+  # same scene source renders on native and web. On web, `Sprite2D#texture` is a renderer
+  # texture id from `checkerboard`/`make_text`/`load_image`; on native it's a Renderer2D
+  # bank id. `texture = 0` is solid white on both.
 
   # Keyboard (DOM keyCodes) + gamepad (left stick + buttons, polled from JS each frame).
   ARROW_LEFT  = 37
@@ -158,7 +147,7 @@ module Flock::Web
       app.add_system(Flock::Schedule::Render) do |world, _cmd|
         # Collect instances, then order by texture for batched draws.
         items = [] of Inst
-        world.query(Flock::Transform2D, Sprite) do |_e, tf, sp|
+        world.query(Flock::Transform2D, Flock::Sprite2D) do |_e, tf, sp|
           next if items.size >= MAX
           p = tf.value.position; s = sp.value.size; c = sp.value.color
           uv = sp.value.uv_min; uz = sp.value.uv_size

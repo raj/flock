@@ -210,10 +210,18 @@ Ship a Flock scene as HTML/WebAssembly. **Working spike done** (`web/`):
 - [x] **Packaging**: `web/build.sh` auto-discovers the `wesh` checkout ($WESH or common paths),
       reports wasm/gzip size, and supports `--release` (wasm-opt -Oz + JS mangle): ~156 KiB /
       ~50 KiB gzip vs ~982 KiB debug.
-- [ ] **Future (web, nice-to-have)**: glyph/text caching (each `make_text` builds a texture);
-      audio volume/mixing/loop parity with native `Audio`; a shared `Sprite`/asset abstraction so
-      the very same source (not just components) runs on both; a `wesh dev`-style live-reload
-      server for the `web/` folder. wgpu-native + SDL3 remain native-only.
+- [x] **Glyph/text cache**: `make_text` reuses one texture per repeated string.
+- [x] **Audio parity**: `play_sound(id, volume, loop)` → handle, `stop_sound`, `master_volume`,
+      mixing through a master GainNode.
+- [x] **Live-reload dev server**: `web/dev.mjs`/`dev.sh` serve + watch + rebuild on `.cr` + SSE reload.
+- [x] **Shared source on both targets**: `Flock::Sprite2D` (native-free, texture = an id) is rendered
+      by both the native `Renderer2D` (via a texture bank + `register_texture`) and the web backend.
+      `examples/shared_scene.cr` (components + spawn + system, core-only, with an injected texture
+      loader) runs unchanged on native (`examples/shared_scene_native.cr`) and web (`web/main.cr`).
+      Verified: native `examples/sprite2d_test.cr` (readback) + web (Chrome). **Web target: feature-complete.**
+      (Only cosmetic gap left: the native `Camera2D` is y-up / origin-center vs the web's top-left, so
+      framing is vertically mirrored — a shared 2D coordinate convention would unify it.)
+      wgpu-native + SDL3 remain native-only.
 
 ## Remaining work (open)
 
