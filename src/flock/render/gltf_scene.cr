@@ -4,17 +4,19 @@ module Flock
   # For CUBICSPLINE each keyframe stores 3 blocks (in-tangent, value, out-tangent).
   class GltfChannel
     getter node : Int32
-    getter path : String   # "translation" | "rotation" | "scale"
+    getter path : String   # "translation" | "rotation" | "scale" | "weights"
     getter interp : String # "LINEAR" | "STEP" | "CUBICSPLINE"
     getter times : Array(Float32)
     getter values : Array(Float32)
 
+    # `stride` overrides the per-keyframe element count (used by "weights", whose stride
+    # is the morph-target count); nil = infer from the path (4 rotation, else 3).
     def initialize(@node : Int32, @path : String, @times : Array(Float32),
-                   @values : Array(Float32), @interp : String = "LINEAR")
+                   @values : Array(Float32), @interp : String = "LINEAR", @stride_override : Int32? = nil)
     end
 
     def stride : Int32
-      @path == "rotation" ? 4 : 3
+      @stride_override || (@path == "rotation" ? 4 : 3)
     end
 
     def duration : Float32
@@ -123,6 +125,21 @@ module Flock
     end
   end
 
+  # A CPU morph-target part: the base interleaved vertices plus one delta set per morph
+  # target ({dpos.xyz, dnrm.xyz} per vertex), the node index whose `weights` drive the
+  # blend, and the default weights. Each frame `MorphModel` blends
+  # `base + Σ weight[i] * target[i]` and rewrites the target Mesh's vertex buffer.
+  class MorphPart
+    getter mesh : Mesh
+    getter base_verts : Array(Float32)      # Mesh::FLOATS per vertex
+    getter targets : Array(Array(Float32))  # 6 floats (dpos3 + dnrm3) per vertex
+    getter node : Int32
+    getter default_weights : Array(Float32)
+
+    def initialize(@mesh, @base_verts, @targets, @node, @default_weights)
+    end
+  end
+
   # A loaded glTF scene graph with its animations. `world_matrices(t)` evaluates the
   # hierarchy at a given time. Covers node (TRS) animation and CPU skinning (`skins`).
   class GltfScene
@@ -130,9 +147,19 @@ module Flock
     getter roots : Array(Int32)
     getter animations : Array(GltfAnimation)
     getter skins : Array(SkinnedPart)
+    getter morphs : Array(MorphPart)
 
     def initialize(@nodes : Array(GltfNode), @roots : Array(Int32),
-                   @animations : Array(GltfAnimation), @skins : Array(SkinnedPart) = [] of SkinnedPart)
+                   @animations : Array(GltfAnimation), @skins : Array(SkinnedPart) = [] of SkinnedPart,
+                   @morphs : Array(MorphPart) = [] of MorphPart)
+    end
+
+    # Morph-target weights for `node` at time `t` under animation `anim`: the sampled
+    # "weights" channel if one targets this node, else nil (caller uses the defaults).
+    def node_weights(node : Int32, t : Float32, anim : Int32 = 0) : Array(Float32)?
+      a = @animations[anim]? || return nil
+      ch = a.channels.find { |c| c.node == node && c.path == "weights" } || return nil
+      ch.sample(t)
     end
 
     def mesh_nodes : Array(Int32)
@@ -269,6 +296,66 @@ module Flock
           nl = 1.0f32 if nl == 0
           verts[v * f] = px; verts[v * f + 1] = py; verts[v * f + 2] = pz
           verts[v * f + 3] = nx / nl; verts[v * f + 4] = ny / nl; verts[v * f + 5] = nz / nl
+        end
+        LibWGPU.queue_write_buffer(@gpu.queue, part.mesh.vertex_buf, 0_u64,
+          verts.to_unsafe.as(Void*), (verts.size * 4).to_u64)
+      end
+    end
+
+    def update(dt : Float32) : Nil
+      d = (@scene.animations[@clip]?.try(&.duration)) || 0.0f32
+      @time += dt
+      @time = @time % d if d > 0 && @time > d
+      apply
+    end
+  end
+
+  # Plays a glTF mesh's morph targets on the CPU: spawns one entity per morph part and,
+  # each frame, blends `base + Σ weight[i] * target[i]` for positions + normals and uploads
+  # the deformed vertices to the mesh's vertex buffer. Weights come from an animation's
+  # "weights" channel (looping) or the mesh/node defaults.
+  #
+  #   scene = Flock::Mesh.load_gltf_scene(gpu, "face.glb")
+  #   morph = Flock::MorphModel.spawn(scene, world, gpu)
+  #   app.add_system(Flock::Schedule::Update) { |w, _| morph.update(w.resource(Flock::Time).delta.to_f32) }
+  class MorphModel
+    getter scene : GltfScene
+    property time : Float32 = 0.0f32
+    property clip : Int32 = 0
+
+    def initialize(@scene : GltfScene, @gpu : GpuContext)
+    end
+
+    def self.spawn(scene : GltfScene, world : World, gpu : GpuContext, tint : Color = Color::WHITE) : MorphModel
+      scene.morphs.each do |part|
+        e = world.spawn
+        world.add(e, Transform3D.new)
+        world.add(e, MeshRenderer.new(part.mesh, tint: tint))
+      end
+      m = new(scene, gpu)
+      m.apply # pose at t=0 so a static (unanimated) morph still shows its default weights
+      m
+    end
+
+    # Blends every morph part at the current time/weights and uploads the vertices.
+    def apply : Nil
+      f = Mesh::FLOATS
+      @scene.morphs.each do |part|
+        w = @scene.node_weights(part.node, @time, @clip) || part.default_weights
+        verts = part.base_verts.dup
+        vcount = part.base_verts.size // f
+        part.targets.each_with_index do |tgt, ti|
+          wt = w[ti]? || 0.0f32
+          next if wt == 0.0f32
+          vcount.times do |v|
+            vo = v * f; to = v * 6
+            verts[vo]     += wt * tgt[to]
+            verts[vo + 1] += wt * tgt[to + 1]
+            verts[vo + 2] += wt * tgt[to + 2]
+            verts[vo + 3] += wt * tgt[to + 3]
+            verts[vo + 4] += wt * tgt[to + 4]
+            verts[vo + 5] += wt * tgt[to + 5]
+          end
         end
         LibWGPU.queue_write_buffer(@gpu.queue, part.mesh.vertex_buf, 0_u64,
           verts.to_unsafe.as(Void*), (verts.size * 4).to_u64)

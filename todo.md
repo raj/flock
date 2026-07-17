@@ -183,9 +183,11 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       `Mesh.load_gltf_pbr` reads them). See `examples/gltf_material_test.cr`. **Scene import:**
       `Mesh.load_gltf_lights` imports `KHR_lights_punctual` (directional/point/spot with color,
       intensity, range, spot cones) as posed `Light`s; `Mesh.load_gltf_cameras` imports glTF cameras
-      as `Camera3D`s (world pose, yfov/near/far). See `examples/gltf_scene_import_test.cr`. **Not
-      yet:** morph targets (vertex-morph animation), multiple UV sets, vertex colors on skinned
-      meshes, other KHR extensions.
+      as `Camera3D`s (world pose, yfov/near/far). See `examples/gltf_scene_import_test.cr`.
+      **Morph targets:** `load_gltf_scene` parses primitive `targets` (POSITION + NORMAL deltas)
+      and `weights` animation channels; `MorphModel` CPU-blends `base + Σ weight[i]·target[i]` and
+      re-uploads the vertex buffer each frame (see `examples/morph_test.cr`). **Not yet:** multiple
+      UV sets, vertex colors on skinned meshes, GPU morph blending, other KHR extensions.
 - [~] **Camera / misc polish.** **Done:** `OrbitCamera` (arcball: target/distance/yaw/pitch, dolly,
       clamps) and `FlyCamera` (position/yaw/pitch, WASD move + mouse look) controller helpers — pure,
       input-agnostic structs that write into a `Camera3D` (see `spec/camera_controller_spec.cr` and

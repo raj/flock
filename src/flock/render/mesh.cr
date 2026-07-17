@@ -284,16 +284,52 @@ module Flock
       gltf_meshes = doc["meshes"]?.try(&.as_a) || [] of JSON::Any
       json_nodes = doc["nodes"]?.try(&.as_a) || [] of JSON::Any
 
-      # One Flock Mesh per glTF mesh index (local space), built lazily.
+      # Morph meshes (primitives with `targets`) get a dedicated mesh + captured base
+      # vertices and per-target deltas, so their vertex buffer can be re-blended each frame.
+      morph_data = {} of Int32 => {Mesh, Array(Float32), Array(Array(Float32))}
+      gltf_meshes.each_with_index do |gm, mi|
+        prims = gm["primitives"].as_a
+        next unless prims.any? { |p| p["targets"]? }
+        verts = [] of Float32
+        indices = [] of UInt32
+        targets = [] of Array(Float32)
+        prims.each do |prim|
+          gltf_append_primitive(prim, Mat4.identity, doc, accessors, views, buffers, color, verts, indices)
+          (prim["targets"]?.try(&.as_a) || [] of JSON::Any).each_with_index do |tg, ti|
+            while targets.size <= ti
+              targets << [] of Float32
+            end
+            acc = targets[ti]
+            pos = gltf_read_floats(accessors, views, buffers, tg["POSITION"].as_i)[0]
+            nrm = (ni = tg["NORMAL"]?) ? gltf_read_floats(accessors, views, buffers, ni.as_i)[0] : nil
+            (pos.size // 3).times do |v|
+              acc << pos[v * 3] << pos[v * 3 + 1] << pos[v * 3 + 2]
+              if nrm
+                acc << nrm[v * 3] << nrm[v * 3 + 1] << nrm[v * 3 + 2]
+              else
+                acc << 0.0f32 << 0.0f32 << 0.0f32
+              end
+            end
+          end
+        end
+        morph_data[mi] = {build(gpu, verts, indices), verts, targets}
+      end
+
+      # One Flock Mesh per glTF mesh index (local space), built lazily. Morph meshes reuse
+      # their pre-built dedicated mesh.
       built = {} of Int32 => Mesh
       local_mesh = ->(mi : Int32) do
         built[mi] ||= begin
-          verts = [] of Float32
-          indices = [] of UInt32
-          gltf_meshes[mi]["primitives"].as_a.each do |prim|
-            gltf_append_primitive(prim, Mat4.identity, doc, accessors, views, buffers, color, verts, indices)
+          if md = morph_data[mi]?
+            md[0]
+          else
+            verts = [] of Float32
+            indices = [] of UInt32
+            gltf_meshes[mi]["primitives"].as_a.each do |prim|
+              gltf_append_primitive(prim, Mat4.identity, doc, accessors, views, buffers, color, verts, indices)
+            end
+            build(gpu, verts, indices)
           end
-          build(gpu, verts, indices)
         end
       end
 
@@ -329,7 +365,12 @@ module Flock
           times = gltf_read_floats(accessors, views, buffers, smp["input"].as_i)[0]
           values = gltf_read_floats(accessors, views, buffers, smp["output"].as_i)[0]
           interp = smp["interpolation"]?.try(&.as_s) || "LINEAR"
-          GltfChannel.new(node, target["path"].as_s, times, values, interp)
+          path = target["path"].as_s
+          # A "weights" channel packs `targetCount` values per keyframe (x3 for CUBICSPLINE).
+          stride = if path == "weights" && !times.empty?
+                     values.size // (times.size * (interp == "CUBICSPLINE" ? 3 : 1))
+                   end
+          GltfChannel.new(node, path, times, values, interp, stride)
         end
         GltfAnimation.new(anim["name"]?.try(&.as_s) || "", channels)
       end
@@ -340,7 +381,19 @@ module Flock
         skins << gltf_build_skinned_part(gpu, doc, n, accessors, views, buffers, color)
       end
 
-      GltfScene.new(nodes, roots, animations, skins)
+      # Morph parts: pair each morph mesh with the first node that references it (for its
+      # weights animation) and its default weights (node.weights, else mesh.weights, else 0).
+      morphs = [] of MorphPart
+      morph_data.each do |mi, (mesh, base_verts, targets)|
+        node_idx = json_nodes.index { |n| n["mesh"]?.try(&.as_i) == mi } || next
+        defaults =
+          (json_nodes[node_idx]["weights"]?.try(&.as_a) ||
+           gltf_meshes[mi]["weights"]?.try(&.as_a) || [] of JSON::Any).map(&.as_f.to_f32)
+        defaults = Array(Float32).new(targets.size, 0.0f32) if defaults.size < targets.size
+        morphs << MorphPart.new(mesh, base_verts, targets, node_idx, defaults)
+      end
+
+      GltfScene.new(nodes, roots, animations, skins, morphs)
     end
 
     # Builds a CPU-skinned part for a node that has both a mesh and a skin: the bind-pose
