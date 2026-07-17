@@ -150,9 +150,13 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       factor to that light only. No caster → group3 is bound but unused, so lit/legacy scenes are
       unchanged. See `examples/shadow_test.cr` (shadows-on vs -off readback). *Spot/point shadows and
       shadow-frustum fitting to off-screen casters are future work.*
-- [ ] **Transparency / alpha blending.** The 3D color target is **opaque only** (no `BlendState`,
-      `write_mask = All`, depth-write on). Add an alpha-blended material flag + back-to-front
-      sorting for translucent meshes (blend enabled, depth-write off).
+- [x] **Transparency / alpha blending.** Set `transparent: true` on a `MeshRenderer`. Opaque
+      meshes still batch/instance as before; translucent ones are collected separately, sorted
+      back-to-front by camera distance, and drawn after all opaque geometry with a blended
+      pipeline variant (standard `SrcAlpha`/`OneMinusSrcAlpha`, depth test on, depth-write off).
+      `tint`/base-texture alpha drives opacity. See `examples/transparency_test.cr` (transparent
+      vs opaque readback proving the panel behind shows through). *Transparent meshes don't cast
+      shadows and always use the built-in shader (custom materials render opaque) — future work.*
 - [ ] **Anti-aliasing (MSAA).** `sample_count = 1` everywhere — aliased edges. Add a multisampled
       color (+ depth) target and a resolve to the surface; make the sample count configurable.
 - [ ] **Native texture mipmaps.** Native `Texture` is `mip_level_count = 1` (only the web target
@@ -275,9 +279,9 @@ notes buried in the completed entries plus the two open sections:
 - [ ] **Mouse**: cursor control (hide/capture/relative mode).
 - [ ] **Text**: per-string texture cache + glyph atlas (native side; web already caches).
 - [ ] **Sampler**: mipmap generation (native `Texture` is single-mip — see "3D — remaining").
-- [ ] **3D**: see the dedicated **"3D — remaining"** section (transparency, MSAA, native
-      mipmaps, post-processing/tonemapping, glTF emissive/occlusion/morph targets).
-      Lighting system and directional shadow mapping are done.
+- [ ] **3D**: see the dedicated **"3D — remaining"** section (MSAA, native mipmaps,
+      post-processing/tonemapping, glTF emissive/occlusion/morph targets). Lighting,
+      directional shadow mapping and transparency are done.
 - [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
 
 ### Cross-platform validation

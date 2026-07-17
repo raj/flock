@@ -20,10 +20,16 @@ module Flock
     # Per-instance tint (multiplied into the mesh's vertex color) + alpha. Lets many
     # entities share one mesh yet render in different colors within a single draw.
     property tint : Color
+    # Alpha blending. When true the mesh is drawn in a separate back-to-front pass with
+    # blending on and depth-writes off (so it reads the opaque depth but doesn't occlude
+    # other translucent meshes). The `tint`/base-texture alpha then controls opacity.
+    # Opaque meshes (the default) are unaffected and still batched/instanced.
+    property transparent : Bool
 
     def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil,
                    @tint : Color = Color::WHITE, @metallic_roughness : Texture? = nil,
-                   @normal_map : Texture? = nil, @metallic : Float32 = 0.0f32, @roughness : Float32 = 1.0f32)
+                   @normal_map : Texture? = nil, @metallic : Float32 = 0.0f32, @roughness : Float32 = 1.0f32,
+                   @transparent : Bool = false)
     end
   end
 

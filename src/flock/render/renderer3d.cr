@@ -364,6 +364,7 @@ module Flock
 
     @shader : LibWGPU::ShaderModule
     @pipeline : LibWGPU::RenderPipeline
+    @transparent_pipeline : LibWGPU::RenderPipeline # alpha-blended variant (depth-write off)
     @group0_layout : LibWGPU::BindGroupLayout
     @group1_layout : LibWGPU::BindGroupLayout # texture + sampler
     @pipeline_layout : LibWGPU::PipelineLayout
@@ -415,6 +416,7 @@ module Flock
 
       @shader = build_shader(WGSL)
       @pipeline = build_pipeline(@shader)
+      @transparent_pipeline = build_pipeline(@shader, blend: true)
       @default_ibl = build_ibl_default
 
       # Skinned pipeline (group0 + group1 + joint matrices in group2).
@@ -496,6 +498,7 @@ module Flock
       LibWGPU.shader_module_release(@skinned_shader)
       LibWGPU.bind_group_layout_release(@joint_layout)
       LibWGPU.pipeline_layout_release(@pipeline_layout)
+      LibWGPU.render_pipeline_release(@transparent_pipeline)
       LibWGPU.render_pipeline_release(@pipeline)
       LibWGPU.shader_module_release(@shader)
       LibWGPU.bind_group_layout_release(@group1_layout)
@@ -972,9 +975,22 @@ module Flock
       LibWGPU.device_create_buffer(@gpu.device, pointerof(d))
     end
 
-    private def build_pipeline(shader : LibWGPU::ShaderModule) : LibWGPU::RenderPipeline
+    # Builds the rigid 3D pipeline. `blend: true` produces the transparency variant:
+    # standard alpha blending with depth-writes disabled (depth test stays on, so opaque
+    # geometry still occludes translucent fragments).
+    private def build_pipeline(shader : LibWGPU::ShaderModule, blend : Bool = false) : LibWGPU::RenderPipeline
       vs = WGPU.string_view("vs_main")
       fs = WGPU.string_view("fs_main")
+
+      blend_state = LibWGPU::BlendState.new
+      blend_state.color = LibWGPU::BlendComponent.new(
+        operation: LibWGPU::BlendOperation::Add,
+        src_factor: LibWGPU::BlendFactor::SrcAlpha,
+        dst_factor: LibWGPU::BlendFactor::OneMinusSrcAlpha)
+      blend_state.alpha = LibWGPU::BlendComponent.new(
+        operation: LibWGPU::BlendOperation::Add,
+        src_factor: LibWGPU::BlendFactor::One,
+        dst_factor: LibWGPU::BlendFactor::OneMinusSrcAlpha)
 
       # Vertex layout: pos(loc0), normal(loc1), color(loc2) Float32x3; uv(loc3) Float32x2.
       a0 = LibWGPU::VertexAttribute.new; a0.format = LibWGPU::VertexFormat::Float32x3; a0.offset = 0_u64; a0.shader_location = 0_u32
@@ -999,6 +1015,7 @@ module Flock
       target = LibWGPU::ColorTargetState.new
       target.format = @gpu.format
       target.write_mask = LibWGPU::ColorWriteMask::All
+      target.blend = pointerof(blend_state) if blend
 
       fragment = LibWGPU::FragmentState.new
       fragment.module_ = shader
@@ -1011,7 +1028,8 @@ module Flock
       primitive.front_face = LibWGPU::FrontFace::CCW
       primitive.cull_mode = LibWGPU::CullMode::None
 
-      # Depth test/write (Depth32Float). Stencil unused: default face state.
+      # Depth test always on; depth-write off for the blended variant so translucent
+      # fragments read the opaque depth but don't occlude one another. Stencil unused.
       face = LibWGPU::StencilFaceState.new
       face.compare = LibWGPU::CompareFunction::Always
       face.fail_op = LibWGPU::StencilOperation::Keep
@@ -1019,7 +1037,7 @@ module Flock
       face.pass_op = LibWGPU::StencilOperation::Keep
       depth = LibWGPU::DepthStencilState.new
       depth.format = LibWGPU::TextureFormat::Depth32Float
-      depth.depth_write_enabled = LibWGPU::OptionalBool::True
+      depth.depth_write_enabled = blend ? LibWGPU::OptionalBool::False : LibWGPU::OptionalBool::True
       depth.depth_compare = LibWGPU::CompareFunction::Less
       depth.stencil_front = face
       depth.stencil_back = face
@@ -1400,8 +1418,12 @@ module Flock
       frustum = Frustum.from(vp)
       groups = [] of {Mesh, Material3D?, Texture, Texture, Texture, Array({Mat4, Color, Float32, Float32})}
       slot = {} of Tuple(UInt64, UInt64, UInt64, UInt64, UInt64) => Int32
+      # Transparent instances are NOT batched: they draw one at a time, back to front.
+      # Each holds its mesh/textures, transform, material params, and camera distance.
+      transparent = [] of {Mesh, Texture, Texture, Texture, Mat4, Color, Float32, Float32, Float32}
       total = 0
       culled = 0
+      cpos = cam.position
       world.query(Transform3D, MeshRenderer) do |_e, tf, mrr|
         mesh = mrr.value.mesh
         model = tf.value.matrix
@@ -1416,10 +1438,19 @@ module Flock
           end
         end
 
-        material = mrr.value.material
         base = mrr.value.texture || @white
         mr_tex = mrr.value.metallic_roughness || @white
         nrm_tex = mrr.value.normal_map || @flat_normal
+
+        if mrr.value.transparent
+          c = model.transform_point(mesh.bounds_center)
+          d = (c.x - cpos.x)**2 + (c.y - cpos.y)**2 + (c.z - cpos.z)**2
+          transparent << {mesh, base, mr_tex, nrm_tex, model, mrr.value.tint,
+                          mrr.value.metallic, mrr.value.roughness, d}
+          next
+        end
+
+        material = mrr.value.material
         inst = {model, mrr.value.tint, mrr.value.metallic, mrr.value.roughness}
         key = {mesh.object_id, material ? material.object_id : 0_u64,
                base.object_id, mr_tex.object_id, nrm_tex.object_id}
@@ -1431,7 +1462,9 @@ module Flock
         end
         total += 1
       end
-      @last_drawn = total
+      # Farthest first, so nearer translucent surfaces blend over the ones behind them.
+      transparent.sort! { |a, b| b[8] <=> a[8] }
+      @last_drawn = total + transparent.size
       @last_culled = culled
 
       # Even with nothing to draw (empty scene or everything culled) we still run the
@@ -1440,16 +1473,23 @@ module Flock
       # frustum can be fitted to it (only needed when a caster is present).
       bb_min = Vec3.new(Float32::MAX, Float32::MAX, Float32::MAX)
       bb_max = Vec3.new(-Float32::MAX, -Float32::MAX, -Float32::MAX)
-      if total > 0
-        ensure_capacity(total)
+      # Opaque instances fill model/param slots [0, total); the sorted transparent ones
+      # follow at [total, total + transparent.size). Each transparent draw indexes its slot
+      # via first_instance, exactly like an opaque group of size 1.
+      slots = total + transparent.size
+      if slots > 0
+        ensure_capacity(slots)
         @scratch.clear
         @scratch_n.clear
         @scratch_p.clear
+        pack = ->(model : Mat4, tint : Color, metallic : Float32, roughness : Float32) do
+          @scratch.concat(model.m)
+          @scratch_n.concat(model.normal_matrix.m)
+          @scratch_p.push(tint.r, tint.g, tint.b, tint.a, metallic, roughness, 0.0f32, 0.0f32)
+        end
         groups.each do |(mesh, _mat, _b, _mrt, _nt, insts)|
           insts.each do |(model, tint, metallic, roughness)|
-            @scratch.concat(model.m)
-            @scratch_n.concat(model.normal_matrix.m)
-            @scratch_p.push(tint.r, tint.g, tint.b, tint.a, metallic, roughness, 0.0f32, 0.0f32)
+            pack.call(model, tint, metallic, roughness)
             if shadow_index >= 0
               c = model.transform_point(mesh.bounds_center)
               s = model.scale_factors
@@ -1459,6 +1499,9 @@ module Flock
               bb_max = Vec3.new(Math.max(bb_max.x, c.x + r), Math.max(bb_max.y, c.y + r), Math.max(bb_max.z, c.z + r))
             end
           end
+        end
+        transparent.each do |(_mesh, _b, _mrt, _nt, model, tint, metallic, roughness, _d)|
+          pack.call(model, tint, metallic, roughness)
         end
         LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
           @scratch.to_unsafe.as(Void*), (@scratch.size * 4).to_u64)
@@ -1550,6 +1593,21 @@ module Flock
         LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 1_u32, s.skin_buf, 0_u64, s.skin_bytes)
         LibWGPU.render_pass_encoder_set_index_buffer(pass, s.mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, s.mesh.index_bytes)
         LibWGPU.render_pass_encoder_draw_indexed(pass, s.mesh.index_count, 1_u32, 0_u32, 0, 0_u32)
+      end
+
+      # Transparent pass: after all opaque geometry, draw the sorted translucent instances
+      # (back to front) with the blended pipeline (depth test on, depth-write off). Each is
+      # a single-instance draw whose first_instance points at its model/param slot.
+      unless transparent.empty?
+        LibWGPU.render_pass_encoder_set_pipeline(pass, @transparent_pipeline)
+        tslot = total.to_u32
+        transparent.each do |(mesh, base_tex, mr_tex, nrm_tex, _model, _tint, _m, _r, _d)|
+          LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(base_tex, mr_tex, nrm_tex), 0_u64, Pointer(UInt32).null)
+          LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, mesh.vertex_buf, 0_u64, mesh.vertex_bytes)
+          LibWGPU.render_pass_encoder_set_index_buffer(pass, mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, mesh.index_bytes)
+          LibWGPU.render_pass_encoder_draw_indexed(pass, mesh.index_count, 1_u32, 0_u32, 0, tslot)
+          tslot += 1
+        end
       end
 
       LibWGPU.render_pass_encoder_end(pass)
