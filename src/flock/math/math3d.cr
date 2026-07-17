@@ -8,10 +8,21 @@ module Flock
       @y = y.to_f32
     end
 
-    def +(o : Vec2); Vec2.new(@x + o.x, @y + o.y); end
-    def -(o : Vec2); Vec2.new(@x - o.x, @y - o.y); end
-    def *(s : Number); Vec2.new(@x * s, @y * s); end
-    def /(s : Number); Vec2.new(@x / s, @y / s); end
+    def +(o : Vec2)
+      Vec2.new(@x + o.x, @y + o.y)
+    end
+
+    def -(o : Vec2)
+      Vec2.new(@x - o.x, @y - o.y)
+    end
+
+    def *(s : Number)
+      Vec2.new(@x * s, @y * s)
+    end
+
+    def /(s : Number)
+      Vec2.new(@x / s, @y / s)
+    end
 
     def dot(o : Vec2) : Float32
       @x * o.x + @y * o.y
@@ -45,9 +56,21 @@ module Flock
       @z = z.to_f32
     end
 
-    def +(o : Vec3); Vec3.new(@x + o.x, @y + o.y, @z + o.z); end
-    def -(o : Vec3); Vec3.new(@x - o.x, @y - o.y, @z - o.z); end
-    def *(s : Number); Vec3.new(@x * s, @y * s, @z * s); end
+    def +(o : Vec3)
+      Vec3.new(@x + o.x, @y + o.y, @z + o.z)
+    end
+
+    def -(o : Vec3)
+      Vec3.new(@x - o.x, @y - o.y, @z - o.z)
+    end
+
+    def *(s : Number)
+      Vec3.new(@x * s, @y * s, @z * s)
+    end
+
+    def /(s : Number)
+      Vec3.new(@x / s, @y / s, @z / s)
+    end
 
     def dot(o : Vec3) : Float32
       @x * o.x + @y * o.y + @z * o.z
@@ -55,6 +78,10 @@ module Flock
 
     def cross(o : Vec3) : Vec3
       Vec3.new(@y * o.z - @z * o.y, @z * o.x - @x * o.z, @x * o.y - @y * o.x)
+    end
+
+    def length_squared : Float32
+      dot(self)
     end
 
     def length : Float32
@@ -183,9 +210,9 @@ module Flock
       xy = xf * yf; xz = xf * zf; yz = yf * zf
       wx = wf * xf; wy = wf * yf; wz = wf * zf
       a = identity.m
-      a[0] = 1 - 2*(yy + zz); a[1] = 2*(xy + wz);     a[2] = 2*(xz - wy)
-      a[4] = 2*(xy - wz);     a[5] = 1 - 2*(xx + zz); a[6] = 2*(yz + wx)
-      a[8] = 2*(xz + wy);     a[9] = 2*(yz - wx);     a[10] = 1 - 2*(xx + yy)
+      a[0] = 1 - 2*(yy + zz); a[1] = 2*(xy + wz); a[2] = 2*(xz - wy)
+      a[4] = 2*(xy - wz); a[5] = 1 - 2*(xx + zz); a[6] = 2*(yz + wx)
+      a[8] = 2*(xz + wy); a[9] = 2*(yz - wx); a[10] = 1 - 2*(xx + yy)
       Mat4.new(a)
     end
 
@@ -223,15 +250,15 @@ module Flock
       end
       inv = 1.0f32 / det
       # N[row][col] stored column-major: res[col*4 + row].
-      res[0] = (e * i - f * h) * inv   # N00
-      res[1] = -(b * i - c * h) * inv  # N10
-      res[2] = (b * f - c * e) * inv   # N20
-      res[4] = -(d * i - f * g) * inv  # N01
-      res[5] = (a * i - c * g) * inv   # N11
-      res[6] = -(a * f - c * d) * inv  # N21
-      res[8] = (d * h - e * g) * inv   # N02
-      res[9] = -(a * h - b * g) * inv  # N12
-      res[10] = (a * e - b * d) * inv  # N22
+      res[0] = (e * i - f * h) * inv  # N00
+      res[1] = -(b * i - c * h) * inv # N10
+      res[2] = (b * f - c * e) * inv  # N20
+      res[4] = -(d * i - f * g) * inv # N01
+      res[5] = (a * i - c * g) * inv  # N11
+      res[6] = -(a * f - c * d) * inv # N21
+      res[8] = (d * h - e * g) * inv  # N02
+      res[9] = -(a * h - b * g) * inv # N12
+      res[10] = (a * e - b * d) * inv # N22
       Mat4.new(res)
     end
 
@@ -307,9 +334,17 @@ module Flock
       qz * qy * qx
     end
 
-    def +(o : Quaternion); Quaternion.new(@x + o.x, @y + o.y, @z + o.z, @w + o.w); end
-    def -(o : Quaternion); Quaternion.new(@x - o.x, @y - o.y, @z - o.z, @w - o.w); end
-    def *(s : Number); Quaternion.new(@x * s, @y * s, @z * s, @w * s); end
+    def +(o : Quaternion)
+      Quaternion.new(@x + o.x, @y + o.y, @z + o.z, @w + o.w)
+    end
+
+    def -(o : Quaternion)
+      Quaternion.new(@x - o.x, @y - o.y, @z - o.z, @w - o.w)
+    end
+
+    def *(s : Number)
+      Quaternion.new(@x * s, @y * s, @z * s, @w * s)
+    end
 
     # Hamilton product (composition of rotations): `self` after `o`.
     def *(o : Quaternion) : Quaternion

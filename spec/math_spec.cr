@@ -54,9 +54,9 @@ describe Flock::Frustum do
     vp = Flock::Mat4.perspective(0.9, 1.0, 0.1, 100.0) *
          Flock::Mat4.look_at(Flock::Vec3.new(0, 0, 5), Flock::Vec3.new(0, 0, 0), Flock::Vec3.new(0, 1, 0))
     f = Flock::Frustum.from(vp)
-    f.intersects_sphere?(Flock::Vec3.new(0, 0, 0), 1.0f32).should be_true     # in front
-    f.intersects_sphere?(Flock::Vec3.new(0, 0, 50), 1.0f32).should be_false   # behind camera
-    f.intersects_sphere?(Flock::Vec3.new(100, 0, 0), 1.0f32).should be_false  # far to the side
+    f.intersects_sphere?(Flock::Vec3.new(0, 0, 0), 1.0f32).should be_true    # in front
+    f.intersects_sphere?(Flock::Vec3.new(0, 0, 50), 1.0f32).should be_false  # behind camera
+    f.intersects_sphere?(Flock::Vec3.new(100, 0, 0), 1.0f32).should be_false # far to the side
   end
 
   it "keeps a just-off-screen sphere whose radius crosses the plane" do
@@ -79,6 +79,14 @@ describe Flock::Vec3 do
 
   it "normalize gives a unit length" do
     Flock::Vec3.new(3, 4, 0).normalize.length.should be_close(1.0f32, 1e-6)
+  end
+
+  it "division and length_squared" do
+    v = Flock::Vec3.new(6, 9, 3) / 3
+    v.x.should be_close(2.0f32, 1e-6)
+    v.y.should be_close(3.0f32, 1e-6)
+    v.z.should be_close(1.0f32, 1e-6)
+    Flock::Vec3.new(1, 2, 2).length_squared.should be_close(9.0f32, 1e-6)
   end
 end
 
