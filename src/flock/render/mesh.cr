@@ -508,30 +508,32 @@ module Flock
       # single material keeps the factors, maps, and alpha mode mutually consistent, and a
       # per-index cache avoids uploading the same image twice (e.g. shared base/emissive).
       if (mats = doc["materials"]?) && (m = mats.as_a[0]?)
-        cache = {} of Int32 => Texture
-        tex = ->(ref : JSON::Any, bit : UInt32) do
+        # Cache is keyed by (image index, sRGB) so a packed image reused as both a color and
+        # a data map gets the correct format for each role (rare, but correct).
+        cache = {} of Tuple(Int32, Bool) => Texture
+        tex = ->(ref : JSON::Any, bit : UInt32, srgb : Bool) do
           tex_coords |= bit if (ref["texCoord"]?.try(&.as_i) || 0) == 1
           ti = ref["index"].as_i
-          cache[ti] ||= gltf_texture_at(gpu, doc, buffers, dir, ti)
+          cache[{ti, srgb}] ||= gltf_texture_at(gpu, doc, buffers, dir, ti, srgb)
         end
         if pbr = m["pbrMetallicRoughness"]?
           metallic = pbr["metallicFactor"]?.try(&.as_f.to_f32) || 1.0f32
           roughness = pbr["roughnessFactor"]?.try(&.as_f.to_f32) || 1.0f32
           if bc = pbr["baseColorTexture"]?
-            base = tex.call(bc, 1_u32)
+            base = tex.call(bc, 1_u32, true) # base-color is sRGB
           end
           if m2 = pbr["metallicRoughnessTexture"]?
-            mr = tex.call(m2, 2_u32)
+            mr = tex.call(m2, 2_u32, false)
           end
         end
         if nt = m["normalTexture"]?
-          normal = tex.call(nt, 4_u32)
+          normal = tex.call(nt, 4_u32, false)
         end
         if et = m["emissiveTexture"]?
-          emissive = tex.call(et, 8_u32)
+          emissive = tex.call(et, 8_u32, true) # emissive is sRGB
         end
         if ot = m["occlusionTexture"]?
-          occlusion = tex.call(ot, 16_u32)
+          occlusion = tex.call(ot, 16_u32, false)
         end
         if ef = m["emissiveFactor"]?.try(&.as_a)
           emissive_factor = Color.new(ef[0].as_f, ef[1].as_f, ef[2].as_f)
@@ -550,10 +552,10 @@ module Flock
     end
 
     private def self.gltf_texture_at(gpu : GpuContext, doc : JSON::Any, buffers : Array(Bytes),
-                                     dir : String, ti : Int32) : Texture
+                                     dir : String, ti : Int32, srgb : Bool = false) : Texture
       tex = doc["textures"].as_a[ti]
       img = doc["images"].as_a[tex["source"].as_i]
-      gltf_load_image(gpu, doc, img, buffers, dir)
+      gltf_load_image(gpu, doc, img, buffers, dir, srgb)
     end
 
     # Finds the first material's base-color texture and decodes it (or nil if none).
@@ -565,25 +567,28 @@ module Flock
         next unless bct
         tex = doc["textures"].as_a[bct["index"].as_i]
         img = doc["images"].as_a[tex["source"].as_i]
-        return gltf_load_image(gpu, doc, img, buffers, dir)
+        return gltf_load_image(gpu, doc, img, buffers, dir, srgb: true) # base-color is sRGB
       end
       nil
     end
 
+    # `srgb: true` for color maps (base-color, emissive) so the GPU decodes their sRGB
+    # encoding to linear on sample; data maps (normal / metallic-roughness / occlusion) stay
+    # linear.
     private def self.gltf_load_image(gpu : GpuContext, doc : JSON::Any, img : JSON::Any,
-                                     buffers : Array(Bytes), dir : String) : Texture
+                                     buffers : Array(Bytes), dir : String, srgb : Bool = false) : Texture
       if uri = img["uri"]?.try(&.as_s)
         if uri.starts_with?("data:")
-          Texture.from_encoded(gpu, Base64.decode(uri.split(",", 2)[1]))
+          Texture.from_encoded(gpu, Base64.decode(uri.split(",", 2)[1]), srgb: srgb)
         else
           # Non-data URIs are percent-encoded per the glTF spec (e.g. "my%20model.png").
-          Texture.load(gpu, File.join(dir, URI.decode(uri)), SamplerFilter::Linear, SamplerWrap::Repeat)
+          Texture.load(gpu, File.join(dir, URI.decode(uri)), SamplerFilter::Linear, SamplerWrap::Repeat, srgb: srgb)
         end
       else
         bv = doc["bufferViews"].as_a[img["bufferView"].as_i]
         off = bv["byteOffset"]?.try(&.as_i) || 0
         len = bv["byteLength"].as_i
-        Texture.from_encoded(gpu, buffers[bv["buffer"].as_i][off, len])
+        Texture.from_encoded(gpu, buffers[bv["buffer"].as_i][off, len], srgb: srgb)
       end
     end
 

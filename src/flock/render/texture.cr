@@ -105,10 +105,13 @@ module Flock
     # `pixels`: RGBA8, `width * height * 4` bytes, row by row. When `mipmaps` is true a full
     # box-filtered mip chain is generated on the CPU and uploaded (reduces minification
     # aliasing for textures viewed at a distance / small on screen).
+    # `srgb: true` stores the pixels in an sRGB format so the GPU decodes to linear on
+    # sample — use it for color textures authored in sRGB (glTF base-color/emissive). Data
+    # textures (normal / metallic-roughness / occlusion) and solid colors stay linear.
     def self.from_pixels(gpu : GpuContext, width : Int, height : Int, pixels : Bytes,
                          filter : SamplerFilter = SamplerFilter::Nearest,
                          wrap : SamplerWrap = SamplerWrap::Clamp,
-                         mipmaps : Bool = false) : Texture
+                         mipmaps : Bool = false, srgb : Bool = false) : Texture
       w = width.to_u32
       h = height.to_u32
       levels = mipmaps ? mip_levels(w, h) : 1_u32
@@ -118,7 +121,7 @@ module Flock
       desc.usage = LibWGPU::TextureUsage::TextureBinding | LibWGPU::TextureUsage::CopyDst
       desc.dimension = LibWGPU::TextureDimension::N2D
       desc.size = LibWGPU::Extent3D.new(width: w, height: h, depth_or_array_layers: 1_u32)
-      desc.format = LibWGPU::TextureFormat::RGBA8Unorm
+      desc.format = srgb ? LibWGPU::TextureFormat::RGBA8UnormSrgb : LibWGPU::TextureFormat::RGBA8Unorm
       desc.mip_level_count = levels
       desc.sample_count = 1_u32
       tex = LibWGPU.device_create_texture(gpu.device, pointerof(desc))
@@ -137,6 +140,7 @@ module Flock
         ch = nh
       end
 
+      # The view must match the texture's format (Srgb view over an Srgb texture).
       view = LibWGPU.texture_create_view(tex, Pointer(LibWGPU::TextureViewDescriptor).null)
       Texture.new(tex, view, w, h, filter, wrap)
     end
@@ -152,7 +156,7 @@ module Flock
     def self.from_surface(gpu : GpuContext, surf : Pointer(LibSDL::Surface),
                           filter : SamplerFilter = SamplerFilter::Nearest,
                           wrap : SamplerWrap = SamplerWrap::Clamp,
-                          mipmaps : Bool = false) : Texture
+                          mipmaps : Bool = false, srgb : Bool = false) : Texture
       conv = LibSDL.convert_surface(surf, LibSDL::PIXELFORMAT_RGBA32)
       raise "SDL_ConvertSurface: #{String.new(LibSDL.get_error)}" if conv.null?
 
@@ -169,7 +173,7 @@ module Flock
         (pixels.to_unsafe + row * row_bytes).copy_from(src + row * pitch, row_bytes)
       end
       LibSDL.destroy_surface(conv)
-      from_pixels(gpu, w, h, pixels, filter, wrap, mipmaps)
+      from_pixels(gpu, w, h, pixels, filter, wrap, mipmaps, srgb)
     end
 
     # Loads an image (PNG, JPG…) via SDL_image, converted to RGBA8. Real images get a mip
@@ -177,10 +181,10 @@ module Flock
     def self.load(gpu : GpuContext, path : String,
                   filter : SamplerFilter = SamplerFilter::Nearest,
                   wrap : SamplerWrap = SamplerWrap::Clamp,
-                  mipmaps : Bool = true) : Texture
+                  mipmaps : Bool = true, srgb : Bool = false) : Texture
       raw = LibSDL.img_load(path.to_unsafe)
       raise "IMG_Load #{path}: #{String.new(LibSDL.get_error)}" if raw.null?
-      tex = from_surface(gpu, raw, filter, wrap, mipmaps)
+      tex = from_surface(gpu, raw, filter, wrap, mipmaps, srgb)
       LibSDL.destroy_surface(raw)
       tex
     end
@@ -190,12 +194,12 @@ module Flock
     def self.from_encoded(gpu : GpuContext, data : Bytes,
                           filter : SamplerFilter = SamplerFilter::Linear,
                           wrap : SamplerWrap = SamplerWrap::Repeat,
-                          mipmaps : Bool = true) : Texture
+                          mipmaps : Bool = true, srgb : Bool = false) : Texture
       io = LibSDL.io_from_const_mem(data.to_unsafe.as(Void*), data.size)
       raise "SDL_IOFromConstMem: #{String.new(LibSDL.get_error)}" if io.null?
       raw = LibSDL.img_load_io(io, true) # closeio: frees the stream
       raise "IMG_Load_IO: #{String.new(LibSDL.get_error)}" if raw.null?
-      tex = from_surface(gpu, raw, filter, wrap, mipmaps)
+      tex = from_surface(gpu, raw, filter, wrap, mipmaps, srgb)
       LibSDL.destroy_surface(raw)
       tex
     end
