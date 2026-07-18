@@ -11,6 +11,12 @@ module Flock
     def release_order : Int32
       0
     end
+
+    # Per-frame hook, called once each frame by the App on EVERY resource. No-op by
+    # default; Events(T) overrides it to advance its double buffer, so sending an event
+    # works without a manual `App#add_event` registration.
+    def frame_update : Nil
+    end
   end
 
   # Central ECS container: entities, component storages, resources.

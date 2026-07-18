@@ -40,9 +40,6 @@ module Flock
     # OnEnter/OnExit systems keyed by "State(S)=value".
     @on_enter : Hash(String, Array(System)) = {} of String => Array(System)
     @on_exit : Hash(String, Array(System)) = {} of String => Array(System)
-    # Event types already registered, so add_event is idempotent (a duplicate updater
-    # would double-advance the buffers and destroy the frame's events).
-    @registered_events : Set(String) = Set(String).new
 
     def initialize
       @world = World.new
@@ -106,15 +103,12 @@ module Flock
       self
     end
 
-    # Registers an event type T: creates its queue and advances it each frame (Last),
-    # so events remain readable for one extra frame (see Events(T)/EventReader).
+    # Pre-creates the event queue for T. Advancing the double buffer each frame is now
+    # automatic (World#update_events runs after Last for every event type), so this is
+    # optional — sending/reading T works without it. Kept for discoverability and to
+    # allocate the queue up front rather than lazily inside a system.
     def add_event(type : T.class) : self forall T
       @world.events(T)
-      # Idempotent: registering the same event type twice would run two updaters in Last,
-      # advancing the double buffer twice per frame and dropping that frame's events.
-      if @registered_events.add?(T.name)
-        register(Schedule::Last, ->(w : World, _c : Commands) { w.events(T).update; nil })
-      end
       self
     end
 
@@ -252,6 +246,10 @@ module Flock
       run_schedule(Schedule::Update)
       run_schedule(Schedule::Render)
       run_schedule(Schedule::Last)
+      # Advance every event queue after all systems have run this frame (events stay
+      # readable for the frame they were sent plus the next). Automatic for every event
+      # type, so `send_event` works without a prior `add_event`.
+      @world.update_events
     end
 
     # Accumulates `dt` and runs FixedUpdate as many times as the fixed step fits

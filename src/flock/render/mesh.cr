@@ -292,7 +292,10 @@ module Flock
 
       # Morph meshes (primitives with `targets`) get a dedicated mesh + captured base
       # vertices and per-target deltas, so their vertex buffer can be re-blended each frame.
-      morph_data = {} of Int32 => {Mesh, Array(Float32), Array(Array(Float32))}
+      # Keyed by mesh index -> {base vertices, indices, per-target deltas}. The Mesh (vertex
+      # buffer) is built PER referencing node below, so multiple instances of the same morph
+      # mesh deform independently.
+      morph_data = {} of Int32 => {Array(Float32), Array(UInt32), Array(Array(Float32))}
       gltf_meshes.each_with_index do |gm, mi|
         prims = gm["primitives"].as_a
         next unless prims.any? { |p| p["targets"]? }
@@ -327,7 +330,7 @@ module Flock
             end
           end
         end
-        morph_data[mi] = {build(gpu, verts, indices), verts, targets}
+        morph_data[mi] = {verts, indices, targets}
       end
 
       # One Flock Mesh per glTF mesh index (local space), built lazily. Morph meshes reuse
@@ -336,7 +339,7 @@ module Flock
       local_mesh = ->(mi : Int32) do
         built[mi] ||= begin
           if md = morph_data[mi]?
-            md[0]
+            build(gpu, md[0], md[1]) # morph source (morph nodes normally carry mesh=nil)
           else
             verts = [] of Float32
             indices = [] of UInt32
@@ -406,16 +409,19 @@ module Flock
         skins << gltf_build_skinned_part(gpu, doc, n, ni, accessors, views, buffers, color)
       end
 
-      # Morph parts: pair each morph mesh with the first node that references it (for its
-      # weights animation) and its default weights (node.weights, else mesh.weights, else 0).
+      # Morph parts: ONE per node referencing a morph mesh (not per mesh), each with its own
+      # vertex buffer + node weights, so two nodes instancing the same morph mesh with
+      # different weight animations both spawn and animate independently.
       morphs = [] of MorphPart
-      morph_data.each do |mi, (mesh, base_verts, targets)|
-        node_idx = json_nodes.index { |n| n["mesh"]?.try(&.as_i) == mi } || next
+      json_nodes.each_with_index do |n, ni|
+        mi = n["mesh"]?.try(&.as_i) || next
+        md = morph_data[mi]? || next
+        base_verts, indices, targets = md
         defaults =
-          (json_nodes[node_idx]["weights"]?.try(&.as_a) ||
+          (n["weights"]?.try(&.as_a) ||
            gltf_meshes[mi]["weights"]?.try(&.as_a) || [] of JSON::Any).map(&.as_f.to_f32)
         defaults = Array(Float32).new(targets.size, 0.0f32) if defaults.size < targets.size
-        morphs << MorphPart.new(mesh, base_verts, targets, node_idx, defaults)
+        morphs << MorphPart.new(build(gpu, base_verts, indices), base_verts, targets, ni, defaults)
       end
 
       GltfScene.new(nodes, roots, animations, skins, morphs)
@@ -447,14 +453,32 @@ module Flock
       doc["meshes"].as_a[node["mesh"].as_i]["primitives"].as_a.each do |prim|
         gltf_append_primitive(prim, Mat4.identity, doc, accessors, views, buffers, color, verts, indices)
         attrs = prim["attributes"]
-        # Only the first influence set (JOINTS_0/WEIGHTS_0, up to 4 bones/vertex) is read;
-        # JOINTS_1/WEIGHTS_1 (5–8 influences) are not supported (would need a wider vertex).
-        gltf_read_floats(accessors, views, buffers, attrs["JOINTS_0"].as_i)[0].each { |x| joints << x.to_i }
-        weights.concat(gltf_read_floats(accessors, views, buffers, attrs["WEIGHTS_0"].as_i)[0])
+        j0 = gltf_read_floats(accessors, views, buffers, attrs["JOINTS_0"].as_i)[0]
+        w0 = gltf_read_floats(accessors, views, buffers, attrs["WEIGHTS_0"].as_i)[0]
+        # A vertex may have a second influence set (JOINTS_1/WEIGHTS_1, up to 8 bones). Rather
+        # than widen the vertex + shader, reduce to the 4 most significant bones per vertex:
+        # the 5th–8th weights are tiny, so keeping the top 4 (then renormalizing below) is
+        # visually equivalent and keeps the 4-bone GPU/CPU skinning path unchanged.
+        j1 = attrs["JOINTS_1"]?.try { |a| gltf_read_floats(accessors, views, buffers, a.as_i)[0] }
+        w1 = attrs["WEIGHTS_1"]?.try { |a| gltf_read_floats(accessors, views, buffers, a.as_i)[0] }
+        vcount = w0.size // 4
+        vcount.times do |v|
+          infl = Array({Int32, Float32}).new(8)
+          4.times { |i| infl << {j0[v * 4 + i].to_i, w0[v * 4 + i]} }
+          if j1 && w1
+            4.times { |i| infl << {j1[v * 4 + i].to_i, w1[v * 4 + i]} }
+          end
+          infl.sort_by! { |(_, w)| -w } # largest weight first; keep the top 4
+          4.times do |i|
+            jt, wt = i < infl.size ? infl[i] : {0, 0.0f32}
+            joints << jt
+            weights << wt
+          end
+        end
       end
 
-      # Renormalize each vertex's 4 weights to sum to 1 (glTF permits un-normalized weights;
-      # a zero-sum vertex is left untouched). Keeps the skin from bulging/shrinking.
+      # Renormalize each vertex's (top-4) weights to sum to 1 (glTF permits un-normalized
+      # weights, and the reduction above drops a little weight). Zero-sum vertices untouched.
       vi = 0
       while vi + 3 < weights.size
         s = weights[vi] + weights[vi + 1] + weights[vi + 2] + weights[vi + 3]

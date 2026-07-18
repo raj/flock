@@ -88,6 +88,19 @@ describe "Events" do
     got.should eq([9, 9]) # still one event per frame (double-advance would drop them)
   end
 
+  it "advances event queues automatically without add_event (no accumulation)" do
+    app = Flock::App.new
+    # NOTE: no app.add_event(PingEvent) — advancement is automatic now.
+    got = [] of Int32
+    app.add_system(Flock::Schedule::Update) { |world, _c| world.send_event(PingEvent.new(5)) }
+    app.add_system(Flock::Schedule::Render) { |world, _c| world.each_event(PingEvent) { |e| got << e.n } }
+
+    app.run_headless(3)
+    # One event visible per frame. Without the automatic advance the un-registered queue
+    # would accumulate and re-deliver: [5, 5,5, 5,5,5] (six) instead of three.
+    got.should eq([5, 5, 5])
+  end
+
   it "EventReader delivers an event re-sent during read exactly once (never skipped)" do
     w = Flock::World.new
     reader = Flock::EventReader(PingEvent).new

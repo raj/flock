@@ -63,6 +63,11 @@ module Flock
       end
     end
 
+    # Called once per frame by the App (via World#update_events) on every resource.
+    def frame_update : Nil
+      update
+    end
+
     # Yields events with global index >= `from` (oldest buffer first); returns the
     # new cursor (total count). Used by EventReader.
     def read_from(from : Int32, & : T ->) : Int32
@@ -128,6 +133,13 @@ module Flock
 
     def each_event(type : T.class, & : T ->) forall T
       events(T).each { |e| yield e }
+    end
+
+    # Advances every event queue's double buffer by one frame. The App calls this once per
+    # frame after Last, so events are readable for the frame they were sent plus the next —
+    # no per-type `add_event` registration required.
+    def update_events : Nil
+      @resources.each_value(&.frame_update)
     end
   end
 end
