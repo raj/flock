@@ -107,12 +107,10 @@ class Sfx < Flock::Resource
   end
 end
 
-app = Flock::App.new
-app.add_plugin(Flock::DefaultPlugins.new("Flock — Space Invaders", 800, 600))
-app.add_state(GameState::Running)
+# --- Systems (Bevy-style: each is a top-level method registered below) ---
 
 # Escape toggles pause; losing window focus auto-pauses (window events).
-app.add_system(Flock::Schedule::First) do |world, _cmd|
+def toggle_pause(world : Flock::World, cmd : Flock::Commands)
   running = world.state(GameState).running?
   if world.resource(Flock::Input).just_pressed?(Flock::Key::Escape)
     world.set_state(running ? GameState::Paused : GameState::Running)
@@ -121,8 +119,8 @@ app.add_system(Flock::Schedule::First) do |world, _cmd|
   end
 end
 
-# On entering Paused, show a "PAUSED" overlay; on leaving, remove it (OnEnter/OnExit).
-app.add_on_enter(GameState::Paused) do |world, cmd|
+# On entering Paused, show a "PAUSED" overlay (OnEnter).
+def on_enter_paused(world : Flock::World, cmd : Flock::Commands)
   gpu = world.resource(Flock::GpuContext)
   assets = world.resource(Flock::Assets)
   font = assets.font("/System/Library/Fonts/Supplemental/Arial.ttf", 48)
@@ -134,12 +132,13 @@ rescue
   # font unavailable: skip the overlay
 end
 
-app.add_on_exit(GameState::Paused) do |world, cmd|
+# On leaving Paused, remove the "PAUSED" overlay (OnExit).
+def on_exit_paused(world : Flock::World, cmd : Flock::Commands)
   world.query(PauseText) { |e, _p| cmd.despawn(e) }
 end
 
 # --- Startup: camera, player, invader grid ---
-app.add_startup do |world, cmd|
+def setup(world : Flock::World, cmd : Flock::Commands)
   world.insert_resource(InvaderState.new)
   world.insert_resource(Sfx.new)
 
@@ -168,7 +167,7 @@ app.add_startup do |world, cmd|
 end
 
 # --- Player movement + shooting ---
-app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, cmd|
+def move_player(world : Flock::World, cmd : Flock::Commands)
   input = world.resource(Flock::Input)
   time = world.resource(Flock::Time)
   dt = time.delta.to_f32
@@ -197,7 +196,7 @@ app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, 
 end
 
 # --- Movement integration (FIXED timestep: stable speed, independent of fps) ---
-app.add_system_in_state(GameState::Running, Flock::Schedule::FixedUpdate) do |world, _cmd|
+def move_bullets(world : Flock::World, cmd : Flock::Commands)
   dt = world.resource(Flock::Time).fixed_delta.to_f32
   world.query(Flock::Transform2D, Velocity) do |_e, tf, vel|
     tf.value.position = tf.value.position + vel.value.linear * dt
@@ -205,7 +204,7 @@ app.add_system_in_state(GameState::Running, Flock::Schedule::FixedUpdate) do |wo
 end
 
 # --- Invader march (group: bounce off edges + drop down) ---
-app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, _cmd|
+def march_invaders(world : Flock::World, cmd : Flock::Commands)
   state = world.resource(InvaderState)
   dt = world.resource(Flock::Time).delta.to_f32
 
@@ -232,14 +231,14 @@ app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, 
 end
 
 # --- Cleanup of bullets that left the screen ---
-app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, cmd|
+def cull_bullets(world : Flock::World, cmd : Flock::Commands)
   world.query(Bullet, Flock::Transform2D) do |e, _b, tf|
     cmd.despawn(e) if tf.value.position.y > 320.0f32
   end
 end
 
 # --- Bullet x invader collisions (AABB) ---
-app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, cmd|
+def resolve_hits(world : Flock::World, cmd : Flock::Commands)
   bullets = [] of {Flock::Entity, Flock::Vec2, Flock::Vec2}
   world.query(Bullet, Flock::Transform2D, Flock::Sprite) do |e, _b, tf, sp|
     bullets << {e, tf.value.position, sp.value.size * 0.5f32}
@@ -263,5 +262,20 @@ app.add_system_in_state(GameState::Running, Flock::Schedule::Update) do |world, 
     end
   end
 end
+
+# --- App wiring: register the systems above (Bevy-style) ---
+app = Flock::App.new
+app.add_plugin(Flock::DefaultPlugins.new("Flock — Space Invaders", 800, 600))
+app.add_state(GameState::Running)
+
+app.add_system(Flock::Schedule::First, &->toggle_pause(Flock::World, Flock::Commands))
+app.add_on_enter(GameState::Paused, &->on_enter_paused(Flock::World, Flock::Commands))
+app.add_on_exit(GameState::Paused, &->on_exit_paused(Flock::World, Flock::Commands))
+app.add_startup(&->setup(Flock::World, Flock::Commands))
+app.add_system_in_state(GameState::Running, Flock::Schedule::Update, &->move_player(Flock::World, Flock::Commands))
+app.add_system_in_state(GameState::Running, Flock::Schedule::FixedUpdate, &->move_bullets(Flock::World, Flock::Commands))
+app.add_system_in_state(GameState::Running, Flock::Schedule::Update, &->march_invaders(Flock::World, Flock::Commands))
+app.add_system_in_state(GameState::Running, Flock::Schedule::Update, &->cull_bullets(Flock::World, Flock::Commands))
+app.add_system_in_state(GameState::Running, Flock::Schedule::Update, &->resolve_hits(Flock::World, Flock::Commands))
 
 app.run

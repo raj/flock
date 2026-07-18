@@ -108,12 +108,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 }
 WGSL
 
-app = Flock::App.new
-# Window + unified 3D-then-2D renderer: the 3D scene with a 2D HUD overlay on top.
-app.add_plugin(Flock::WindowPlugin.new("Flock — Solar System", 900, 650))
-app.add_plugin(Flock::Render2D3DPlugin.new)
-
-app.add_startup do |world, cmd|
+def setup(world : Flock::World, cmd : Flock::Commands)
   gpu = world.resource(Flock::GpuContext)
   renderer = world.resource(Flock::Renderer3D)
 
@@ -168,7 +163,7 @@ app.add_startup do |world, cmd|
 end
 
 # Advance orbits + self-rotation.
-app.add_system(Flock::Schedule::Update) do |world, _cmd|
+def advance_orbits(world : Flock::World, cmd : Flock::Commands)
   dt = world.resource(Flock::Time).delta
   world.query(Flock::Transform3D, Orbit) do |_e, tf, orb|
     o = orb.value
@@ -183,12 +178,21 @@ app.add_system(Flock::Schedule::Update) do |world, _cmd|
 end
 
 # Slowly orbit the camera around the system for a cinematic look.
-app.add_system(Flock::Schedule::Update) do |world, _cmd|
+def orbit_camera(world : Flock::World, cmd : Flock::Commands)
   t = world.resource(Flock::Time).elapsed
   world.query(CameraRig, Flock::Camera3D) do |_e, _rig, camp|
     r = 30.0
     camp.value.position = Flock::Vec3.new(Math.cos(t * 0.15) * r, 12.0, Math.sin(t * 0.15) * r)
   end
 end
+
+app = Flock::App.new
+# Window + unified 3D-then-2D renderer: the 3D scene with a 2D HUD overlay on top.
+app.add_plugin(Flock::WindowPlugin.new("Flock — Solar System", 900, 650))
+app.add_plugin(Flock::Render2D3DPlugin.new)
+
+app.add_startup(&->setup(Flock::World, Flock::Commands))
+app.add_system(Flock::Schedule::Update, &->advance_orbits(Flock::World, Flock::Commands))
+app.add_system(Flock::Schedule::Update, &->orbit_camera(Flock::World, Flock::Commands))
 
 app.run

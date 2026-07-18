@@ -26,20 +26,23 @@ fn fs_main(@builtin(position) frag : vec4<f32>) -> @location(0) vec4<f32> {
 }
 SHADER
 
-app = Flock::App.new
-app.add_plugin(Flock::WindowPlugin.new("Flock — custom shader", 800, 600))
-
-app.add_startup do |world, _cmd|
+def setup(world : Flock::World, cmd : Flock::Commands)
   gpu = world.resource(Flock::GpuContext)
   world.insert_resource(Flock::Material.new(gpu, Flock::Shader.from_source(gpu, WGSL)))
 end
 
-app.add_system(Flock::Schedule::Render) do |world, _cmd|
+def render_plasma(world : Flock::World, cmd : Flock::Commands)
   gpu = world.resource(Flock::GpuContext)
   mat = world.resource(Flock::Material)
   t = world.resource(Flock::Time).elapsed.to_f32
   mat.set_uniform([t, gpu.aspect, 0.0f32, 0.0f32])
   mat.render(gpu)
 end
+
+app = Flock::App.new
+app.add_plugin(Flock::WindowPlugin.new("Flock — custom shader", 800, 600))
+
+app.add_startup(&->setup(Flock::World, Flock::Commands))
+app.add_system(Flock::Schedule::Render, &->render_plasma(Flock::World, Flock::Commands))
 
 app.run

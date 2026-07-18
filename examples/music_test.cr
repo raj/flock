@@ -6,27 +6,42 @@
 # Exits 0 on success, 1 on failure (usable in CI once a fixture is provided).
 require "../src/flock/gpu"
 
-path = ENV["MUSIC_FILE"]? || abort("set MUSIC_FILE=/path/to/audio.(mp3|ogg|flac)")
-ok = false
+# Read-only capture: a runtime-initialized top-level constant (Bevy-style config).
+MUSIC_PATH = ENV["MUSIC_FILE"]? || abort("set MUSIC_FILE=/path/to/audio.(mp3|ogg|flac)")
 
-app = Flock::App.new
-app.add_plugin(Flock::DefaultPlugins.new("Flock — music test", 320, 240))
-app.add_startup { |_w, cmd| cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.1, 0.1, 0.12))) }
+# Mutable across-frame flag: the last observed "is the track playing?" result.
+class MusicCheck < Flock::Resource
+  property ok : Bool
 
-app.add_startup do |world, _cmd|
+  def initialize(@ok : Bool = false)
+  end
+end
+
+def setup(world : Flock::World, cmd : Flock::Commands)
+  world.insert_resource(MusicCheck.new)
+  cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.1, 0.1, 0.12)))
+end
+
+def start_music(world : Flock::World, cmd : Flock::Commands)
   music = world.resource(Flock::Music)
-  music.play(path, loop: true, volume: 0.5)
+  music.play(MUSIC_PATH, loop: true, volume: 0.5)
 end
 
 # After a few frames the streaming track must report playing.
-app.add_system(Flock::Schedule::Update) do |world, _cmd|
-  ok = world.resource(Flock::Music).playing?
+def check_playing(world : Flock::World, cmd : Flock::Commands)
+  world.resource(MusicCheck).ok = world.resource(Flock::Music).playing?
 end
+
+app = Flock::App.new
+app.add_plugin(Flock::DefaultPlugins.new("Flock — music test", 320, 240))
+app.add_startup(&->setup(Flock::World, Flock::Commands))
+app.add_startup(&->start_music(Flock::World, Flock::Commands))
+app.add_system(Flock::Schedule::Update, &->check_playing(Flock::World, Flock::Commands))
 
 app.run
 
-if ok
-  puts "OK: music track is playing (#{path})"
+if app.world.resource(MusicCheck).ok
+  puts "OK: music track is playing (#{MUSIC_PATH})"
   exit 0
 else
   puts "FAIL: music track not playing"

@@ -11,10 +11,7 @@ struct Spin
   end
 end
 
-app = Flock::App.new
-app.add_plugin(Flock::WindowPlugin.new("Flock — 3D cube", 800, 600))
-
-app.add_startup do |world, cmd|
+def setup(world : Flock::World, cmd : Flock::Commands)
   gpu = world.resource(Flock::GpuContext)
   world.insert_resource(Flock::Renderer3D.new(gpu))
   cube = Flock::Mesh.cube(gpu, Flock::Color.new(0.9, 0.5, 0.2))
@@ -26,7 +23,7 @@ app.add_startup do |world, cmd|
 end
 
 # Spin the cubes.
-app.add_system(Flock::Schedule::Update) do |world, _cmd|
+def spin_cubes(world : Flock::World, cmd : Flock::Commands)
   dt = world.resource(Flock::Time).delta.to_f32
   world.query(Flock::Transform3D, Spin) do |_e, tf, sp|
     r = tf.value.rotation
@@ -35,8 +32,15 @@ app.add_system(Flock::Schedule::Update) do |world, _cmd|
   end
 end
 
-app.add_system(Flock::Schedule::Render) do |world, _cmd|
+def render_scene(world : Flock::World, cmd : Flock::Commands)
   world.resource(Flock::Renderer3D).render(world)
 end
+
+app = Flock::App.new
+app.add_plugin(Flock::WindowPlugin.new("Flock — 3D cube", 800, 600))
+
+app.add_startup(&->setup(Flock::World, Flock::Commands))
+app.add_system(Flock::Schedule::Update, &->spin_cubes(Flock::World, Flock::Commands))
+app.add_system(Flock::Schedule::Render, &->render_scene(Flock::World, Flock::Commands))
 
 app.run

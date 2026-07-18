@@ -8,15 +8,17 @@
 require "../src/flock/gpu"
 require "./shared_scene"
 
-app = Flock::App.new
-app.add_plugin(Flock::DefaultPlugins.new("Flock — shared scene (native)", 800, 600))
-
 # Camera centered on the scene so world [0,800]×[0,600] fills the window.
-app.add_startup do |_world, cmd|
+def setup_camera(world : Flock::World, cmd : Flock::Commands)
   cmd.spawn(Flock::Camera2D.new(
     position: Flock::Vec2.new(SharedScene::WIDTH * 0.5f32, SharedScene::HEIGHT * 0.5f32),
     clear_color: Flock::Color.new(0.04, 0.04, 0.07)))
 end
+
+app = Flock::App.new
+app.add_plugin(Flock::DefaultPlugins.new("Flock — shared scene (native)", 800, 600))
+
+app.add_startup(&->setup_camera(Flock::World, Flock::Commands))
 
 # Native texture loader: load a file via SDL_image and register it in the Renderer2D bank.
 SharedScene.setup(app, ->(name : String) {

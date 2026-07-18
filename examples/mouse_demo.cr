@@ -7,16 +7,13 @@ struct Cursor
   include Flock::Component
 end
 
-app = Flock::App.new
-app.add_plugin(Flock::DefaultPlugins.new("Flock — mouse", 800, 600))
-
-app.add_startup do |_world, cmd|
+def setup(world : Flock::World, cmd : Flock::Commands)
   cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.1, 0.1, 0.15)))
   cmd.spawn(Cursor.new, Flock::Transform2D.at(0, 0),
     Flock::Sprite.new(Flock::Vec2.new(40, 40), Flock::Color::WHITE))
 end
 
-app.add_system(Flock::Schedule::Update) do |world, _cmd|
+def move_cursor(world : Flock::World, cmd : Flock::Commands)
   input = world.resource(Flock::Input)
   gpu = world.resource(Flock::GpuContext)
 
@@ -30,5 +27,11 @@ app.add_system(Flock::Schedule::Update) do |world, _cmd|
     sp.value.color = down ? Flock::Color::RED : Flock::Color::WHITE
   end
 end
+
+app = Flock::App.new
+app.add_plugin(Flock::DefaultPlugins.new("Flock — mouse", 800, 600))
+
+app.add_startup(&->setup(Flock::World, Flock::Commands))
+app.add_system(Flock::Schedule::Update, &->move_cursor(Flock::World, Flock::Commands))
 
 app.run

@@ -6,15 +6,20 @@
 #   WGPU_FRAMES=120 crystal run examples/orbit_camera.cr   # headless smoke
 require "../src/flock/gpu"
 
-app = Flock::App.new
-app.add_plugin(Flock::WindowPlugin.new("Flock — Orbit Camera", 900, 650))
-app.add_plugin(Flock::InputPlugin.new)
-app.add_plugin(Flock::Render3DPlugin.new) # MSAA 4x by default
+# Mutable camera state captured across frames (Bevy-style resource).
+class OrbitState < Flock::Resource
+  property orbit : Flock::OrbitCamera
+  property last_mouse : Flock::Vec2
 
-orbit = Flock::OrbitCamera.new(target: Flock::Vec3.new(0, 0, 0), distance: 8.0f32, yaw: 0.5f32, pitch: 0.4f32)
-last_mouse = Flock::Vec2.new
+  def initialize(@orbit : Flock::OrbitCamera, @last_mouse : Flock::Vec2)
+  end
+end
 
-app.add_startup do |world, cmd|
+def setup(world : Flock::World, cmd : Flock::Commands)
+  world.insert_resource(OrbitState.new(
+    Flock::OrbitCamera.new(target: Flock::Vec3.new(0, 0, 0), distance: 8.0f32, yaw: 0.5f32, pitch: 0.4f32),
+    Flock::Vec2.new))
+
   # A ground slab + a few cubes to look at.
   gpu = world.resource(Flock::GpuContext)
   ground = Flock::Mesh.cube(gpu, color: Flock::Color.new(0.4, 0.42, 0.5))
@@ -30,17 +35,27 @@ app.add_startup do |world, cmd|
   cmd.spawn(Flock::Camera3D.new(clear_color: Flock::Color.new(0.05, 0.06, 0.09)))
 end
 
-app.add_system(Flock::Schedule::Update) do |world, _cmd|
+# Drag to orbit, scroll to zoom.
+def orbit_camera(world : Flock::World, cmd : Flock::Commands)
+  state = world.resource(OrbitState)
   input = world.resource(Flock::Input)
   m = input.mouse_position
   if input.mouse_pressed?(Flock::MouseButton::Left)
-    orbit.rotate((m.x - last_mouse.x) * 0.008, (m.y - last_mouse.y) * 0.008)
+    state.orbit.rotate((m.x - state.last_mouse.x) * 0.008, (m.y - state.last_mouse.y) * 0.008)
   end
-  last_mouse = m
+  state.last_mouse = m
   wheel = input.mouse_wheel.y
-  orbit.dolly(1.0f32 - wheel * 0.1f32) if wheel != 0.0f32
-  world.query(Flock::Camera3D) { |_e, cam| orbit.apply(cam) }
+  state.orbit.dolly(1.0f32 - wheel * 0.1f32) if wheel != 0.0f32
+  world.query(Flock::Camera3D) { |_e, cam| state.orbit.apply(cam) }
 end
+
+app = Flock::App.new
+app.add_plugin(Flock::WindowPlugin.new("Flock — Orbit Camera", 900, 650))
+app.add_plugin(Flock::InputPlugin.new)
+app.add_plugin(Flock::Render3DPlugin.new) # MSAA 4x by default
+
+app.add_startup(&->setup(Flock::World, Flock::Commands))
+app.add_system(Flock::Schedule::Update, &->orbit_camera(Flock::World, Flock::Commands))
 
 app.run
 
