@@ -1,0 +1,11 @@
+{
+  "asset":{"version":"2.0"},
+  "scene":0,
+  "scenes":[{"nodes":[0]}],
+  "nodes":[{"mesh":0,"translation":[-1.2,0.0,0.0]}],
+  "materials":[{"pbrMetallicRoughness":{"baseColorFactor":[0.2,0.4,0.9,1.0]}}],
+  "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}],
+  "buffers":[{"uri":"data:application/octet-stream;base64,zczMvs3MzL4AAAAAzczMPs3MzL4AAAAAzczMPs3MzD4AAAAAzczMvs3MzD4AAAAAAAABAAIAAAACAAMA","byteLength":60}],
+  "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":48},{"buffer":0,"byteOffset":48,"byteLength":12}],
+  "accessors":[{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},{"bufferView":1,"componentType":5123,"count":6,"type":"SCALAR"}]
+}

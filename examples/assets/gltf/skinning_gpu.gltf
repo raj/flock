@@ -1,0 +1,33 @@
+{
+  "asset":{"version":"2.0"},
+  "scene":0,
+  "scenes":[{"nodes":[0,2]}],
+  "nodes":[
+    {"translation":[0,0,0],"children":[1]},
+    {"translation":[0,1,0]},
+    {"mesh":0,"skin":0}
+  ],
+  "skins":[{"joints":[0,1],"inverseBindMatrices":4}],
+  "meshes":[{"primitives":[{"attributes":{"POSITION":0,"JOINTS_0":1,"WEIGHTS_0":2},"indices":3}]}],
+  "animations":[{"samplers":[{"input":5,"output":6,"interpolation":"LINEAR"}],
+                 "channels":[{"sampler":0,"target":{"node":1,"path":"rotation"}}]}],
+  "buffers":[{"uri":"data:application/octet-stream;base64,zcxMvgAAAAAAAAAAzcxMPgAAAAAAAAAAzcxMPgAAAEAAAAAAzcxMvgAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAABAAIAAAACAAMAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIC/AAAAAAAAgD8AAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAPMENT/zBDU/","byteLength":324}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":48},
+    {"buffer":0,"byteOffset":48,"byteLength":32},
+    {"buffer":0,"byteOffset":80,"byteLength":64},
+    {"buffer":0,"byteOffset":144,"byteLength":12},
+    {"buffer":0,"byteOffset":156,"byteLength":128},
+    {"buffer":0,"byteOffset":284,"byteLength":8},
+    {"buffer":0,"byteOffset":292,"byteLength":32}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},
+    {"bufferView":1,"componentType":5123,"count":4,"type":"VEC4"},
+    {"bufferView":2,"componentType":5126,"count":4,"type":"VEC4"},
+    {"bufferView":3,"componentType":5123,"count":6,"type":"SCALAR"},
+    {"bufferView":4,"componentType":5126,"count":2,"type":"MAT4"},
+    {"bufferView":5,"componentType":5126,"count":2,"type":"SCALAR"},
+    {"bufferView":6,"componentType":5126,"count":2,"type":"VEC4"}
+  ]
+}

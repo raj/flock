@@ -5,55 +5,15 @@
 #
 #   crystal run examples/anim_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
-require "base64"
 
 SIZE = 128
-LE = IO::ByteFormat::LittleEndian
 
-io = IO::Memory.new
-# positions (offset 0, 48B): a small centered quad
-[-0.4f32, -0.4f32, 0.0f32, 0.4f32, -0.4f32, 0.0f32,
- 0.4f32, 0.4f32, 0.0f32, -0.4f32, 0.4f32, 0.0f32].each { |f| io.write_bytes(f, LE) }
-# indices (offset 48, 12B)
-[0u16, 1u16, 2u16, 0u16, 2u16, 3u16].each { |i| io.write_bytes(i, LE) }
-# anim input times (offset 60, 8B)
-[0.0f32, 1.0f32].each { |f| io.write_bytes(f, LE) }
-# anim output translations (offset 68, 24B): x from -1.2 to +1.2
-[-1.2f32, 0.0f32, 0.0f32, 1.2f32, 0.0f32, 0.0f32].each { |f| io.write_bytes(f, LE) }
-buf = io.to_slice
-uri = "data:application/octet-stream;base64,#{Base64.strict_encode(buf)}"
-
-json = %({
-  "asset":{"version":"2.0"},
-  "scene":0,
-  "scenes":[{"nodes":[0]}],
-  "nodes":[{"mesh":0,"translation":[-1.2,0.0,0.0]}],
-  "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1}]}],
-  "animations":[{"samplers":[{"input":2,"output":3,"interpolation":"LINEAR"}],
-                 "channels":[{"sampler":0,"target":{"node":0,"path":"translation"}}]}],
-  "buffers":[{"uri":"#{uri}","byteLength":#{buf.size}}],
-  "bufferViews":[
-    {"buffer":0,"byteOffset":0,"byteLength":48},
-    {"buffer":0,"byteOffset":48,"byteLength":12},
-    {"buffer":0,"byteOffset":60,"byteLength":8},
-    {"buffer":0,"byteOffset":68,"byteLength":24}
-  ],
-  "accessors":[
-    {"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},
-    {"bufferView":1,"componentType":5123,"count":6,"type":"SCALAR"},
-    {"bufferView":2,"componentType":5126,"count":2,"type":"SCALAR"},
-    {"bufferView":3,"componentType":5126,"count":2,"type":"VEC3"}
-  ]
-})
-
-path = File.tempname("flock_anim", ".gltf")
-File.write(path, json)
+path = "examples/assets/gltf/anim.gltf"
 
 gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 
 scene = Flock::Mesh.load_gltf_scene(gpu, path, Flock::Color.new(0.3, 0.9, 0.4))
-File.delete(path) rescue nil
 raise "expected 1 animation" unless scene.animations.size == 1
 raise "expected duration ~1s" unless (scene.animations[0].duration - 1.0f32).abs < 1e-4
 

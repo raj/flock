@@ -1,0 +1,17 @@
+{
+  "asset":{"version":"2.0"},
+  "scene":0,"scenes":[{"nodes":[0]}],
+  "nodes":[{"mesh":0}],
+  "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"targets":[{"POSITION":2}]}]}],
+  "buffers":[{"uri":"data:application/octet-stream;base64,zcxMv83MTL8AAAAAzcxMP83MTL8AAAAAzcxMP83MTD8AAAAAzcxMv83MTD8AAAAAAAABAAIAAAACAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","byteLength":108}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":48},
+    {"buffer":0,"byteOffset":48,"byteLength":12},
+    {"buffer":0,"byteOffset":60,"byteLength":48}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},
+    {"bufferView":1,"componentType":5123,"count":6,"type":"SCALAR"},
+    {"bufferView":2,"componentType":5126,"count":4,"type":"VEC3"}
+  ]
+}

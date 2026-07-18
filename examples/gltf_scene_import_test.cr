@@ -7,28 +7,7 @@
 #   crystal run examples/gltf_scene_import_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
 
-json = <<-JSON
-{
-  "asset":{"version":"2.0"},
-  "extensions":{"KHR_lights_punctual":{"lights":[
-    {"type":"directional","color":[1.0,0.1,0.1],"intensity":2.0},
-    {"type":"point","color":[0.1,1.0,0.1],"intensity":3.0,"range":5.0},
-    {"type":"spot","color":[0.1,0.1,1.0],"intensity":4.0,"range":8.0,"spot":{"innerConeAngle":0.2,"outerConeAngle":0.5}}
-  ]}},
-  "cameras":[{"type":"perspective","perspective":{"yfov":0.8,"znear":0.5,"zfar":200.0}}],
-  "nodes":[
-    {"extensions":{"KHR_lights_punctual":{"light":0}}},
-    {"translation":[1.0,2.0,3.0],"extensions":{"KHR_lights_punctual":{"light":1}}},
-    {"translation":[0.0,5.0,0.0],"extensions":{"KHR_lights_punctual":{"light":2}}},
-    {"translation":[4.0,0.0,0.0],"camera":0}
-  ],
-  "scenes":[{"nodes":[0,1,2,3]}],
-  "scene":0
-}
-JSON
-
-path = File.tempname("flock_scene", ".gltf")
-File.write(path, json)
+path = "examples/assets/gltf/gltf_scene_import.gltf"
 
 ok = true
 def check(cond, msg)
@@ -68,7 +47,6 @@ ok &&= check((cam.target.z - -1.0).abs < 1e-4, "camera aims -Z (target z=-1), go
 ok &&= check((cam.fov_y - 0.8).abs < 1e-4, "camera fov 0.8")
 ok &&= check((cam.near - 0.5).abs < 1e-4 && (cam.far - 200.0).abs < 1e-4, "camera near/far")
 
-File.delete(path)
 
 # --- End-to-end: render a white sphere lit only by the imported directional (red) light. ---
 SIZE = 64

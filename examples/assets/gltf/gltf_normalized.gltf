@@ -1,0 +1,22 @@
+{
+  "asset":{"version":"2.0"},
+  "scene":0,"scenes":[{"nodes":[0]}],
+  "nodes":[{"mesh":0,"skin":0}],
+  "skins":[{"joints":[0],"inverseBindMatrices":4}],
+  "meshes":[{"primitives":[{"attributes":{"POSITION":0,"JOINTS_0":1,"WEIGHTS_0":2},"indices":3}]}],
+  "buffers":[{"uri":"data:application/octet-stream;base64,mpkZv5qZGb8AAAAAmpkZP5qZGb8AAAAAmpkZP5qZGT8AAAAAmpkZv5qZGT8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/AAAA/wAAAP8AAAD/AAAAAAABAAIAAAACAAMAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPw==","byteLength":172}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":48},
+    {"buffer":0,"byteOffset":48,"byteLength":32},
+    {"buffer":0,"byteOffset":80,"byteLength":16},
+    {"buffer":0,"byteOffset":96,"byteLength":12},
+    {"buffer":0,"byteOffset":108,"byteLength":64}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},
+    {"bufferView":1,"componentType":5123,"count":4,"type":"VEC4"},
+    {"bufferView":2,"componentType":5121,"normalized":true,"count":4,"type":"VEC4"},
+    {"bufferView":3,"componentType":5123,"count":6,"type":"SCALAR"},
+    {"bufferView":4,"componentType":5126,"count":1,"type":"MAT4"}
+  ]
+}

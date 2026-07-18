@@ -7,32 +7,12 @@ require "../src/flock/gpu"
 
 SIZE = 128
 
-OBJ = <<-OBJ
-# unit cube, no normals
-v -0.5 -0.5 -0.5
-v  0.5 -0.5 -0.5
-v  0.5  0.5 -0.5
-v -0.5  0.5 -0.5
-v -0.5 -0.5  0.5
-v  0.5 -0.5  0.5
-v  0.5  0.5  0.5
-v -0.5  0.5  0.5
-f 1 2 3 4
-f 5 8 7 6
-f 1 5 6 2
-f 2 6 7 3
-f 3 7 8 4
-f 4 8 5 1
-OBJ
-
-path = File.tempname("flock_cube", ".obj")
-File.write(path, OBJ)
+path = "examples/assets/cube.obj"
 
 gpu = Flock.headless_context(SIZE, SIZE)
 
 renderer = Flock::Renderer3D.new(gpu)
 mesh = Flock::Mesh.load_obj(gpu, path, Flock::Color.new(0.2, 0.7, 0.9))
-File.delete(path) rescue nil
 
 world = Flock::World.new
 world.insert_resource(Flock::Time.new)

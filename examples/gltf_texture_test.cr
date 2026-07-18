@@ -6,75 +6,17 @@
 #
 #   crystal run examples/gltf_texture_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
-require "base64"
 
 SIZE = 128
-LE = IO::ByteFormat::LittleEndian
 
-# --- 2x2 green 24-bit BMP (bottom-up, rows padded to 4 bytes). ---
-def build_bmp : Bytes
-  w = 2; h = 2
-  row = w * 3
-  pad = (4 - row % 4) % 4
-  pixels = row + pad
-  img = pixels * h
-  io = IO::Memory.new
-  io.write("BM".to_slice)                 # signature
-  io.write_bytes((54 + img).to_u32, LE)   # file size
-  io.write_bytes(0_u32, LE)               # reserved
-  io.write_bytes(54_u32, LE)              # pixel data offset
-  io.write_bytes(40_u32, LE)              # DIB header size
-  io.write_bytes(w.to_i32, LE); io.write_bytes(h.to_i32, LE)
-  io.write_bytes(1_u16, LE); io.write_bytes(24_u16, LE) # planes, bpp
-  io.write_bytes(0_u32, LE)               # no compression
-  io.write_bytes(img.to_u32, LE)          # image size
-  io.write_bytes(2835_i32, LE); io.write_bytes(2835_i32, LE) # ppm
-  io.write_bytes(0_u32, LE); io.write_bytes(0_u32, LE)       # palette
-  h.times do
-    w.times { io.write_byte(0_u8); io.write_byte(255_u8); io.write_byte(0_u8) } # BGR = green
-    pad.times { io.write_byte(0_u8) }
-  end
-  io.to_slice
-end
-
-bmp_uri = "data:image/bmp;base64,#{Base64.strict_encode(build_bmp)}"
-
-# --- Geometry buffer: 4 positions (VEC3) + 4 uvs (VEC2) + 6 indices (USHORT). ---
-gio = IO::Memory.new
-[-0.6f32, -0.6f32, 0.0f32, 0.6f32, -0.6f32, 0.0f32,
- 0.6f32, 0.6f32, 0.0f32, -0.6f32, 0.6f32, 0.0f32].each { |f| gio.write_bytes(f, LE) }
-[0.0f32, 1.0f32, 1.0f32, 1.0f32, 1.0f32, 0.0f32, 0.0f32, 0.0f32].each { |f| gio.write_bytes(f, LE) }
-[0u16, 1u16, 2u16, 0u16, 2u16, 3u16].each { |i| gio.write_bytes(i, LE) }
-geom = gio.to_slice
-geom_uri = "data:application/octet-stream;base64,#{Base64.strict_encode(geom)}"
-
-json = %({
-  "asset":{"version":"2.0"},
-  "images":[{"uri":"#{bmp_uri}"}],
-  "textures":[{"source":0}],
-  "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}}],
-  "meshes":[{"primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"indices":2,"material":0}]}],
-  "buffers":[{"uri":"#{geom_uri}","byteLength":#{geom.size}}],
-  "bufferViews":[
-    {"buffer":0,"byteOffset":0,"byteLength":48},
-    {"buffer":0,"byteOffset":48,"byteLength":32},
-    {"buffer":0,"byteOffset":80,"byteLength":12}
-  ],
-  "accessors":[
-    {"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},
-    {"bufferView":1,"componentType":5126,"count":4,"type":"VEC2"},
-    {"bufferView":2,"componentType":5123,"count":6,"type":"SCALAR"}
-  ]
-})
-
-path = File.tempname("flock_tex", ".gltf")
-File.write(path, json)
+# Self-contained fixture: a quad with TEXCOORD_0 and a material whose baseColorTexture
+# is an embedded 2x2 green BMP data-URI. See examples/assets/gltf/.
+path = "examples/assets/gltf/gltf_texture.gltf"
 
 gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 
 mesh, tex = Flock::Mesh.load_gltf_textured(gpu, path, Flock::Color.new(0.9, 0.1, 0.1))
-File.delete(path) rescue nil
 abort "expected a base-color texture" unless tex
 
 world = Flock::World.new

@@ -6,38 +6,18 @@
 #
 #   crystal run examples/gltf_nodes_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
-require "base64"
 
 SIZE = 128
 
-bin_io = IO::Memory.new
-[-0.4f32, -0.4f32, 0.0f32, 0.4f32, -0.4f32, 0.0f32,
- 0.4f32, 0.4f32, 0.0f32, -0.4f32, 0.4f32, 0.0f32].each { |f| bin_io.write_bytes(f, IO::ByteFormat::LittleEndian) }
-[0u16, 1u16, 2u16, 0u16, 2u16, 3u16].each { |i| bin_io.write_bytes(i, IO::ByteFormat::LittleEndian) }
-bin = bin_io.to_slice
-b64 = Base64.strict_encode(bin)
-
-json = %({
-  "asset":{"version":"2.0"},
-  "scene":0,
-  "scenes":[{"nodes":[0]}],
-  "nodes":[{"mesh":0,"translation":[-1.2,0.0,0.0]}],
-  "materials":[{"pbrMetallicRoughness":{"baseColorFactor":[0.2,0.4,0.9,1.0]}}],
-  "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}],
-  "buffers":[{"uri":"data:application/octet-stream;base64,#{b64}","byteLength":#{bin.size}}],
-  "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":48},{"buffer":0,"byteOffset":48,"byteLength":12}],
-  "accessors":[{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},{"bufferView":1,"componentType":5123,"count":6,"type":"SCALAR"}]
-})
-
-path = File.tempname("flock_nodes", ".gltf")
-File.write(path, json)
+# Self-contained fixture: a quad placed by a node translation, referencing a blue
+# material (baseColorFactor). See examples/assets/gltf/.
+path = "examples/assets/gltf/gltf_nodes.gltf"
 
 gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 
 # RED fallback — the blue material must override it.
 mesh = Flock::Mesh.load_gltf(gpu, path, Flock::Color.new(0.9, 0.1, 0.1))
-File.delete(path) rescue nil
 
 world = Flock::World.new
 world.insert_resource(Flock::Time.new)

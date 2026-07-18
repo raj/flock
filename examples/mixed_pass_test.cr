@@ -6,46 +6,14 @@
 #
 #   crystal run examples/mixed_pass_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
-require "base64"
 
 SIZE = 64
-LE = IO::ByteFormat::LittleEndian
 
-io = IO::Memory.new
-# POSITION (0,48): a centered quad, green (via fallback color) — the morph target is zero.
-[-0.8f32, -0.8f32, 0.0f32, 0.8f32, -0.8f32, 0.0f32,
- 0.8f32, 0.8f32, 0.0f32, -0.8f32, 0.8f32, 0.0f32].each { |f| io.write_bytes(f, LE) }
-# indices (48,12)
-[0u16, 1u16, 2u16, 0u16, 2u16, 3u16].each { |i| io.write_bytes(i, LE) }
-# morph target POSITION delta (60,48): all zero (we only need a morph mesh to exist).
-12.times { io.write_bytes(0.0f32, LE) }
-buf = io.to_slice
-uri = "data:application/octet-stream;base64,#{Base64.strict_encode(buf)}"
-
-json = %({
-  "asset":{"version":"2.0"},
-  "scene":0,"scenes":[{"nodes":[0]}],
-  "nodes":[{"mesh":0}],
-  "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"targets":[{"POSITION":2}]}]}],
-  "buffers":[{"uri":"#{uri}","byteLength":#{buf.size}}],
-  "bufferViews":[
-    {"buffer":0,"byteOffset":0,"byteLength":48},
-    {"buffer":0,"byteOffset":48,"byteLength":12},
-    {"buffer":0,"byteOffset":60,"byteLength":48}
-  ],
-  "accessors":[
-    {"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},
-    {"bufferView":1,"componentType":5123,"count":6,"type":"SCALAR"},
-    {"bufferView":2,"componentType":5126,"count":4,"type":"VEC3"}
-  ]
-})
-path = File.tempname("flock_mixed", ".gltf")
-File.write(path, json)
+path = "examples/assets/gltf/mixed_pass.gltf"
 
 gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 scene = Flock::Mesh.load_gltf_scene(gpu, path, Flock::Color.new(0.1, 0.9, 0.1)) # green
-File.delete(path) rescue nil
 
 world = Flock::World.new
 world.insert_resource(Flock::Time.new)

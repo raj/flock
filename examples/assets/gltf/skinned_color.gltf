@@ -1,0 +1,25 @@
+{
+  "asset":{"version":"2.0"},
+  "scene":0,
+  "scenes":[{"nodes":[0]}],
+  "nodes":[{"mesh":0,"skin":0}],
+  "skins":[{"joints":[0],"inverseBindMatrices":5}],
+  "meshes":[{"primitives":[{"attributes":{"POSITION":0,"COLOR_0":1,"JOINTS_0":2,"WEIGHTS_0":3},"indices":4}]}],
+  "buffers":[{"uri":"data:application/octet-stream;base64,mpkZv5qZGb8AAAAAmpkZP5qZGb8AAAAAmpkZP5qZGT8AAAAAmpkZv5qZGT8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAABAAIAAAACAAMAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPw==","byteLength":268}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":48},
+    {"buffer":0,"byteOffset":48,"byteLength":48},
+    {"buffer":0,"byteOffset":96,"byteLength":32},
+    {"buffer":0,"byteOffset":128,"byteLength":64},
+    {"buffer":0,"byteOffset":192,"byteLength":12},
+    {"buffer":0,"byteOffset":204,"byteLength":64}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},
+    {"bufferView":1,"componentType":5126,"count":4,"type":"VEC3"},
+    {"bufferView":2,"componentType":5123,"count":4,"type":"VEC4"},
+    {"bufferView":3,"componentType":5126,"count":4,"type":"VEC4"},
+    {"bufferView":4,"componentType":5123,"count":6,"type":"SCALAR"},
+    {"bufferView":5,"componentType":5126,"count":1,"type":"MAT4"}
+  ]
+}

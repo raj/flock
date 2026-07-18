@@ -6,59 +6,15 @@
 #
 #   crystal run examples/morph_test.cr   # exit 0 if OK
 require "../src/flock/gpu"
-require "base64"
 
 SIZE = 128
 
-bin = IO::Memory.new
-le = IO::ByteFormat::LittleEndian
-# POSITION base (4 verts, quad on the left: x in [-1.0, -0.2]).
-[-1.0f32, -0.4f32, 0.0f32, -0.2f32, -0.4f32, 0.0f32,
- -0.2f32, 0.4f32, 0.0f32, -1.0f32, 0.4f32, 0.0f32].each { |f| bin.write_bytes(f, le) }
-# indices (2 triangles).
-[0u16, 1u16, 2u16, 0u16, 2u16, 3u16].each { |i| bin.write_bytes(i, le) }
-# morph target POSITION delta: +1.2 X for every vertex.
-[1.2f32, 0.0f32, 0.0f32, 1.2f32, 0.0f32, 0.0f32,
- 1.2f32, 0.0f32, 0.0f32, 1.2f32, 0.0f32, 0.0f32].each { |f| bin.write_bytes(f, le) }
-# animation times + weights (0 -> 1 over 1s).
-[0.0f32, 1.0f32].each { |f| bin.write_bytes(f, le) } # times
-[0.0f32, 1.0f32].each { |f| bin.write_bytes(f, le) } # weights
-data = bin.to_slice
-b64 = Base64.strict_encode(data)
-
-json = %({
-  "asset":{"version":"2.0"},
-  "scene":0,
-  "scenes":[{"nodes":[0]}],
-  "nodes":[{"mesh":0}],
-  "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"targets":[{"POSITION":2}]}]}],
-  "animations":[{"samplers":[{"input":3,"output":4,"interpolation":"LINEAR"}],
-                 "channels":[{"sampler":0,"target":{"node":0,"path":"weights"}}]}],
-  "buffers":[{"uri":"data:application/octet-stream;base64,#{b64}","byteLength":#{data.size}}],
-  "bufferViews":[
-    {"buffer":0,"byteOffset":0,"byteLength":48},
-    {"buffer":0,"byteOffset":48,"byteLength":12},
-    {"buffer":0,"byteOffset":60,"byteLength":48},
-    {"buffer":0,"byteOffset":108,"byteLength":8},
-    {"buffer":0,"byteOffset":116,"byteLength":8}
-  ],
-  "accessors":[
-    {"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},
-    {"bufferView":1,"componentType":5123,"count":6,"type":"SCALAR"},
-    {"bufferView":2,"componentType":5126,"count":4,"type":"VEC3"},
-    {"bufferView":3,"componentType":5126,"count":2,"type":"SCALAR"},
-    {"bufferView":4,"componentType":5126,"count":2,"type":"SCALAR"}
-  ]
-})
-
-path = File.tempname("flock_morph", ".gltf")
-File.write(path, json)
+path = "examples/assets/gltf/morph.gltf"
 
 gpu = Flock.headless_context(SIZE, SIZE)
 renderer = Flock::Renderer3D.new(gpu)
 
 scene = Flock::Mesh.load_gltf_scene(gpu, path, Flock::Color.new(0.9, 0.9, 0.2))
-File.delete(path) rescue nil
 raise "no morph parts parsed" if scene.morphs.empty?
 
 world = Flock::World.new

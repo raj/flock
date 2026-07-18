@@ -1,0 +1,3 @@
+{"asset":{"version":"2.0"},"buffers":[{"uri":"data:application/octet-stream;base64,mpkZv5qZGb8AAAAAmpkZP5qZGb8AAAAAmpkZP5qZGT8AAAAAmpkZv5qZGT8AAAAAAAABAAIAAAACAAMA","byteLength":60}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":48},{"buffer":0,"byteOffset":48,"byteLength":12}],
+"accessors":[{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3"},{"bufferView":1,"componentType":5123,"count":6,"type":"SCALAR"}],
+"meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1}]}]}
