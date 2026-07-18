@@ -3,11 +3,9 @@
 #   WGPU_FRAMES=5 crystal run examples/window_app.cr   # headless smoke
 require "../src/flock/gpu"
 
-app = Flock::App.new
-app.add_plugin(Flock::WindowPlugin.new("Flock — window", 800, 600))
-app.add_plugin(Flock::RenderPlugin.new)
-
-app.add_startup do |_world, cmd|
+# Startup system: spawn the camera and the scene. Named like a Bevy system, then
+# handed to `add_startup` — the App calls it once at launch with (world, commands).
+def setup(world : Flock::World, cmd : Flock::Commands)
   # Fullscreen camera centered on the origin (world is in pixels, origin = center).
   cmd.spawn(Flock::Camera2D.new(clear_color: Flock::Color.new(0.08, 0.09, 0.13)))
 
@@ -25,4 +23,8 @@ app.add_startup do |_world, cmd|
   )
 end
 
+app = Flock::App.new
+app.add_plugin(Flock::WindowPlugin.new("Flock — window", 800, 600))
+app.add_plugin(Flock::RenderPlugin.new)
+app.add_startup(&->setup(Flock::World, Flock::Commands))
 app.run
