@@ -101,6 +101,8 @@ module Flock
       end
       LibWGPU.buffer_unmap(buffer)
       LibWGPU.buffer_release(buffer)
+      LibWGPU.command_buffer_release(cmd)
+      LibWGPU.command_encoder_release(enc)
 
       Pixels.new(@width.to_i, @height.to_i, dense)
     end

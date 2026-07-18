@@ -61,7 +61,11 @@ module Flock
     def render(gpu : GpuContext = @gpu) : Nil
       st = LibWGPU::SurfaceTexture.new
       LibWGPU.surface_get_current_texture(gpu.surface, pointerof(st))
-      return unless st.status.success_optimal? || st.status.success_suboptimal?
+      unless st.status.success_optimal? || st.status.success_suboptimal?
+        # e.g. Outdated on resize: still hands back a texture that must be released.
+        LibWGPU.texture_release(st.texture) unless st.texture.null?
+        return
+      end
       target = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
 
       color = LibWGPU::RenderPassColorAttachment.new

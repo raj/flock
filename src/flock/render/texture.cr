@@ -28,6 +28,9 @@ module Flock
     # Callbacks fired on `release` (renderers register here to evict this texture's cached
     # bind groups, so releasing a dynamic texture doesn't leak them).
     @on_release = [] of ->
+    # Guards against a double release: glTF PBR loading de-duplicates textures (one packed
+    # ORM map can back several material slots), so the same Texture may be released twice.
+    @released = false
 
     def initialize(@texture : LibWGPU::Texture, @view : LibWGPU::TextureView,
                    @width : UInt32, @height : UInt32,
@@ -41,6 +44,8 @@ module Flock
     end
 
     def release : Nil
+      return if @released
+      @released = true
       @on_release.each &.call
       @on_release.clear
       LibWGPU.texture_view_release(@view)

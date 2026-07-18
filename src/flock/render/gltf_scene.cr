@@ -96,16 +96,19 @@ module Flock
     end
   end
 
-  # A node of a loaded glTF scene: base local transform (TRS) + optional mesh + children.
+  # A node of a loaded glTF scene: base local transform + optional mesh + children. A node
+  # gives EITHER a TRS (translation/rotation/scale) OR a 4x4 `matrix` (exporters emit the
+  # latter for joints/armatures); when `matrix` is set it is the local transform verbatim.
   struct GltfNode
     property translation : Vec3
     property rotation : StaticArray(Float32, 4) # quaternion xyzw
     property scale : Vec3
     property mesh : Mesh?
     property children : Array(Int32)
+    property matrix : Mat4?
 
     def initialize(@translation : Vec3, @rotation : StaticArray(Float32, 4), @scale : Vec3,
-                   @mesh : Mesh?, @children : Array(Int32))
+                   @mesh : Mesh?, @children : Array(Int32), @matrix : Mat4? = nil)
     end
   end
 
@@ -185,8 +188,14 @@ module Flock
       end
 
       locals = (0...@nodes.size).map do |i|
-        r = rots[i]
-        Mat4.translation(trans[i]) * Mat4.rotation_quaternion(r[0], r[1], r[2], r[3]) * Mat4.scale(scales[i])
+        # A matrix-form node uses its matrix verbatim (the glTF spec forbids animating it);
+        # only TRS nodes compose from the (possibly animated) translation/rotation/scale.
+        if m = @nodes[i].matrix
+          m
+        else
+          r = rots[i]
+          Mat4.translation(trans[i]) * Mat4.rotation_quaternion(r[0], r[1], r[2], r[3]) * Mat4.scale(scales[i])
+        end
       end
 
       worlds = Array(Mat4).new(@nodes.size) { Mat4.identity }

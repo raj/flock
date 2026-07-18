@@ -737,25 +737,41 @@ module Flock
     # Renders the world's meshes into an arbitrary target (surface or offscreen),
     # with its own depth buffer. Used by `render` and by readback tests.
     # Aspect ratio a camera renders at: its viewport (if any), else the full framebuffer.
-    private def camera_aspect(cam : Camera3D) : Float32
+    private def camera_aspect(cam : Camera3D, fb_w : UInt32, fb_h : UInt32) : Float32
       if vp = cam.viewport
         vp.height > 0 ? vp.width / vp.height : @gpu.aspect
       else
-        @gpu.aspect
+        fb_h > 0 ? fb_w.to_f32 / fb_h.to_f32 : @gpu.aspect
       end
     end
 
-    def render_into(world : World, target : LibWGPU::TextureView) : Nil
-      ensure_depth(@gpu.width, @gpu.height)
+    # Renders into an offscreen `RenderTarget`, sizing the depth/MSAA/HDR attachments to it.
+    def render_into(world : World, target : RenderTarget) : Nil
+      render_into(world, target.view, target.width, target.height)
+    end
+
+    # `width`/`height` size the depth/MSAA/HDR attachments and the default aspect; they
+    # default to the window framebuffer but must be passed the actual target size when
+    # rendering into an offscreen `RenderTarget` that differs from the window (else the
+    # depth/MSAA attachments mismatch the color target and wgpu rejects the pass).
+    def render_into(world : World, target : LibWGPU::TextureView,
+                    width : UInt32 = @gpu.width, height : UInt32 = @gpu.height) : Nil
+      ensure_depth(width, height)
 
       # Every active Camera3D, drawn in ascending `order` (split-screen / overlays / minimaps).
+      # Stable ordering on ties: `sort_by!` is unstable, so key on (order, spawn index) to keep
+      # the primary camera (drives culling + the full-frame clear) deterministic.
       cameras = [] of Camera3D
-      world.query(Camera3D) { |_e, cam| cameras << cam.value if cam.value.active }
-      cameras.sort_by!(&.order)
+      world.query(Camera3D) do |_e, cam|
+        cameras << cam.value if cam.value.active
+      end
+      indexed = cameras.map_with_index { |c, idx| {c, idx} }
+      indexed.sort_by! { |(c, idx)| {c.order, idx} }
+      cameras = indexed.map { |(c, _idx)| c }
       cameras << Camera3D.new if cameras.empty?
       cam = cameras.first          # primary: drives culling + transparent sort
       single = cameras.size == 1
-      vp = cam.view_projection(camera_aspect(cam))
+      vp = cam.view_projection(camera_aspect(cam, width, height))
 
       # Globals: time (a.x), IBL flag (a.y), camera position (b.xyz), ambient sky/ground.
       t = world.resource?(Time).try(&.elapsed.to_f32) || 0.0f32
@@ -927,7 +943,7 @@ module Flock
       # draw into their viewport (split-screen / overlays). With MSAA, each pass resolves
       # the (cumulative) multisample target, so the last resolve is the full frame.
       cameras.each_with_index do |acam, ci|
-        avp = acam.view_projection(camera_aspect(acam))
+        avp = acam.view_projection(camera_aspect(acam, width, height))
         LibWGPU.queue_write_buffer(@gpu.queue, @uniform_buf, 0_u64, avp.m.to_unsafe.as(Void*), 64_u64)
         globals[4] = acam.position.x; globals[5] = acam.position.y; globals[6] = acam.position.z
         LibWGPU.queue_write_buffer(@gpu.queue, @globals_buf, 0_u64, globals.to_unsafe.as(Void*), GLOBALS_BYTES.to_u64)

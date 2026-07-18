@@ -63,7 +63,10 @@ module Flock
       end
 
       index = @sparse[id]
-      if index >= 0 && @entities[index].generation == entity.generation
+      if index >= 0
+        # The slot is occupied — an id has at most one dense entry, so overwrite it in place
+        # whether it's the same generation (update) or a stale one (replace); never push a
+        # second entry, which would orphan the old one and corrupt iteration.
         @dense[index] = component
         @entities[index] = entity
       else

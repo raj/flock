@@ -33,6 +33,11 @@ module Flock
     # Registers an already-created texture (e.g. text rendering) under a key, to
     # reuse it and release it with the others.
     def store_texture(key : String, texture : Texture) : Texture
+      # Release a different texture previously stored under this key (e.g. re-rendered text)
+      # so overwriting doesn't leak its GPU handle. Texture#release is idempotent.
+      if (old = @textures[key]?) && !old.same?(texture)
+        old.release
+      end
       @textures[key] = texture
     end
 

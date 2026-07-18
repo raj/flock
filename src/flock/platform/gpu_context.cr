@@ -34,7 +34,10 @@ module Flock
       LibWGPU.instance_release(@instance)
       LibSDL.metal_destroy_view(@view) unless @view.null?
       LibSDL.destroy_window(@window) unless @window.null?
-      LibSDL.quit
+      # Only the windowed context that initialized SDL tears it down. A headless context
+      # (null window/view, from `Flock.headless_context`) never called SDL_Init, so it must
+      # NOT quit SDL — doing so would kill a coexisting windowed app's window/input/audio.
+      LibSDL.quit unless @window.null?
     end
 
     # Reconfigures the surface to the window's current size (recovery of a

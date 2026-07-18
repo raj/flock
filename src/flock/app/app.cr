@@ -265,7 +265,9 @@ module Flock
         @accumulator -= @fixed_dt
         steps += 1
         if steps >= MAX_FIXED_STEPS
-          @accumulator = 0.0 # drop the accumulated lag (anti-spiral)
+          # Anti-spiral: drop the excess whole-step lag but KEEP the sub-step remainder,
+          # so the fixed cadence stays continuous instead of jumping after a hitch.
+          @accumulator = @accumulator % @fixed_dt
           break
         end
       end

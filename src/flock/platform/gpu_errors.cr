@@ -95,6 +95,9 @@ module Flock
       sleep(1.milliseconds)
     end
 
+    # Without this the loop could exhaust with `done == false`, and since the status still
+    # holds its optimistic default we'd return a NULL device that crashes far away later.
+    raise "Flock.request_device: timed out waiting for the device callback" unless result.done
     raise "Flock.request_device failed: #{result.status}" unless result.status.success?
     result.handle
   end

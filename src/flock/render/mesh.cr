@@ -1,5 +1,6 @@
 require "json"
 require "base64"
+require "uri"
 
 module Flock
   # A GPU mesh: interleaved vertex buffer (position + normal + color + uv0 + uv1, 13 floats
@@ -362,7 +363,14 @@ module Flock
         mi = n["mesh"]?
         mesh = (n["skin"]?.nil? && mi && !morph_data.has_key?(mi.as_i)) ? local_mesh.call(mi.as_i) : nil
         children = n["children"]?.try(&.as_a.map(&.as_i)) || [] of Int32
-        GltfNode.new(t, rot, s, mesh, children)
+        # A node may give a full column-major `matrix` instead of TRS (common for joints).
+        mat =
+          if mm = n["matrix"]?
+            a = StaticArray(Float32, 16).new(0.0f32)
+            mm.as_a.each_with_index { |v, i| a[i] = v.as_f.to_f32 }
+            Mat4.new(a)
+          end
+        GltfNode.new(t, rot, s, mesh, children, mat)
       end
 
       roots =
@@ -439,8 +447,21 @@ module Flock
       doc["meshes"].as_a[node["mesh"].as_i]["primitives"].as_a.each do |prim|
         gltf_append_primitive(prim, Mat4.identity, doc, accessors, views, buffers, color, verts, indices)
         attrs = prim["attributes"]
+        # Only the first influence set (JOINTS_0/WEIGHTS_0, up to 4 bones/vertex) is read;
+        # JOINTS_1/WEIGHTS_1 (5–8 influences) are not supported (would need a wider vertex).
         gltf_read_floats(accessors, views, buffers, attrs["JOINTS_0"].as_i)[0].each { |x| joints << x.to_i }
         weights.concat(gltf_read_floats(accessors, views, buffers, attrs["WEIGHTS_0"].as_i)[0])
+      end
+
+      # Renormalize each vertex's 4 weights to sum to 1 (glTF permits un-normalized weights;
+      # a zero-sum vertex is left untouched). Keeps the skin from bulging/shrinking.
+      vi = 0
+      while vi + 3 < weights.size
+        s = weights[vi] + weights[vi + 1] + weights[vi + 2] + weights[vi + 3]
+        if s > 0.0f32
+          weights[vi] /= s; weights[vi + 1] /= s; weights[vi + 2] /= s; weights[vi + 3] /= s
+        end
+        vi += 4
       end
 
       SkinnedPart.new(build(gpu, verts, indices), verts, joints, weights, joint_nodes, inverse_binds, node_idx)
@@ -555,7 +576,8 @@ module Flock
         if uri.starts_with?("data:")
           Texture.from_encoded(gpu, Base64.decode(uri.split(",", 2)[1]))
         else
-          Texture.load(gpu, File.join(dir, uri), SamplerFilter::Linear, SamplerWrap::Repeat)
+          # Non-data URIs are percent-encoded per the glTF spec (e.g. "my%20model.png").
+          Texture.load(gpu, File.join(dir, URI.decode(uri)), SamplerFilter::Linear, SamplerWrap::Repeat)
         end
       else
         bv = doc["bufferViews"].as_a[img["bufferView"].as_i]
@@ -751,7 +773,7 @@ module Flock
           if uri.starts_with?("data:")
             Base64.decode(uri.split(",", 2)[1])
           else
-            File.read(File.join(dir, uri)).to_slice
+            File.read(File.join(dir, URI.decode(uri))).to_slice
           end
         else
           glb_bin || raise("glTF buffer has no uri and no GLB binary chunk")
