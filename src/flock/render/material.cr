@@ -92,11 +92,8 @@ module Flock
       LibWGPU.queue_submit(gpu.queue, 1_u64, cmds.to_unsafe)
       LibWGPU.surface_present(gpu.surface)
 
-      LibWGPU.command_buffer_release(cmd)
-      LibWGPU.render_pass_encoder_release(pass)
-      LibWGPU.command_encoder_release(encoder)
-      LibWGPU.texture_view_release(target)
-      LibWGPU.texture_release(st.texture)
+      WGPU.release_pass(cmd, pass, encoder)
+      WGPU.release_surface(target, st.texture)
     end
 
     private def build_pipeline(shader : Shader) : LibWGPU::RenderPipeline

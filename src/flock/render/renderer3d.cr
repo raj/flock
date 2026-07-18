@@ -629,8 +629,7 @@ module Flock
         target = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
         render_into(world, target)
         LibWGPU.surface_present(@gpu.surface)
-        LibWGPU.texture_view_release(target)
-        LibWGPU.texture_release(st.texture)
+        WGPU.release_surface(target, st.texture)
       when .outdated?, .lost?
         # Some backends still hand back a texture with a non-success status; release it.
         LibWGPU.texture_release(st.texture) unless st.texture.null?
@@ -732,9 +731,7 @@ module Flock
       cmd = LibWGPU.command_encoder_finish(encoder, pointerof(cmd_desc))
       cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
       LibWGPU.queue_submit(@gpu.queue, 1_u64, cmds.to_unsafe)
-      LibWGPU.command_buffer_release(cmd)
-      LibWGPU.render_pass_encoder_release(pass)
-      LibWGPU.command_encoder_release(encoder)
+      WGPU.release_pass(cmd, pass, encoder)
     end
 
     # Renders the world's meshes into an arbitrary target (surface or offscreen),
@@ -1047,9 +1044,7 @@ module Flock
         cmd = LibWGPU.command_encoder_finish(encoder, pointerof(cmd_desc))
         cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
         LibWGPU.queue_submit(@gpu.queue, 1_u64, cmds.to_unsafe)
-        LibWGPU.command_buffer_release(cmd)
-        LibWGPU.render_pass_encoder_release(pass)
-        LibWGPU.command_encoder_release(encoder)
+        WGPU.release_pass(cmd, pass, encoder)
       end
 
       # Post pass (once, whole frame): tonemap the HDR target into `target`.
@@ -1077,9 +1072,7 @@ module Flock
         pcmd = LibWGPU.command_encoder_finish(pencoder, pointerof(pcmd_desc))
         pcmds = StaticArray(LibWGPU::CommandBuffer, 1).new(pcmd)
         LibWGPU.queue_submit(@gpu.queue, 1_u64, pcmds.to_unsafe)
-        LibWGPU.command_buffer_release(pcmd)
-        LibWGPU.render_pass_encoder_release(post)
-        LibWGPU.command_encoder_release(pencoder)
+        WGPU.release_pass(pcmd, post, pencoder)
       end
     end
   end

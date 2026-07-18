@@ -470,8 +470,7 @@ module Flock
         target = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
         render_into(target, @gpu.width, @gpu.height, world)
         LibWGPU.surface_present(@gpu.surface)
-        LibWGPU.texture_view_release(target)
-        LibWGPU.texture_release(st.texture)
+        WGPU.release_surface(target, st.texture)
       when .outdated?, .lost?
         # Surface outdated (resize) or lost (display change): reconfigure
         # to the current size and retry on the next frame.
@@ -605,9 +604,7 @@ module Flock
         cmds = StaticArray(LibWGPU::CommandBuffer, 1).new(cmd)
         LibWGPU.queue_submit(@gpu.queue, 1_u64, cmds.to_unsafe)
 
-        LibWGPU.command_buffer_release(cmd)
-        LibWGPU.render_pass_encoder_release(pass)
-        LibWGPU.command_encoder_release(encoder)
+        WGPU.release_pass(cmd, pass, encoder)
       end
     end
   end

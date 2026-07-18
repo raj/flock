@@ -39,8 +39,7 @@ module Flock
           r3.render_into(world, view)                                            # 3D scene (clears)
           r2.render_into(view, gpu.width, gpu.height, world, load_previous: true) # 2D overlay on top
           LibWGPU.surface_present(gpu.surface)
-          LibWGPU.texture_view_release(view)
-          LibWGPU.texture_release(st.texture)
+          WGPU.release_surface(view, st.texture)
         when .outdated?, .lost?
           gpu.reconfigure_to_window
         else
