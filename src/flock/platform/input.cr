@@ -1,31 +1,45 @@
 module Flock
-  # Keyboard keys (value = SDL scancode). Extend as needed.
+  # Keyboard keys (value = SDL physical scancode, from SDL_scancode.h).
   enum Key : Int32
-    A      =  4
-    D      =  7
-    S      = 22
-    W      = 26
-    Escape = 41
-    Space  = 44
-    Right  = 79
-    Left   = 80
-    Down   = 81
-    Up     = 82
+    A =  4; B =  5; C =  6; D =  7; E =  8; F =  9; G = 10; H = 11; I = 12
+    J = 13; K = 14; L = 15; M = 16; N = 17; O = 18; P = 19; Q = 20; R = 21
+    S = 22; T = 23; U = 24; V = 25; W = 26; X = 27; Y = 28; Z = 29
+
+    Num1 = 30; Num2 = 31; Num3 = 32; Num4 = 33; Num5 = 34
+    Num6 = 35; Num7 = 36; Num8 = 37; Num9 = 38; Num0 = 39
+
+    Return    = 40; Escape = 41; Backspace = 42; Tab = 43; Space = 44
+    Minus     = 45; Equals = 46; LeftBracket = 47; RightBracket = 48
+    Comma     = 54; Period = 55; Slash = 56
+
+    F1 = 58; F2 = 59; F3 = 60; F4 = 61; F5 = 62; F6 = 63
+    F7 = 64; F8 = 65; F9 = 66; F10 = 67; F11 = 68; F12 = 69
+
+    Right = 79; Left = 80; Down = 81; Up = 82
+
+    LCtrl = 224; LShift = 225; LAlt = 226; LGui = 227
+    RCtrl = 228; RShift = 229; RAlt = 230; RGui = 231
   end
 
-  # Gamepad buttons (values = SDL_GamepadButton).
+  # Gamepad buttons (values = SDL_GamepadButton). NOTE the SDL3 ordering: the stick and
+  # shoulder buttons occupy 7..10, so the D-pad starts at 11 (this used to be wrong).
   enum Button : Int32
-    South     =  0 # A / cross
-    East      =  1 # B / circle
-    West      =  2 # X / square
-    North     =  3 # Y / triangle
-    Back      =  4
-    Guide     =  5
-    Start     =  6
-    DpadUp    =  7
-    DpadDown  =  8
-    DpadLeft  =  9
-    DpadRight = 10
+    South         =  0 # A / cross
+    East          =  1 # B / circle
+    West          =  2 # X / square
+    North         =  3 # Y / triangle
+    Back          =  4
+    Guide         =  5
+    Start         =  6
+    LeftStick     =  7
+    RightStick    =  8
+    LeftShoulder  =  9
+    RightShoulder = 10
+    DpadUp        = 11
+    DpadDown      = 12
+    DpadLeft      = 13
+    DpadRight     = 14
+    Misc1         = 15
   end
 
   # Mouse buttons (SDL index). `mask` = bit in the SDL_GetMouseState mask.
@@ -94,9 +108,11 @@ module Flock
     @window : LibSDL::Window = Pointer(Void).null.as(LibSDL::Window)
 
     # Event-driven (fed by the runner from SDL events, reset to zero at the start
-    # of each frame): wheel + typed text.
+    # of each frame): wheel, typed text, and relative mouse motion.
     @wheel : Vec2 = Vec2.new
     @text : String = ""
+    @mouse_delta : Vec2 = Vec2.new # accumulated raw (window-point) motion this frame
+    @hidpi_scale : Vec2 = Vec2.new(1.0f32, 1.0f32)
 
     def pressed?(key : Key) : Bool
       @current[key.value]
@@ -143,6 +159,40 @@ module Flock
       @wheel
     end
 
+    # Relative mouse motion accumulated over the frame, in framebuffer pixels (same space as
+    # `mouse_position`). Event-driven, so it works even when the cursor is grabbed by relative
+    # mouse mode (where `mouse_position` stops moving) — use it for look/aim.
+    def mouse_delta : Vec2
+      Vec2.new(@mouse_delta.x * @hidpi_scale.x, @mouse_delta.y * @hidpi_scale.y)
+    end
+
+    # Relative mouse mode hides and grabs the cursor and delivers motion as deltas only
+    # (`mouse_delta`); ideal for FPS-style camera control.
+    def relative_mouse_mode=(enabled : Bool) : Nil
+      LibSDL.set_window_relative_mouse_mode(@window, enabled) unless @window.null?
+    end
+
+    def relative_mouse_mode? : Bool
+      !@window.null? && LibSDL.get_window_relative_mouse_mode(@window)
+    end
+
+    def show_cursor : Nil
+      LibSDL.show_cursor
+    end
+
+    def hide_cursor : Nil
+      LibSDL.hide_cursor
+    end
+
+    def cursor_visible? : Bool
+      LibSDL.cursor_visible
+    end
+
+    # Warps the cursor to (x, y) in window points.
+    def warp_mouse(x : Number, y : Number) : Nil
+      LibSDL.warp_mouse_in_window(@window, x.to_f32, y.to_f32) unless @window.null?
+    end
+
     # Text typed during the frame (UTF-8). Requires `start_text_input`.
     def text_input : String
       @text
@@ -162,6 +212,7 @@ module Flock
     def clear_frame_events : Nil
       @wheel = Vec2.new
       @text = ""
+      @mouse_delta = Vec2.new
     end
 
     def push_wheel(x : Float32, y : Float32) : Nil
@@ -170,6 +221,41 @@ module Flock
 
     def push_text(str : String) : Nil
       @text += str
+    end
+
+    # Accumulates a MOUSE_MOTION delta (raw window points; scaled to pixels on read).
+    def push_mouse_delta(x : Float32, y : Float32) : Nil
+      @mouse_delta = Vec2.new(@mouse_delta.x + x, @mouse_delta.y + y)
+    end
+
+    # --- Gamepad hotplug (driven by GAMEPAD_ADDED/REMOVED events) ---
+
+    # Opens every gamepad already connected (called once at startup; hotplug afterwards is
+    # handled by the ADDED/REMOVED events routed here from the runner).
+    def open_connected_gamepads : Nil
+      count = 0
+      ids = LibSDL.get_gamepads(pointerof(count))
+      count.times { |i| on_gamepad_added(ids[i]) }
+      LibSDL.sdl_free(ids.as(Void*)) unless ids.null?
+    end
+
+    def on_gamepad_added(id : LibSDL::JoystickID) : Nil
+      return if @open.has_key?(id)
+      handle = LibSDL.open_gamepad(id)
+      return if handle.null?
+      @open[id] = handle
+      rebuild_gamepads
+    end
+
+    def on_gamepad_removed(id : LibSDL::JoystickID) : Nil
+      if handle = @open.delete(id)
+        LibSDL.close_gamepad(handle)
+        rebuild_gamepads
+      end
+    end
+
+    private def rebuild_gamepads : Nil
+      @gamepads = @open.map { |id, handle| Gamepad.new(handle, id) }
     end
 
     # Set by InputPlugin: allows converting window points to framebuffer pixels
@@ -191,48 +277,26 @@ module Flock
       (n...KEY_COUNT).each { |i| @current[i] = false }
 
       refresh_mouse
-      refresh_gamepads
+      # Gamepads are managed by hotplug events (on_gamepad_added/removed), not polled here;
+      # per-button/axis state is read live through the Gamepad struct.
     end
 
     private def refresh_mouse : Nil
       @mouse_previous = @mouse_current
       @mouse_current = LibSDL.get_mouse_state(out mx, out my)
       if @window.null?
+        @hidpi_scale = Vec2.new(1.0f32, 1.0f32)
         @mouse_position = Vec2.new(mx, my)
       else
-        # SDL returns window points; we convert to framebuffer pixels (HiDPI).
+        # SDL returns window points; we convert to framebuffer pixels (HiDPI). The same
+        # scale is applied to the relative motion deltas so `mouse_delta` is in pixels too.
         LibSDL.get_window_size(@window, out pw, out ph)
         LibSDL.get_window_size_in_pixels(@window, out fw, out fh)
         sx = pw > 0 ? fw.to_f32 / pw.to_f32 : 1.0f32
         sy = ph > 0 ? fh.to_f32 / ph.to_f32 : 1.0f32
+        @hidpi_scale = Vec2.new(sx, sy)
         @mouse_position = Vec2.new(mx * sx, my * sy)
       end
-    end
-
-    private def refresh_gamepads : Nil
-      count = 0
-      ids = LibSDL.get_gamepads(pointerof(count))
-      present = {} of LibSDL::JoystickID => Bool
-      count.times do |i|
-        id = ids[i]
-        present[id] = true
-        unless @open.has_key?(id)
-          handle = LibSDL.open_gamepad(id)
-          @open[id] = handle unless handle.null?
-        end
-      end
-      # Closes disconnected gamepads.
-      @open.reject! do |id, handle|
-        if present[id]?
-          false
-        else
-          LibSDL.close_gamepad(handle)
-          true
-        end
-      end
-      LibSDL.sdl_free(ids.as(Void*)) unless ids.null?
-
-      @gamepads = @open.map { |id, handle| Gamepad.new(handle, id) }
     end
   end
 
@@ -245,6 +309,7 @@ module Flock
         input.attach_window(gpu.window)
         input.start_text_input # enable reception of text events
       end
+      input.open_connected_gamepads # hotplug afterwards is event-driven
       app.world.insert_resource(input)
       app.add_system(Schedule::First) do |world, _cmd|
         world.resource(Input).refresh

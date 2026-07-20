@@ -167,6 +167,21 @@ module Flock
                 te = pointerof(event).as(Pointer(LibSDL::TextInputEvent)).value
                 inp.push_text(String.new(te.text)) unless te.text.null?
               end
+            when LibSDL::EVENT_MOUSE_MOTION
+              if inp = input
+                me = pointerof(event).as(Pointer(LibSDL::MouseMotionEvent)).value
+                inp.push_mouse_delta(me.xrel, me.yrel)
+              end
+            when LibSDL::EVENT_GAMEPAD_ADDED
+              if inp = input
+                ge = pointerof(event).as(Pointer(LibSDL::GamepadDeviceEvent)).value
+                inp.on_gamepad_added(ge.which)
+              end
+            when LibSDL::EVENT_GAMEPAD_REMOVED
+              if inp = input
+                ge = pointerof(event).as(Pointer(LibSDL::GamepadDeviceEvent)).value
+                inp.on_gamepad_removed(ge.which)
+              end
             when LibSDL::EVENT_WINDOW_FOCUS_GAINED
               win.try &.on_focus(true)
             when LibSDL::EVENT_WINDOW_FOCUS_LOST
