@@ -162,8 +162,8 @@ end
 app = Flock::App.new
 app.add_plugin(Flock::WindowPlugin.new("Flock - Animated Mesh Events (Fox)", 960, 640))
 app.add_plugin(Flock::InputPlugin.new)
-app.add_plugin(Flock::Render3DPlugin.new) # MSAA 4x by default
-app.add_plugin(Flock::DiagnosticsPlugin.new(overlay: true)) # FPS / triangles / draws overlay
+app.add_plugin(Flock::Render2D3DPlugin.new) # 3D scene + 2D overlay composited in one frame
+app.add_plugin(Flock::DiagnosticsPlugin.new(overlay: true)) # FPS / triangles / draws, top-left
 app.add_event(Footstep)
 
 app.add_startup(&->setup(Flock::World, Flock::Commands))
