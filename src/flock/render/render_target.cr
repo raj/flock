@@ -93,6 +93,13 @@ module Flock
 
       WGPU.map_buffer_read(@gpu.instance, buffer, size)
       mapped = LibWGPU.buffer_get_mapped_range(buffer, 0_u64, size).as(UInt8*)
+      if mapped.null?
+        LibWGPU.buffer_unmap(buffer)
+        LibWGPU.buffer_release(buffer)
+        LibWGPU.command_buffer_release(cmd)
+        LibWGPU.command_encoder_release(enc)
+        raise "RenderTarget#read: buffer_get_mapped_range returned null (buffer mapping failed)"
+      end
 
       # Densify: drop the per-row padding into a tight width*height*4 buffer.
       dense = Bytes.new((unpadded * @height).to_i)
