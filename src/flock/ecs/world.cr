@@ -101,6 +101,16 @@ module Flock
       storage(T).get?(entity)
     end
 
+    # Returns a raw `Pointer(T)` to the component's storage slot (nil if absent).
+    #
+    # ⚠ MUTATION CAVEAT (same as `query`): with struct components, the compound
+    # sugar `ptr.value.field += x` does NOT persist — Crystal mutates a temporary
+    # copy of the struct and discards it. To write back you must assign the whole
+    # value, e.g. `ptr.value.field = ptr.value.field + x`, or read the struct into
+    # a local, mutate it, then `ptr.value = local`.
+    #
+    # ⚠ The pointer is also invalidated by any structural mutation (`add`/`despawn`)
+    # that reallocates or reorders the dense arrays — do not hold it across those.
     def get_ptr(entity : Entity, type : T.class) : Pointer(T)? forall T
       storage(T).get_ptr(entity)
     end
@@ -116,6 +126,13 @@ module Flock
     # --- Resources ---------------------------------------------------------
 
     def insert_resource(resource : Resource) : Nil
+      # Release the previous resource of the same type before overwriting it, so a
+      # replaced GPU/SDL-backed resource doesn't leak its native handle. Skip when
+      # re-inserting the exact same object (releasing then keeping it would be a bug).
+      existing = @resources[resource.class.name]?
+      if existing && !existing.same?(resource) && existing.responds_to?(:release)
+        existing.release
+      end
       @resources[resource.class.name] = resource
     end
 
