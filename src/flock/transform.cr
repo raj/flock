@@ -7,26 +7,33 @@ module Flock
     property position : Vec2
     property rotation : Float32 # radians
     property scale : Vec2
+    @[JSON::Field(ignore: true)] # transient world matrix (e.g. set by HierarchyPlugin); not saved
+    property matrix_override : Mat4?
 
     def initialize(@position : Vec2 = Vec2.new, @rotation : Float32 = 0.0f32,
-                   @scale : Vec2 = Vec2.new(1, 1))
+                   @scale : Vec2 = Vec2.new(1, 1), @matrix_override : Mat4? = nil)
     end
 
     def self.at(x : Number, y : Number) : Transform2D
       new(Vec2.new(x, y))
     end
 
-    # Model matrix: translate * rotate * scale.
-    def matrix : Mat4
+    # Local (TRS) model matrix, ignoring any override: translate * rotate * scale.
+    def local_matrix : Mat4
       Mat4.translation(Vec3.new(@position.x, @position.y, 0)) *
         Mat4.rotation_z(@rotation) *
         Mat4.scale(Vec3.new(@scale.x, @scale.y, 1))
     end
+
+    # Model matrix used by the renderer: the world override if set (e.g. by a parent hierarchy),
+    # else the local matrix.
+    def matrix : Mat4
+      @matrix_override || local_matrix
+    end
   end
 
-  # 3D transform. `rotation` is Euler angles (radians, applied Z*Y*X). When
-  # `matrix_override` is set (e.g. by an animation player computing a world matrix
-  # from a node hierarchy / quaternions), `matrix` returns it verbatim.
+  # 3D transform. `rotation` is Euler angles (radians, applied Z*Y*X). When `matrix_override` is
+  # set (by an animation player or HierarchyPlugin computing a world matrix), `matrix` returns it.
   struct Transform3D
     include Component
     include JSON::Serializable
@@ -40,14 +47,16 @@ module Flock
                    @scale : Vec3 = Vec3.new(1, 1, 1), @matrix_override : Mat4? = nil)
     end
 
-    # Model matrix: the override if present, else translate * rotate(Z*Y*X) * scale.
-    def matrix : Mat4
-      if mo = @matrix_override
-        return mo
-      end
+    # Local (TRS) model matrix, ignoring any override.
+    def local_matrix : Mat4
       Mat4.translation(@position) *
         Mat4.rotation_z(@rotation.z) * Mat4.rotation_y(@rotation.y) * Mat4.rotation_x(@rotation.x) *
         Mat4.scale(@scale)
+    end
+
+    # Model matrix: the override if present, else the local matrix.
+    def matrix : Mat4
+      @matrix_override || local_matrix
     end
   end
 end
