@@ -31,6 +31,18 @@ class SaveScore < Flock::Resource
   end
 end
 
+# Uses an explicit save key (survives a Crystal-type rename).
+struct SaveTaggedThing
+  include Flock::Component
+  include Flock::Saveable
+  property n : Int32
+
+  def initialize(@n : Int32 = 0)
+  end
+
+  saveable_as "Pinned"
+end
+
 describe Flock::Scene do
   it "captures components, round-trips through JSON, and spawns into a fresh world" do
     w1 = Flock::World.new
@@ -96,6 +108,19 @@ describe Flock::Scene do
     w.query(SavePos) { |_e, p| total += 1; coords << p.value.x }
     total.should eq(1)
     coords.first.should eq(1)
+  end
+
+  it "saves under an explicit key (saveable_as), not the type name" do
+    w1 = Flock::World.new
+    e = w1.spawn
+    w1.add(e, SaveTaggedThing.new(42))
+    json = Flock::Scene.to_json(w1)
+    json.should contain(%("Pinned"))
+    json.should_not contain("SaveTaggedThing")
+
+    w2 = Flock::World.new
+    map = Flock::Scene.spawn(w2, Flock::Scene.from_json(json))
+    w2.get(map[e.id], SaveTaggedThing).not_nil!.n.should eq(42)
   end
 
   it "skips unknown component/resource types with a warning (no crash)" do

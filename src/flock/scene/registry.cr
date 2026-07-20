@@ -80,6 +80,19 @@ module Flock
     #     property target : Flock::Entity
     #     entity_fields target
     #   end
+    # Pins the name this component is saved under, independent of the Crystal type name — so a
+    # type rename doesn't invalidate existing save files. Call after `include Flock::Saveable`:
+    #
+    #   struct Position
+    #     include Flock::Component
+    #     include Flock::Saveable
+    #     saveable_as "Position"   # stays "Position" even if the struct is renamed/namespaced
+    #   end
+    macro saveable_as(key)
+      ::Flock::Scene::COMPONENTS.delete({{@type.name.stringify}}) # drop the auto type-name entry
+      ::Flock::Scene.register_component({{key}}, ::Flock::Scene::ComponentSerializerFor({{@type}}).new)
+    end
+
     macro entity_fields(*names)
       # Returns a copy with every declared entity field remapped through `map` (old id -> Entity).
       # A reference to an entity absent from the scene is left unchanged.
