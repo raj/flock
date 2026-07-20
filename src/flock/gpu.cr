@@ -31,4 +31,5 @@ require "./render/renderer3d_skin_morph"
 require "./render/render_plugin"
 
 require "./assets"
+require "./diagnostics"
 require "./default_plugins"
