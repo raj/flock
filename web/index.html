@@ -9,6 +9,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="assets/icon-180.png"><!-- iOS ignores manifest icons for A2HS -->
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <title>Flock — Web (WASM)</title>
   <style>
     html, body { height: 100%; }
@@ -22,8 +24,9 @@
              touch-action: none; max-width: 100%; height: auto; }
     #status { opacity: .7; text-align: center; }
     code { background: #1a1a26; padding: 1px 5px; border-radius: 4px; }
-    /* On small screens hide the desktop chrome and let the canvas fill the width. */
-    @media (max-width: 700px) {
+    /* On touch / small screens hide the desktop chrome and let the canvas fill the width
+       (landscape phones are 700-930px wide, so a width-only query would miss them). */
+    @media (max-width: 700px), (pointer: coarse) {
       body { justify-content: center; gap: 8px;
              padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
       h1, #desc { display: none; }

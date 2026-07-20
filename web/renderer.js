@@ -29,7 +29,11 @@ const WebGPUBackend = {
   async init(canvas, device) {
     this.device = device;
     this.canvas = canvas;
+    // Capture validation errors (which WebGPU reports asynchronously) so a partial WebView
+    // implementation triggers the WebGL2 fallback instead of silently rendering nothing.
+    device.pushErrorScope("validation");
     this.context = canvas.getContext("webgpu");
+    if (!this.context) throw new Error("WebGPU canvas context unavailable");
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.context.configure({ device, format: this.format, alphaMode: "premultiplied" });
 
@@ -84,6 +88,8 @@ const WebGPUBackend = {
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }, { binding: 1, resource: { buffer: this.instanceBuf } }],
     });
+    const err = await device.popErrorScope();
+    if (err) throw new Error("WebGPU validation error: " + err.message);
     this.resize();
   },
 
@@ -98,6 +104,7 @@ const WebGPUBackend = {
   texture(w, h, src) { return this._bind(this._mipped(w, h, src)); },
 
   draw(floats, count, groups) {
+    count = Math.min(count, MAX); // defensive: buffers are sized for MAX instances
     if (count > 0) this.device.queue.writeBuffer(this.instanceBuf, 0, floats, 0, count * FLOATS);
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginRenderPass({
@@ -245,6 +252,7 @@ const WebGL2Backend = {
     const gl = this.gl;
     gl.clearColor(CLEAR[0], CLEAR[1], CLEAR[2], CLEAR[3]);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    count = Math.min(count, MAX); // defensive: buffers are sized for MAX instances
     if (count <= 0) return;
     gl.useProgram(this.prog);
     gl.uniform2f(this.uSize, WIDTH, HEIGHT);
@@ -296,18 +304,21 @@ const WebGL2Backend = {
       if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error("shader: " + gl.getShaderInfoLog(s));
       return s;
     };
+    const vs = compile(gl.VERTEX_SHADER, vsSrc), fs = compile(gl.FRAGMENT_SHADER, fsSrc);
     const p = gl.createProgram();
-    gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
-    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
+    gl.attachShader(p, vs); gl.attachShader(p, fs);
     gl.linkProgram(p);
+    gl.deleteShader(vs); gl.deleteShader(fs); // freed once the program is deleted
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error("link: " + gl.getProgramInfoLog(p));
     return p;
   },
 };
 
-// Picks the best available backend. WebGPU is probed (adapter) BEFORE touching the canvas, so a
-// failed probe doesn't lock the canvas out of WebGL2.
-async function selectBackend(canvas) {
+// Picks the best available backend (WebGPU, else WebGL2). If WebGPU init fails after the canvas
+// has been bound to a "webgpu" context (a context type can't be released), the canvas is swapped
+// for a fresh clone so WebGL2 can bind — the failure mode of a flaky/partial WebView WebGPU.
+async function selectBackend() {
+  let canvas = document.getElementById("c");
   if (navigator.gpu) {
     try {
       const adapter = await navigator.gpu.requestAdapter();
@@ -318,6 +329,9 @@ async function selectBackend(canvas) {
       }
     } catch (e) {
       console.warn("WebGPU init failed, falling back to WebGL2:", e);
+      const fresh = canvas.cloneNode(false); // copies id/width/height, not the context
+      canvas.replaceWith(fresh);
+      canvas = fresh;
     }
   }
   await WebGL2Backend.init(canvas);
@@ -365,7 +379,9 @@ globalThis.__flockLoadImage = (url) => {
   textures.push(gfx.white());
   (async () => {
     try {
-      const bmp = await createImageBitmap(await (await fetch(url)).blob());
+      // Keep straight (non-premultiplied) alpha — the shaders premultiply, so this avoids a
+      // double-premultiply on translucent images (and keeps both backends identical).
+      const bmp = await createImageBitmap(await (await fetch(url)).blob(), { premultiplyAlpha: "none" });
       textures[id] = gfx.texture(bmp.width, bmp.height, { bitmap: bmp });
     } catch (e) { console.error("image load failed:", url, e); }
   })();
@@ -430,7 +446,12 @@ function setupVirtualControls() {
     "font:600 22px system-ui;color:#dfe;background:#ffffff1f;border:1px solid #ffffff33;border-radius:12px;" +
     "-webkit-user-select:none;user-select:none;touch-action:none;backdrop-filter:blur(2px);";
   const hold = (el, code) => {
-    const on = (e) => { e.preventDefault(); flock_key(code, 1); };
+    const on = (e) => {
+      e.preventDefault();
+      // Release implicit pointer capture so sliding onto another button fires its enter/leave.
+      try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+      flock_key(code, 1);
+    };
     const off = (e) => { e.preventDefault(); flock_key(code, 0); };
     el.addEventListener("pointerdown", on);
     ["pointerup", "pointerleave", "pointercancel"].forEach((t) => el.addEventListener(t, off));
@@ -461,9 +482,9 @@ function setupVirtualControls() {
 
 async function main() {
   const status = document.getElementById("status");
-  const canvas = document.getElementById("c");
   try {
-    gfx = await selectBackend(canvas);
+    gfx = await selectBackend();
+    const canvas = document.getElementById("c"); // fresh node if selectBackend swapped it
     textures.push(gfx.white()); // id 0 = solid white
 
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -496,6 +517,7 @@ async function main() {
     canvas.addEventListener("pointerdown", (e) => onDown(e.offsetX, e.offsetY));
     canvas.addEventListener("pointermove", (e) => onMove(e.offsetX, e.offsetY));
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp); // interrupted drag mustn't leave keys held
 
     setupVirtualControls(); // touch-only on-screen d-pad + A button
 

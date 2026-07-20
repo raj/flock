@@ -32,6 +32,10 @@ bash "$WESH/lib/js/scripts/build.sh" "$HERE/main.cr" --esm -o app.wasm "$@"
 GUARD='if (__memory.buffer.byteLength === 0) __memory = new DataView(__exports.memory.buffer); '
 perl -0pi -e "s/(__memory\.setBigUint64\(time_ptr)/${GUARD}\$1/" app.mjs
 
+# Patch: instantiate from a fetched ArrayBuffer instead of instantiateStreaming, which hard-fails
+# if the server sends app.wasm with the wrong Content-Type (a WKWebView/iOS gotcha under Capacitor).
+perl -0pi -e 's/WebAssembly\.instantiateStreaming\(fetch\(wasmSource\), imports\)/WebAssembly.instantiate(await (await fetch(wasmSource)).arrayBuffer(), imports)/' app.mjs
+
 BYTES=$(stat -f%z app.wasm 2>/dev/null || stat -c%s app.wasm)
 GZ=$(gzip -c app.wasm | wc -c | tr -d ' ')
 echo "built: web/app.wasm ($((BYTES / 1024)) KiB, ~$((GZ / 1024)) KiB gzip) + web/app.mjs (wesh: $WESH)"
