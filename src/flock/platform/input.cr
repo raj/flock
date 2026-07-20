@@ -186,6 +186,9 @@ module Flock
       n = Math.min(numkeys, KEY_COUNT)
       KEY_COUNT.times { |i| @previous[i] = @current[i] }
       n.times { |i| @current[i] = ptr[i] }
+      # Defensively clear the tail SDL didn't report (numkeys < KEY_COUNT), so no
+      # stale key state lingers past the range the backend actually filled.
+      (n...KEY_COUNT).each { |i| @current[i] = false }
 
       refresh_mouse
       refresh_gamepads
