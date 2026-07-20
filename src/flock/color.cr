@@ -1,5 +1,8 @@
+require "json"
+
 module Flock
   struct Color
+    include JSON::Serializable
     property r : Float32
     property g : Float32
     property b : Float32

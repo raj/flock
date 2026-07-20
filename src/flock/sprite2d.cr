@@ -6,6 +6,7 @@ module Flock
   # both targets. `uv_min`/`uv_size` select an atlas sub-rect; `z` is the draw order.
   struct Sprite2D
     include Component
+    include JSON::Serializable
     property size : Vec2
     property color : Color
     property texture : Int32

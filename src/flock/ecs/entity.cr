@@ -1,7 +1,10 @@
+require "json"
+
 module Flock
   # Lightweight entity: a unique ID + a generation to distinguish a recycled ID
   # from an old handle. Value type (struct): no allocation.
   struct Entity
+    include JSON::Serializable
     getter id : UInt32
     getter generation : UInt32
 

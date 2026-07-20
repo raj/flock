@@ -3,6 +3,7 @@ module Flock
   # the native renderer and the web backend.
   struct Transform2D
     include Component
+    include JSON::Serializable
     property position : Vec2
     property rotation : Float32 # radians
     property scale : Vec2
@@ -28,9 +29,11 @@ module Flock
   # from a node hierarchy / quaternions), `matrix` returns it verbatim.
   struct Transform3D
     include Component
+    include JSON::Serializable
     property position : Vec3
     property rotation : Vec3
     property scale : Vec3
+    @[JSON::Field(ignore: true)] # a transient cache; not part of the saved state
     property matrix_override : Mat4?
 
     def initialize(@position : Vec3 = Vec3.new, @rotation : Vec3 = Vec3.new,

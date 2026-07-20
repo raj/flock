@@ -17,6 +17,8 @@ require "./flock/ecs/world"
 require "./flock/ecs/commands"
 require "./flock/ecs/events"
 require "./flock/ecs/state"
+require "./flock/scene/registry"
+require "./flock/scene/scene"
 
 # App / loop / plugins (headless: no native dependency).
 require "./flock/app/schedule"

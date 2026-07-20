@@ -26,6 +26,12 @@ module Flock
       @dense.size
     end
 
+    # Yields every (entity, component) pair. Read-only (component is a copy); used by the
+    # scene/save system to snapshot a storage.
+    def each_pair(& : Entity, T ->) : Nil
+      @entities.each_with_index { |e, i| yield e, @dense[i] }
+    end
+
     # Dense index of the entity if present and of matching generation.
     def index_of?(entity : Entity) : Int32?
       id = entity.id.to_i

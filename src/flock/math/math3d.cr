@@ -1,5 +1,8 @@
+require "json"
+
 module Flock
   struct Vec2
+    include JSON::Serializable
     property x : Float32
     property y : Float32
 
@@ -46,6 +49,7 @@ module Flock
   end
 
   struct Vec3
+    include JSON::Serializable
     property x : Float32
     property y : Float32
     property z : Float32
