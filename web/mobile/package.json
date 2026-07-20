@@ -1,0 +1,21 @@
+{
+  "name": "flock-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor packaging of the Flock web (WASM) target for iOS/Android.",
+  "type": "module",
+  "scripts": {
+    "sync-web": "node sync-web.mjs",
+    "sync": "npm run sync-web && cap sync",
+    "ios": "npm run sync && cap open ios",
+    "android": "npm run sync && cap open android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.1.0",
+    "@capacitor/ios": "^6.1.0",
+    "@capacitor/android": "^6.1.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.0"
+  }
+}

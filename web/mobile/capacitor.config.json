@@ -1,0 +1,11 @@
+{
+  "appId": "dev.flock.web",
+  "appName": "Flock",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "ios": {
+    "contentInset": "never"
+  }
+}
