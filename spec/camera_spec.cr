@@ -22,4 +22,14 @@ describe Flock::Camera2D do
     w = cam.screen_to_world(Flock::Vec2.new(640, 240), 640.0f32, 480.0f32)
     w.x.should be_close(160.0f32, 1e-3) # 320 px / zoom 2 = 160 units
   end
+
+  it "is the inverse of the viewport projection for a sub-viewport camera" do
+    vp = Flock::Viewport.new(100.0f32, 50.0f32, 200.0f32, 120.0f32)
+    cam = Flock::Camera2D.new(position: Flock::Vec2.new(10, 20), viewport: vp)
+    # The viewport center in framebuffer pixels must map to the camera position.
+    center = Flock::Vec2.new(100.0f32 + 100.0f32, 50.0f32 + 60.0f32)
+    w = cam.screen_to_world(center, 640.0f32, 480.0f32)
+    w.x.should be_close(10.0f32, 1e-3)
+    w.y.should be_close(20.0f32, 1e-3)
+  end
 end

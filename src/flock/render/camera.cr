@@ -31,9 +31,17 @@ module Flock
 
     # Converts a screen position (framebuffer pixels, top-left origin) into
     # world coordinates. Analytic inverse of `view_projection` (pan/zoom/rotation).
+    # For a sub-viewport camera, `view_projection` is built from the viewport's
+    # size (see renderer2d.cr), so the inverse must map relative to the viewport's
+    # origin and dimensions rather than the whole framebuffer.
     def screen_to_world(screen : Vec2, fb_w : Float32, fb_h : Float32) : Vec2
-      dx = screen.x - fb_w * 0.5f32
-      dy = screen.y - fb_h * 0.5f32
+      vp = @viewport
+      ox = vp ? vp.x : 0.0f32
+      oy = vp ? vp.y : 0.0f32
+      vw = vp ? vp.width : fb_w
+      vh = vp ? vp.height : fb_h
+      dx = (screen.x - ox) - vw * 0.5f32
+      dy = (screen.y - oy) - vh * 0.5f32
       vx = dx / @zoom
       vy = -dy / @zoom # screen y downward -> world y upward
       c = Math.cos(@rotation)
