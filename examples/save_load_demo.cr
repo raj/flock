@@ -71,6 +71,7 @@ app = Flock::App.new
 app.add_plugin(Flock::WindowPlugin.new("Flock - Save/Load (F5 save, F9 restore)", 800, 600))
 app.add_plugin(Flock::InputPlugin.new)
 app.add_plugin(Flock::RenderPlugin.new)
+app.add_plugin(Flock::SavePlugin.new("/tmp/flock_autosave.json", interval: 15.0)) # autosave every 15s
 
 app.add_startup(&->setup(Flock::World, Flock::Commands))
 app.add_system(Flock::Schedule::Update, &->save_load(Flock::World, Flock::Commands))

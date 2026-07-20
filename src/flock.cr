@@ -25,7 +25,8 @@ require "./flock/app/schedule"
 require "./flock/app/plugin"
 require "./flock/time"
 require "./flock/app/app"
-require "./flock/hierarchy" # Parent component + HierarchyPlugin (needs Component, Plugin, Schedule)
+require "./flock/hierarchy"        # Parent component + HierarchyPlugin (needs Component, Plugin, Schedule)
+require "./flock/scene/save_plugin" # periodic autosave (needs Scene, Plugin, Time)
 
 module Flock
   VERSION = "0.1.0"
