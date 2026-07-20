@@ -71,6 +71,16 @@ module Flock
         meshes += 1
         tris += (mr.value.mesh.index_count // 3).to_i64
       end
+      # GPU-skinned and morph meshes are their own components (no MeshRenderer), so count them
+      # too — otherwise a skinned character (e.g. the fox) contributes zero triangles.
+      world.query(GpuSkinnedMesh) do |_e, sk|
+        meshes += 1
+        tris += (sk.value.mesh.index_count // 3).to_i64
+      end
+      world.query(GpuMorphMesh) do |_e, mo|
+        meshes += 1
+        tris += (mo.value.mesh.index_count // 3).to_i64
+      end
       @mesh_instances = meshes
       @triangles = tris
 
