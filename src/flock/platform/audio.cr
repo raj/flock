@@ -90,7 +90,12 @@ module Flock
       src = sound.spec
       stream = LibSDL.create_audio_stream(pointerof(src), pointerof(@spec))
       pb = Playback.new(stream, sound, loop, vol)
-      return pb if stream.null?
+      if stream.null?
+        # Stream creation failed: the handle isn't playing and isn't tracked in
+        # @playing, so mark it inactive to reflect its real state.
+        pb.active = false
+        return pb
+      end
 
       LibSDL.set_audio_stream_gain(stream, vol * @master_volume)
       LibSDL.put_audio_stream_data(stream, sound.data.to_unsafe.as(Void*), sound.data.size)
