@@ -27,6 +27,50 @@ module Flock
 
     VERSION = 1
 
+    # The version stamped into new saves and the target that `from_json` migrates up to. Defaults
+    # to the engine's VERSION; a game that changes its save schema bumps this and registers the
+    # matching migrations, so old save files upgrade transparently on load.
+    @@current_version : Int32 = VERSION
+
+    def self.current_version : Int32
+      @@current_version
+    end
+
+    def self.current_version=(v : Int32) : Int32
+      @@current_version = v
+    end
+
+    # from_version -> a function upgrading a whole scene-document JSON by exactly one version.
+    MIGRATIONS = {} of Int32 => JSON::Any -> JSON::Any
+
+    # Registers a migration that upgrades a document from `from` to `from + 1`. The block receives
+    # and returns the whole document as JSON::Any (mutate `json.as_h`, or rebuild). Example
+    # renaming a component key across every entity:
+    #
+    #   Flock::Scene.register_migration(1) do |json|
+    #     json["entities"].as_a.each do |e|
+    #       comps = e["components"].as_h
+    #       if v = comps.delete("Old"); comps["New"] = v; end
+    #     end
+    #     json
+    #   end
+    def self.register_migration(from : Int32, &block : JSON::Any -> JSON::Any) : Nil
+      MIGRATIONS[from] = block
+    end
+
+    # Applies registered migrations to bring `json` up to `to` (default: current_version). Raises
+    # if a step in the chain is missing. A document already at/above `to` is returned unchanged.
+    def self.migrate(json : JSON::Any, to : Int32 = @@current_version) : JSON::Any
+      v = json["version"]?.try(&.as_i) || 1
+      while v < to
+        mig = MIGRATIONS[v]? || raise "no scene migration from version #{v} (need to reach #{to})"
+        json = mig.call(json)
+        v += 1
+        json.as_h?.try { |h| h["version"] = JSON::Any.new(v.to_i64) }
+      end
+      json
+    end
+
     # Snapshots every registered (Saveable) component + resource in `world`.
     def self.capture(world : World) : Document
       by_entity = {} of UInt32 => Hash(String, JSON::Any)
@@ -43,7 +87,7 @@ module Flock
           resources[name] = json
         end
       end
-      Document.new(entities, resources, VERSION)
+      Document.new(entities, resources, @@current_version)
     end
 
     # Serializes the current saveable state to a JSON string / a file.
@@ -56,7 +100,8 @@ module Flock
     end
 
     def self.from_json(json : String) : Document
-      Document.from_json(json)
+      # Upgrade older saves to current_version before constructing the Document.
+      Document.from_json(migrate(JSON.parse(json)).to_json)
     end
 
     def self.load(path : String) : Document
