@@ -1,0 +1,13 @@
+{
+  "name": "Flock",
+  "short_name": "Flock",
+  "description": "A Flock game (Crystal ECS in WebAssembly).",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b0b12",
+  "theme_color": "#0b0b12",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -422,6 +422,43 @@ function pollGamepad() {
   flock_gamepad(ax, ay, mask, 1);
 }
 
+// On-screen d-pad + action button for touch devices, wired to the same arrow/space keys the game
+// already reads (a reusable template — real games remap the codes). Hidden on mouse/desktop.
+function setupVirtualControls() {
+  if (!window.matchMedia || !window.matchMedia("(pointer: coarse)").matches) return;
+  const base = "position:fixed;z-index:10;display:flex;align-items:center;justify-content:center;" +
+    "font:600 22px system-ui;color:#dfe;background:#ffffff1f;border:1px solid #ffffff33;border-radius:12px;" +
+    "-webkit-user-select:none;user-select:none;touch-action:none;backdrop-filter:blur(2px);";
+  const hold = (el, code) => {
+    const on = (e) => { e.preventDefault(); flock_key(code, 1); };
+    const off = (e) => { e.preventDefault(); flock_key(code, 0); };
+    el.addEventListener("pointerdown", on);
+    ["pointerup", "pointerleave", "pointercancel"].forEach((t) => el.addEventListener(t, off));
+  };
+  const dpad = document.createElement("div");
+  dpad.style.cssText = "position:fixed;z-index:10;width:180px;height:180px;touch-action:none;" +
+    "bottom:max(20px,env(safe-area-inset-bottom));left:max(20px,env(safe-area-inset-left));";
+  document.body.appendChild(dpad);
+  const key = (label, code, x, y) => {
+    const b = document.createElement("div");
+    b.textContent = label;
+    b.style.cssText = base + `position:absolute;width:56px;height:56px;left:${x}px;top:${y}px;`;
+    dpad.appendChild(b);
+    hold(b, code);
+  };
+  key("▲", 38, 62, 0);   // up
+  key("◀", 37, 0, 62);   // left
+  key("▶", 39, 124, 62); // right
+  key("▼", 40, 62, 124); // down
+
+  const act = document.createElement("div");
+  act.textContent = "A";
+  act.style.cssText = base + "width:72px;height:72px;border-radius:50%;" +
+    "bottom:max(28px,env(safe-area-inset-bottom));right:max(28px,env(safe-area-inset-right));";
+  document.body.appendChild(act);
+  hold(act, 32); // space
+}
+
 async function main() {
   const status = document.getElementById("status");
   const canvas = document.getElementById("c");
@@ -459,6 +496,8 @@ async function main() {
     canvas.addEventListener("pointerdown", (e) => onDown(e.offsetX, e.offsetY));
     canvas.addEventListener("pointermove", (e) => onMove(e.offsetX, e.offsetY));
     window.addEventListener("pointerup", onUp);
+
+    setupVirtualControls(); // touch-only on-screen d-pad + A button
 
     let last = performance.now();
     const loop = (now) => {

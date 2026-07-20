@@ -2,22 +2,40 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Flock — Web (WASM + WebGPU)</title>
+  <!-- viewport-fit=cover + no user zoom: full-bleed on notched phones, game-like touch. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b12">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <title>Flock — Web (WASM)</title>
   <style>
+    html, body { height: 100%; }
     body { margin: 0; background: #0b0b12; color: #cdd; font: 14px/1.5 system-ui, sans-serif;
-           display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px; }
-    h1 { font-size: 18px; font-weight: 600; margin: 0; }
-    canvas { border-radius: 8px; box-shadow: 0 8px 40px #0008; background: #070710; }
-    #status { opacity: .7; }
+           display: flex; flex-direction: column; align-items: center; gap: 12px;
+           padding: max(24px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+                    max(24px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+           overscroll-behavior: none; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+    h1 { font-size: 18px; font-weight: 600; margin: 0; text-align: center; }
+    canvas { border-radius: 8px; box-shadow: 0 8px 40px #0008; background: #070710;
+             touch-action: none; max-width: 100%; height: auto; }
+    #status { opacity: .7; text-align: center; }
     code { background: #1a1a26; padding: 1px 5px; border-radius: 4px; }
+    /* On small screens hide the desktop chrome and let the canvas fill the width. */
+    @media (max-width: 700px) {
+      body { justify-content: center; gap: 8px;
+             padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+      h1, #desc { display: none; }
+      canvas { width: 100vw; border-radius: 0; }
+    }
   </style>
 </head>
 <body>
-  <h1>Flock — ECS in WebAssembly, rendered with WebGPU</h1>
+  <h1>Flock — ECS in WebAssembly (WebGPU / WebGL2)</h1>
   <canvas id="c" width="800" height="600"></canvas>
   <div id="status">loading…</div>
-  <p>Crystal ECS core compiled to WASM (<code>web/main.cr</code>); WebGPU renderer in <code>web/renderer.js</code>.</p>
+  <p id="desc">Crystal ECS core compiled to WASM (<code>web/main.cr</code>); renderer in <code>web/renderer.js</code>.</p>
   <!-- Live-reload when served by web/dev.mjs; silently no-ops under plain static hosting. -->
   <script>try { new EventSource("/__events").onmessage = (e) => { if (e.data === "reload") location.reload(); }; } catch (_) {}</script>
   <script type="module" src="./renderer.js"></script>

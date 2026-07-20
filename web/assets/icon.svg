@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0b0b12"/>
+  <!-- three stylized birds (a flock) -->
+  <g fill="none" stroke="#7ec7ff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M120 250 L170 210 L220 250"/>
+    <path d="M210 320 L275 268 L340 320"/>
+    <path d="M300 220 L350 182 L400 220"/>
+  </g>
+</svg>
