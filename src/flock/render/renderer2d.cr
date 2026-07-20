@@ -474,9 +474,12 @@ module Flock
       when .outdated?, .lost?
         # Surface outdated (resize) or lost (display change): reconfigure
         # to the current size and retry on the next frame.
+        # Some backends still hand back a texture with a non-success status; release it.
+        LibWGPU.texture_release(st.texture) unless st.texture.null?
         @gpu.reconfigure_to_window
       else
         # Timeout / Error / transient status (e.g. 1st frame): skip this frame.
+        LibWGPU.texture_release(st.texture) unless st.texture.null?
       end
     end
 

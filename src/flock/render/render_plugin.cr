@@ -41,9 +41,12 @@ module Flock
           LibWGPU.surface_present(gpu.surface)
           WGPU.release_surface(view, st.texture)
         when .outdated?, .lost?
+          # Some backends still hand back a texture with a non-success status; release it.
+          LibWGPU.texture_release(st.texture) unless st.texture.null?
           gpu.reconfigure_to_window
         else
           # transient: skip this frame
+          LibWGPU.texture_release(st.texture) unless st.texture.null?
         end
       end
     end
