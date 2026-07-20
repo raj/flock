@@ -1,165 +1,337 @@
-// WebGPU renderer + browser services for the Flock web backend. The ECS (WASM) computes
-// sprite instances and calls globalThis.__flockDraw; we draw them as instanced textured
-// quads (with UV sub-rects / atlas support) using WebGPU. Also exposes procedural + file
-// texture loading (with mipmaps), text rasterization, WebAudio (beeps + decoded files),
-// and Web Gamepad polling used by the WASM side.
+// Renderer + browser services for the Flock web backend. The ECS (WASM) computes sprite
+// instances and calls globalThis.__flockDraw; we draw them as instanced textured quads (with UV
+// sub-rects / atlas support). Two graphics backends implement the same tiny interface
+// ({ init, resize, white, texture, draw }): WebGPU when available, else WebGL2 — so the game runs
+// on WebViews without WebGPU (older iOS/Android). The audio / text / gamepad / input / loop
+// services are backend-agnostic.
 import init, { flock_init, flock_frame, flock_key, flock_gamepad } from "./app.mjs";
 
-const WIDTH = 800, HEIGHT = 600, MAX = 512, FLOATS = 12;
-let device, context, pipeline, instanceBuf, uniformBuf, group0, format, sampler;
-let mipPipeline, mipSampler, audioCtx, masterGain;
-const textures = [];        // id -> { bindGroup }  (id 0 = solid white)
-const sounds = [];          // id -> AudioBuffer | null
+const WIDTH = 800, HEIGHT = 600, MAX = 512, FLOATS = 12, STRIDE = FLOATS * 4;
+const CLEAR = [0.04, 0.04, 0.07, 1];
+
+// Backend-agnostic state.
+const textures = [];         // id -> backend texture handle (id 0 = solid white)
+const sounds = [];           // id -> AudioBuffer | null
 const textCache = new Map(); // text string -> texture id (glyph cache)
 const playing = new Map();   // handle -> AudioBufferSourceNode
 let handleSeq = 1;
+let audioCtx, masterGain;
+let gfx = null;              // the selected graphics backend
 
-async function initGPU() {
-  if (!navigator.gpu) throw new Error("WebGPU unavailable — use Chrome (or a WebGPU-enabled browser).");
-  const adapter = await navigator.gpu.requestAdapter();
-  device = await adapter.requestDevice();
+// ============================================================ WebGPU backend
+const WebGPUBackend = {
+  name: "WebGPU",
+  device: null, context: null, canvas: null, pipeline: null, instanceBuf: null,
+  uniformBuf: null, group0: null, format: null, sampler: null, mipPipeline: null, mipSampler: null,
 
-  const canvas = document.getElementById("c");
-  context = canvas.getContext("webgpu");
-  format = navigator.gpu.getPreferredCanvasFormat();
-  context.configure({ device, format, alphaMode: "premultiplied" });
+  // `device` is created by the selector before touching the canvas, so a failed WebGPU probe
+  // never locks the canvas out of a WebGL2 fallback.
+  async init(canvas, device) {
+    this.device = device;
+    this.canvas = canvas;
+    this.context = canvas.getContext("webgpu");
+    this.format = navigator.gpu.getPreferredCanvasFormat();
+    this.context.configure({ device, format: this.format, alphaMode: "premultiplied" });
 
-  const shader = device.createShaderModule({ code: `
-    struct Globals { size : vec2<f32> };
-    @group(0) @binding(0) var<uniform> g : Globals;
-    @group(0) @binding(1) var<storage, read> inst : array<vec4<f32>>;
-    @group(1) @binding(0) var tex : texture_2d<f32>;
-    @group(1) @binding(1) var samp : sampler;
-
-    struct VSOut { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32>, @location(1) color : vec4<f32> };
-
-    @vertex
-    fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VSOut {
-      var corners = array<vec2<f32>, 6>(
-        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
-        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0));
-      let rect = inst[ii * 3u];        // x, y, w, h (pixels, top-left origin)
-      let col  = inst[ii * 3u + 1u];   // r, g, b, a
-      let uvr  = inst[ii * 3u + 2u];   // u, v, uw, uh (atlas sub-rect)
-      let c = corners[vi];
-      let p = rect.xy + c * rect.zw;
-      let ndc = vec2<f32>(p.x / g.size.x * 2.0 - 1.0, 1.0 - p.y / g.size.y * 2.0);
-      var o : VSOut;
-      o.pos = vec4<f32>(ndc, 0.0, 1.0);
-      o.uv = uvr.xy + c * uvr.zw;
-      o.color = col;
-      return o;
-    }
-
-    @fragment
-    fn fs(i : VSOut) -> @location(0) vec4<f32> {
-      let c = i.color * textureSample(tex, samp, i.uv);
-      return vec4<f32>(c.rgb * c.a, c.a); // premultiplied
-    }
-  ` });
-
-  pipeline = device.createRenderPipeline({
-    layout: "auto",
-    vertex: { module: shader, entryPoint: "vs" },
-    fragment: {
-      module: shader, entryPoint: "fs",
-      targets: [{ format, blend: {
-        color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
-        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
-      } }],
-    },
-    primitive: { topology: "triangle-list" },
-  });
-
-  sampler = device.createSampler({ magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" });
-  uniformBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  instanceBuf = device.createBuffer({ size: MAX * FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-  group0 = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [{ binding: 0, resource: { buffer: uniformBuf } }, { binding: 1, resource: { buffer: instanceBuf } }],
-  });
-  resize(); // sets canvas size (HiDPI) + uniform
-
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  masterGain = audioCtx.createGain();
-  masterGain.connect(audioCtx.destination);
-
-  textures.push({ bindGroup: makeBindGroup(makeSolid(1, 1, [255, 255, 255, 255])) }); // id 0 = white
-}
-
-// --- HiDPI canvas sizing ---
-function resize() {
-  const canvas = document.getElementById("c");
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.style.width = WIDTH + "px"; canvas.style.height = HEIGHT + "px";
-  canvas.width = Math.round(WIDTH * dpr); canvas.height = Math.round(HEIGHT * dpr);
-  // The world is WIDTH×HEIGHT; the canvas backing store is scaled by dpr, so the NDC
-  // mapping still uses logical size — draw at full backing-store resolution.
-  device.queue.writeBuffer(uniformBuf, 0, new Float32Array([WIDTH, HEIGHT, 0, 0]));
-}
-
-// --- Texture helpers ---
-function mipLevels(w, h) { return 1 + Math.floor(Math.log2(Math.max(w, h))); }
-
-function makeSolid(w, h, rgba) {
-  const tex = device.createTexture({
-    size: [w, h, 1], format: "rgba8unorm",
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-  });
-  device.queue.writeTexture({ texture: tex }, new Uint8Array(rgba), { bytesPerRow: w * 4, rowsPerImage: h }, [w, h, 1]);
-  return tex;
-}
-
-function makeBindGroup(tex) {
-  return device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(1),
-    entries: [{ binding: 0, resource: tex.createView() }, { binding: 1, resource: sampler }],
-  });
-}
-
-// Texture with a full mip chain: upload level 0 (from pixels or an ImageBitmap), then
-// generate the smaller levels on the GPU.
-function makeMipped(w, h, { pixels, bitmap }) {
-  const levels = mipLevels(w, h);
-  const tex = device.createTexture({
-    size: [w, h, 1], format: "rgba8unorm", mipLevelCount: levels,
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-  });
-  if (bitmap) device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: tex }, [w, h]);
-  else device.queue.writeTexture({ texture: tex }, pixels, { bytesPerRow: w * 4, rowsPerImage: h }, [w, h, 1]);
-  generateMips(tex, levels);
-  return tex;
-}
-
-function generateMips(tex, levels) {
-  if (!mipPipeline) {
-    const mod = device.createShaderModule({ code: `
-      @group(0) @binding(0) var t : texture_2d<f32>;
-      @group(0) @binding(1) var s : sampler;
-      struct V { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32> };
-      @vertex fn v(@builtin(vertex_index) i : u32) -> V {
-        var p = array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0), vec2<f32>(3.0,-1.0), vec2<f32>(-1.0,3.0));
-        var o : V; o.pos = vec4<f32>(p[i], 0.0, 1.0); o.uv = p[i] * vec2<f32>(0.5,-0.5) + 0.5; return o;
+    const shader = device.createShaderModule({ code: `
+      struct Globals { size : vec2<f32> };
+      @group(0) @binding(0) var<uniform> g : Globals;
+      @group(0) @binding(1) var<storage, read> inst : array<vec4<f32>>;
+      @group(1) @binding(0) var tex : texture_2d<f32>;
+      @group(1) @binding(1) var samp : sampler;
+      struct VSOut { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32>, @location(1) color : vec4<f32> };
+      @vertex
+      fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VSOut {
+        var corners = array<vec2<f32>, 6>(
+          vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
+          vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0));
+        let rect = inst[ii * 3u];
+        let col  = inst[ii * 3u + 1u];
+        let uvr  = inst[ii * 3u + 2u];
+        let c = corners[vi];
+        let p = rect.xy + c * rect.zw;
+        let ndc = vec2<f32>(p.x / g.size.x * 2.0 - 1.0, 1.0 - p.y / g.size.y * 2.0);
+        var o : VSOut;
+        o.pos = vec4<f32>(ndc, 0.0, 1.0);
+        o.uv = uvr.xy + c * uvr.zw;
+        o.color = col;
+        return o;
       }
-      @fragment fn f(inp : V) -> @location(0) vec4<f32> { return textureSample(t, s, inp.uv); }
+      @fragment
+      fn fs(i : VSOut) -> @location(0) vec4<f32> {
+        let c = i.color * textureSample(tex, samp, i.uv);
+        return vec4<f32>(c.rgb * c.a, c.a);
+      }
     ` });
-    mipPipeline = device.createRenderPipeline({ layout: "auto", vertex: { module: mod, entryPoint: "v" },
-      fragment: { module: mod, entryPoint: "f", targets: [{ format: "rgba8unorm" }] }, primitive: { topology: "triangle-list" } });
-    mipSampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
-  }
-  const enc = device.createCommandEncoder();
-  for (let l = 1; l < levels; l++) {
-    const bg = device.createBindGroup({
-      layout: mipPipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: tex.createView({ baseMipLevel: l - 1, mipLevelCount: 1 }) }, { binding: 1, resource: mipSampler }],
+
+    this.pipeline = device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module: shader, entryPoint: "vs" },
+      fragment: {
+        module: shader, entryPoint: "fs",
+        targets: [{ format: this.format, blend: {
+          color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+          alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+        } }],
+      },
+      primitive: { topology: "triangle-list" },
     });
-    const pass = enc.beginRenderPass({ colorAttachments: [{ view: tex.createView({ baseMipLevel: l, mipLevelCount: 1 }), loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 0 } }] });
-    pass.setPipeline(mipPipeline); pass.setBindGroup(0, bg); pass.draw(3); pass.end();
+
+    this.sampler = device.createSampler({ magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" });
+    this.uniformBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.instanceBuf = device.createBuffer({ size: MAX * FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.group0 = device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }, { binding: 1, resource: { buffer: this.instanceBuf } }],
+    });
+    this.resize();
+  },
+
+  resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.canvas.style.width = WIDTH + "px"; this.canvas.style.height = HEIGHT + "px";
+    this.canvas.width = Math.round(WIDTH * dpr); this.canvas.height = Math.round(HEIGHT * dpr);
+    this.device.queue.writeBuffer(this.uniformBuf, 0, new Float32Array([WIDTH, HEIGHT, 0, 0]));
+  },
+
+  white() { return this._bind(this._solid(1, 1, [255, 255, 255, 255])); },
+  texture(w, h, src) { return this._bind(this._mipped(w, h, src)); },
+
+  draw(floats, count, groups) {
+    if (count > 0) this.device.queue.writeBuffer(this.instanceBuf, 0, floats, 0, count * FLOATS);
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [{ view: this.context.getCurrentTexture().createView(),
+        clearValue: { r: CLEAR[0], g: CLEAR[1], b: CLEAR[2], a: CLEAR[3] }, loadOp: "clear", storeOp: "store" }],
+    });
+    pass.setPipeline(this.pipeline);
+    pass.setBindGroup(0, this.group0);
+    let offset = 0;
+    for (let gi = 0; gi < groups.length; gi += 2) {
+      const texId = groups[gi], n = groups[gi + 1];
+      if (n <= 0) continue;
+      pass.setBindGroup(1, textures[texId] || textures[0]);
+      pass.draw(6, n, 0, offset);
+      offset += n;
+    }
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+  },
+
+  // -- private texture helpers --
+  _bind(tex) {
+    return this.device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(1),
+      entries: [{ binding: 0, resource: tex.createView() }, { binding: 1, resource: this.sampler }],
+    });
+  },
+  _solid(w, h, rgba) {
+    const tex = this.device.createTexture({ size: [w, h, 1], format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    this.device.queue.writeTexture({ texture: tex }, new Uint8Array(rgba), { bytesPerRow: w * 4, rowsPerImage: h }, [w, h, 1]);
+    return tex;
+  },
+  _mipped(w, h, { pixels, bitmap }) {
+    const levels = 1 + Math.floor(Math.log2(Math.max(w, h)));
+    const tex = this.device.createTexture({ size: [w, h, 1], format: "rgba8unorm", mipLevelCount: levels,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+    if (bitmap) this.device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: tex }, [w, h]);
+    else this.device.queue.writeTexture({ texture: tex }, pixels, { bytesPerRow: w * 4, rowsPerImage: h }, [w, h, 1]);
+    this._genMips(tex, levels);
+    return tex;
+  },
+  _genMips(tex, levels) {
+    const device = this.device;
+    if (!this.mipPipeline) {
+      const mod = device.createShaderModule({ code: `
+        @group(0) @binding(0) var t : texture_2d<f32>;
+        @group(0) @binding(1) var s : sampler;
+        struct V { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32> };
+        @vertex fn v(@builtin(vertex_index) i : u32) -> V {
+          var p = array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0), vec2<f32>(3.0,-1.0), vec2<f32>(-1.0,3.0));
+          var o : V; o.pos = vec4<f32>(p[i], 0.0, 1.0); o.uv = p[i] * vec2<f32>(0.5,-0.5) + 0.5; return o;
+        }
+        @fragment fn f(inp : V) -> @location(0) vec4<f32> { return textureSample(t, s, inp.uv); }
+      ` });
+      this.mipPipeline = device.createRenderPipeline({ layout: "auto", vertex: { module: mod, entryPoint: "v" },
+        fragment: { module: mod, entryPoint: "f", targets: [{ format: "rgba8unorm" }] }, primitive: { topology: "triangle-list" } });
+      this.mipSampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
+    }
+    const enc = device.createCommandEncoder();
+    for (let l = 1; l < levels; l++) {
+      const bg = device.createBindGroup({ layout: this.mipPipeline.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: tex.createView({ baseMipLevel: l - 1, mipLevelCount: 1 }) }, { binding: 1, resource: this.mipSampler }] });
+      const pass = enc.beginRenderPass({ colorAttachments: [{ view: tex.createView({ baseMipLevel: l, mipLevelCount: 1 }),
+        loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 0 } }] });
+      pass.setPipeline(this.mipPipeline); pass.setBindGroup(0, bg); pass.draw(3); pass.end();
+    }
+    device.queue.submit([enc.finish()]);
+  },
+};
+
+// ============================================================ WebGL2 backend
+const WebGL2Backend = {
+  name: "WebGL2",
+  gl: null, canvas: null, prog: null, uSize: null, vao: null, quadBuf: null, instBuf: null,
+
+  async init(canvas) {
+    const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: false });
+    if (!gl) throw new Error("WebGL2 unavailable");
+    this.gl = gl; this.canvas = canvas;
+
+    // Vertex shader: per-vertex corner (0..1) + per-instance rect/color/uv -> pixel-space quad.
+    const vs = `#version 300 es
+      uniform vec2 uSize;
+      layout(location=0) in vec2 aCorner;
+      layout(location=1) in vec4 aRect;   // x, y, w, h  (per instance)
+      layout(location=2) in vec4 aColor;  // r, g, b, a  (per instance)
+      layout(location=3) in vec4 aUv;     // u, v, uw, uh (per instance)
+      out vec2 vUv; out vec4 vColor;
+      void main() {
+        vec2 p = aRect.xy + aCorner * aRect.zw;
+        vec2 ndc = vec2(p.x / uSize.x * 2.0 - 1.0, 1.0 - p.y / uSize.y * 2.0);
+        gl_Position = vec4(ndc, 0.0, 1.0);
+        vUv = aUv.xy + aCorner * aUv.zw;
+        vColor = aColor;
+      }`;
+    const fs = `#version 300 es
+      precision mediump float;
+      uniform sampler2D uTex;
+      in vec2 vUv; in vec4 vColor;
+      out vec4 o;
+      void main() {
+        vec4 c = vColor * texture(uTex, vUv);
+        o = vec4(c.rgb * c.a, c.a); // premultiplied
+      }`;
+    this.prog = this._program(vs, fs);
+    this.uSize = gl.getUniformLocation(this.prog, "uSize");
+    gl.useProgram(this.prog);
+    gl.uniform1i(gl.getUniformLocation(this.prog, "uTex"), 0);
+
+    this.vao = gl.createVertexArray();
+    gl.bindVertexArray(this.vao);
+
+    // Static unit quad (2 triangles), matching the WebGPU corner order.
+    this.quadBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    // Per-instance data (pointers re-specified per texture-group in draw, to offset).
+    this.instBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.instBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, MAX * STRIDE, gl.DYNAMIC_DRAW);
+    for (const loc of [1, 2, 3]) { gl.enableVertexAttribArray(loc); gl.vertexAttribDivisor(loc, 1); }
+
+    gl.bindVertexArray(null);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); // premultiplied
+    this.resize();
+  },
+
+  resize() {
+    const gl = this.gl, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.canvas.style.width = WIDTH + "px"; this.canvas.style.height = HEIGHT + "px";
+    this.canvas.width = Math.round(WIDTH * dpr); this.canvas.height = Math.round(HEIGHT * dpr);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+  },
+
+  white() { return this._tex(1, 1, { pixels: new Uint8Array([255, 255, 255, 255]) }, false); },
+  texture(w, h, src) { return this._tex(w, h, src, true); },
+
+  draw(floats, count, groups) {
+    const gl = this.gl;
+    gl.clearColor(CLEAR[0], CLEAR[1], CLEAR[2], CLEAR[3]);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (count <= 0) return;
+    gl.useProgram(this.prog);
+    gl.uniform2f(this.uSize, WIDTH, HEIGHT);
+    gl.bindVertexArray(this.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.instBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, floats, 0, count * FLOATS);
+    gl.activeTexture(gl.TEXTURE0);
+    let offset = 0;
+    for (let gi = 0; gi < groups.length; gi += 2) {
+      const texId = groups[gi], n = groups[gi + 1];
+      if (n <= 0) continue;
+      // WebGL2 has no baseInstance, so offset the instance attributes into the buffer instead.
+      const base = offset * STRIDE;
+      gl.vertexAttribPointer(1, 4, gl.FLOAT, false, STRIDE, base + 0);
+      gl.vertexAttribPointer(2, 4, gl.FLOAT, false, STRIDE, base + 16);
+      gl.vertexAttribPointer(3, 4, gl.FLOAT, false, STRIDE, base + 32);
+      gl.bindTexture(gl.TEXTURE_2D, textures[texId] || textures[0]);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
+      offset += n;
+    }
+    gl.bindVertexArray(null);
+  },
+
+  // -- private --
+  _tex(w, h, { pixels, bitmap }, mip) {
+    const gl = this.gl, t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); // straight alpha; shader premultiplies
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    if (bitmap) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    if (mip) {
+      gl.generateMipmap(gl.TEXTURE_2D); // WebGL2 allows mipmaps on NPOT textures
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    } else {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    }
+    return t;
+  },
+  _program(vsSrc, fsSrc) {
+    const gl = this.gl;
+    const compile = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src.trim());
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error("shader: " + gl.getShaderInfoLog(s));
+      return s;
+    };
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error("link: " + gl.getProgramInfoLog(p));
+    return p;
+  },
+};
+
+// Picks the best available backend. WebGPU is probed (adapter) BEFORE touching the canvas, so a
+// failed probe doesn't lock the canvas out of WebGL2.
+async function selectBackend(canvas) {
+  if (navigator.gpu) {
+    try {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter) {
+        const device = await adapter.requestDevice();
+        await WebGPUBackend.init(canvas, device);
+        return WebGPUBackend;
+      }
+    } catch (e) {
+      console.warn("WebGPU init failed, falling back to WebGL2:", e);
+    }
   }
-  device.queue.submit([enc.finish()]);
+  await WebGL2Backend.init(canvas);
+  return WebGL2Backend;
 }
 
-// --- Services the WASM side calls ---
+// ============================================================ backend-agnostic services
+
+// Registers a texture built by the active backend and returns its id.
+function registerTexture(w, h, src) {
+  const id = textures.length;
+  textures.push(gfx.texture(w, h, src));
+  return id;
+}
 
 globalThis.__flockCheckerboard = () => {
   const N = 64, cell = 8, px = new Uint8Array(N * N * 4);
@@ -168,13 +340,12 @@ globalThis.__flockCheckerboard = () => {
     const o = (y * N + x) * 4, v = on ? 235 : 120;
     px[o] = v; px[o + 1] = v; px[o + 2] = 255; px[o + 3] = 255;
   }
-  const id = textures.length; textures.push({ bindGroup: makeBindGroup(makeMipped(N, N, { pixels: px })) });
-  return id;
+  return registerTexture(N, N, { pixels: px });
 };
 
 globalThis.__flockMakeText = (text) => {
   const cached = textCache.get(text);
-  if (cached !== undefined) return cached; // glyph cache: reuse the texture for a repeated string
+  if (cached !== undefined) return cached;
   const cv = document.createElement("canvas"), ctx = cv.getContext("2d");
   ctx.font = "bold 44px system-ui, sans-serif";
   const w = Math.max(1, Math.ceil(ctx.measureText(text).width) + 16), h = 60;
@@ -183,7 +354,7 @@ globalThis.__flockMakeText = (text) => {
   c2.font = "bold 44px system-ui, sans-serif"; c2.textBaseline = "middle"; c2.fillStyle = "white";
   c2.fillText(text, 8, h / 2);
   const img = c2.getImageData(0, 0, w, h);
-  const id = textures.length; textures.push({ bindGroup: makeBindGroup(makeMipped(w, h, { pixels: new Uint8Array(img.data.buffer) })) });
+  const id = registerTexture(w, h, { pixels: new Uint8Array(img.data.buffer) });
   textCache.set(text, id);
   return id;
 };
@@ -191,17 +362,16 @@ globalThis.__flockMakeText = (text) => {
 // Async image load: reserve a white slot now, swap in the image texture when it arrives.
 globalThis.__flockLoadImage = (url) => {
   const id = textures.length;
-  textures.push({ bindGroup: makeBindGroup(makeSolid(1, 1, [255, 255, 255, 255])) });
+  textures.push(gfx.white());
   (async () => {
     try {
       const bmp = await createImageBitmap(await (await fetch(url)).blob());
-      textures[id] = { bindGroup: makeBindGroup(makeMipped(bmp.width, bmp.height, { bitmap: bmp })) };
+      textures[id] = gfx.texture(bmp.width, bmp.height, { bitmap: bmp });
     } catch (e) { console.error("image load failed:", url, e); }
   })();
   return id;
 };
 
-// Async audio load: reserve a sound id, decode into it when it arrives.
 globalThis.__flockLoadSound = (url) => {
   const id = sounds.length; sounds.push(null);
   (async () => {
@@ -213,8 +383,6 @@ globalThis.__flockLoadSound = (url) => {
   return id;
 };
 
-// Plays a decoded sound at `vol` (0..1), optionally looping. WebAudio mixes concurrent
-// sources automatically; all go through masterGain. Returns a handle (0 if it can't play).
 globalThis.__flockPlaySound = (id, vol, loop) => {
   const buf = sounds[id];
   if (!buf || audioCtx.state !== "running") return 0;
@@ -242,25 +410,7 @@ globalThis.__flockBeep = (freq, ms) => {
   osc.connect(gain).connect(masterGain); osc.start(t); osc.stop(t + ms / 1000);
 };
 
-globalThis.__flockDraw = (floats, count, groups) => {
-  if (count > 0) device.queue.writeBuffer(instanceBuf, 0, floats, 0, count * FLOATS);
-  const enc = device.createCommandEncoder();
-  const pass = enc.beginRenderPass({
-    colorAttachments: [{ view: context.getCurrentTexture().createView(), clearValue: { r: 0.04, g: 0.04, b: 0.07, a: 1 }, loadOp: "clear", storeOp: "store" }],
-  });
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, group0);
-  let offset = 0;
-  for (let gi = 0; gi < groups.length; gi += 2) {
-    const texId = groups[gi], n = groups[gi + 1];
-    if (n <= 0) continue;
-    pass.setBindGroup(1, (textures[texId] || textures[0]).bindGroup);
-    pass.draw(6, n, 0, offset);
-    offset += n;
-  }
-  pass.end();
-  device.queue.submit([enc.finish()]);
-};
+globalThis.__flockDraw = (floats, count, groups) => gfx.draw(floats, count, groups);
 
 function pollGamepad() {
   const gps = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -274,12 +424,19 @@ function pollGamepad() {
 
 async function main() {
   const status = document.getElementById("status");
+  const canvas = document.getElementById("c");
   try {
-    await initGPU();
+    gfx = await selectBackend(canvas);
+    textures.push(gfx.white()); // id 0 = solid white
+
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.connect(audioCtx.destination);
+
     await init();
     flock_init();
-    status.textContent = "running — textures/text/images · atlas UV · mipmaps · keyboard/gamepad/touch · WebAudio";
-    window.addEventListener("resize", resize);
+    status.textContent = `running (${gfx.name}) — textures/text/images · atlas UV · mipmaps · keyboard/gamepad/touch · WebAudio`;
+    window.addEventListener("resize", () => gfx.resize());
 
     const gesture = () => { if (audioCtx.state !== "running") audioCtx.resume(); };
     const key = (e, down) => { gesture(); if ([32, 37, 38, 39, 40].includes(e.keyCode)) { flock_key(e.keyCode, down); e.preventDefault(); } };
@@ -287,7 +444,6 @@ async function main() {
     window.addEventListener("keyup", (e) => key(e, 0));
 
     // Touch / pointer: drag to move the player (mapped to the 4 arrow "keys" by direction).
-    const canvas = document.getElementById("c");
     let dragging = false, px = 0, py = 0;
     const clearDirs = () => [37, 38, 39, 40].forEach((k) => flock_key(k, 0));
     const onDown = (x, y) => { gesture(); dragging = true; px = x; py = y; };
