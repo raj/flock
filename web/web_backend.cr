@@ -58,7 +58,7 @@ module Flock::Web
   GROUPS = Slice(Int32).new(128)         # draw groups: [textureId, count] pairs (sorted by texture)
 
   private record Inst,
-    tex : Int32, mat : Int32, x : Float32, y : Float32, w : Float32, h : Float32,
+    z : Float32, tex : Int32, mat : Int32, x : Float32, y : Float32, w : Float32, h : Float32,
     r : Float32, g : Float32, b : Float32, a : Float32,
     u : Float32, v : Float32, uw : Float32, uh : Float32
 
@@ -168,10 +168,11 @@ module Flock::Web
           next if items.size >= MAX
           p = tf.value.position; s = sp.value.size; c = sp.value.color
           uv = sp.value.uv_min; uz = sp.value.uv_size
-          items << Inst.new(sp.value.texture, sp.value.material, p.x, p.y, s.x, s.y, c.r, c.g, c.b, c.a, uv.x, uv.y, uz.x, uz.y)
+          items << Inst.new(sp.value.z, sp.value.texture, sp.value.material, p.x, p.y, s.x, s.y, c.r, c.g, c.b, c.a, uv.x, uv.y, uz.x, uz.y)
         end
-        # Order by (material, texture) so each draw group is one contiguous run.
-        items.sort_by! { |it| {it.mat, it.tex} }
+        # Order by layer (z), then (material, texture): correct back-to-front layering
+        # (matches the native renderer) with contiguous draw groups.
+        items.sort_by! { |it| {it.z, it.mat, it.tex} }
 
         groups = 0
         cur_tex = -1
