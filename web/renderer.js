@@ -6,8 +6,20 @@
 // services are backend-agnostic.
 import init, { flock_init, flock_frame, flock_key, flock_gamepad } from "./app.mjs";
 
-const WIDTH = 800, HEIGHT = 600, MAX = 512, FLOATS = 12, STRIDE = FLOATS * 4;
+// Render resolution comes from the canvas element's width/height attributes (set by the
+// page), so the engine isn't hardwired to one size. Falls back to 800x600.
+const _canvas0 = document.getElementById("c");
+const WIDTH = (_canvas0 && _canvas0.width) || 800, HEIGHT = (_canvas0 && _canvas0.height) || 600;
+const MAX = 512, FLOATS = 12, STRIDE = FLOATS * 4;
 const CLEAR = [0.04, 0.04, 0.07, 1];
+
+// Scales the canvas's CSS size to fit the window while preserving aspect (contain), so the
+// game fills the screen. The internal framebuffer stays WIDTH x HEIGHT (× dpr).
+function fitStyle(canvas) {
+  const s = Math.min(window.innerWidth / WIDTH, window.innerHeight / HEIGHT);
+  canvas.style.width = Math.round(WIDTH * s) + "px";
+  canvas.style.height = Math.round(HEIGHT * s) + "px";
+}
 
 // Backend-agnostic state.
 const textures = [];         // id -> backend texture handle (id 0 = solid white)
@@ -123,7 +135,7 @@ const WebGPUBackend = {
 
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.canvas.style.width = WIDTH + "px"; this.canvas.style.height = HEIGHT + "px";
+    fitStyle(this.canvas);
     this.canvas.width = Math.round(WIDTH * dpr); this.canvas.height = Math.round(HEIGHT * dpr);
     this.device.queue.writeBuffer(this.uniformBuf, 0, new Float32Array([WIDTH, HEIGHT, 0, 0]));
   },
@@ -273,7 +285,7 @@ const WebGL2Backend = {
 
   resize() {
     const gl = this.gl, dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.canvas.style.width = WIDTH + "px"; this.canvas.style.height = HEIGHT + "px";
+    fitStyle(this.canvas);
     this.canvas.width = Math.round(WIDTH * dpr); this.canvas.height = Math.round(HEIGHT * dpr);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
   },

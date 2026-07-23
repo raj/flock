@@ -64,18 +64,24 @@ module Flock
     DISC_GLSL     = {{ read_file("#{__DIR__}/shaders/disc.glsl") }}
     VIGNETTE_WGSL = {{ read_file("#{__DIR__}/shaders/vignette.wgsl") }}
     VIGNETTE_GLSL = {{ read_file("#{__DIR__}/shaders/vignette.glsl") }}
+    INVADER_A_WGSL = {{ read_file("#{__DIR__}/shaders/invader_a.wgsl") }}
+    INVADER_A_GLSL = {{ read_file("#{__DIR__}/shaders/invader_a.glsl") }}
+    INVADER_B_WGSL = {{ read_file("#{__DIR__}/shaders/invader_b.wgsl") }}
+    INVADER_B_GLSL = {{ read_file("#{__DIR__}/shaders/invader_b.glsl") }}
 
     # Available built-in shader names.
-    BUILTINS = [:glow, :ring, :disc, :vignette]
+    BUILTINS = [:glow, :ring, :disc, :vignette, :invader_a, :invader_b]
 
     # Returns the {wgsl_core, glsl_core} pair for a built-in name.
     def core(name : Symbol) : Tuple(String, String)
       case name
-      when :glow     then {GLOW_WGSL, GLOW_GLSL}
-      when :ring     then {RING_WGSL, RING_GLSL}
-      when :disc     then {DISC_WGSL, DISC_GLSL}
-      when :vignette then {VIGNETTE_WGSL, VIGNETTE_GLSL}
-      else                raise "unknown built-in sprite shader: #{name}"
+      when :glow      then {GLOW_WGSL, GLOW_GLSL}
+      when :ring      then {RING_WGSL, RING_GLSL}
+      when :disc      then {DISC_WGSL, DISC_GLSL}
+      when :vignette  then {VIGNETTE_WGSL, VIGNETTE_GLSL}
+      when :invader_a then {INVADER_A_WGSL, INVADER_A_GLSL}
+      when :invader_b then {INVADER_B_WGSL, INVADER_B_GLSL}
+      else                 raise "unknown built-in sprite shader: #{name}"
       end
     end
 
