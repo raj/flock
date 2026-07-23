@@ -164,6 +164,12 @@ module Flock::Web
   class WebPlugins < Flock::Plugin
     def build(app : Flock::App) : Nil
       app.world.insert_resource(Input.new)
+      # Unified, backend-agnostic resources (same API as native): game code uses these.
+      app.world.insert_resource(Flock::Input.new)
+      app.world.insert_resource(Flock::Audio.new)
+      app.world.insert_resource(Flock::Text.new)
+      # Advance the unified input's edge state at the end of each frame.
+      app.add_system(Flock::Schedule::Last) { |w, _c| w.resource(Flock::Input).advance }
       app.add_system(Flock::Schedule::Render) do |world, _cmd|
         # Collect instances, then order by texture for batched draws.
         items = [] of Inst
@@ -214,6 +220,23 @@ module Flock::Web
     end
   end
 
+  # DOM keyCode → shared Flock::Key (only the codes renderer.js forwards today + letters).
+  def dom_to_key(code : Int32) : Flock::Key?
+    case code
+    when 32 then Flock::Key::Space
+    when 37 then Flock::Key::Left
+    when 38 then Flock::Key::Up
+    when 39 then Flock::Key::Right
+    when 40 then Flock::Key::Down
+    when 13 then Flock::Key::Return
+    when  8 then Flock::Key::Backspace
+    when  9 then Flock::Key::Tab
+    when 27 then Flock::Key::Escape
+    when 65..90 then Flock::Key.new(4 + (code - 65)) # A..Z
+    else         nil
+    end
+  end
+
   @@app : Flock::App? = nil
 
   def launch(app : Flock::App) : Nil
@@ -238,11 +261,81 @@ JS.export def flock_frame(dt_ms : Int32) : Int32
 end
 
 JS.export def flock_key(code : Int32, down : Int32) : Int32
-  Flock::Web.app.world.resource(Flock::Web::Input).set(code, down != 0)
+  w = Flock::Web.app.world
+  w.resource(Flock::Web::Input).set(code, down != 0)                       # legacy raw-code input
+  if key = Flock::Web.dom_to_key(code)
+    w.resource(Flock::Input).set_key(key, down != 0)                       # unified input
+  end
+  0
+end
+
+JS.export def flock_pointer(x : Int32, y : Int32, down : Int32) : Int32
+  Flock::Web.app.world.resource(Flock::Input).set_pointer(x.to_f32, y.to_f32, down != 0)
   0
 end
 
 JS.export def flock_gamepad(ax : Int32, ay : Int32, buttons : Int32, connected : Int32) : Int32
   Flock::Web.app.world.resource(Flock::Web::Input).set_gamepad(ax, ay, buttons, connected != 0)
   0
+end
+
+# --- Unified, backend-agnostic resources (web implementations) ---
+# Same class names + API as the native backend (Flock::Input / Flock::Audio / Flock::Text).
+# Native and web are separate compile targets, so game code referencing these is portable.
+module Flock
+  # Keyboard + pointer input (web). Mirrors the native Flock::Input surface game code uses.
+  class Input < Resource
+    KEYS = 256
+    @down = Array(Bool).new(KEYS, false)
+    @prev = Array(Bool).new(KEYS, false)
+    getter text_input : String = ""
+    getter mouse_x : Float32 = 0.0f32
+    getter mouse_y : Float32 = 0.0f32
+    getter? mouse_down : Bool = false
+
+    def set_key(key : Flock::Key, down : Bool) : Nil
+      v = key.value
+      @down[v] = down if 0 <= v < KEYS
+    end
+
+    def pressed?(key : Flock::Key) : Bool
+      v = key.value
+      (0 <= v < KEYS) && @down[v]
+    end
+
+    def just_pressed?(key : Flock::Key) : Bool
+      v = key.value
+      (0 <= v < KEYS) && @down[v] && !@prev[v]
+    end
+
+    def set_pointer(x : Float32, y : Float32, down : Bool) : Nil
+      @mouse_x = x; @mouse_y = y; @mouse_down = down
+    end
+
+    def append_text(s : String) : Nil
+      @text_input += s
+    end
+
+    # End-of-frame: snapshot for edge detection + clear the per-frame text buffer.
+    def advance : Nil
+      @prev = @down.dup
+      @text_input = ""
+    end
+  end
+
+  # Audio (web). `beep` matches native's signature; delegates to the WebAudio bridge.
+  class Audio < Resource
+    def beep(frequency : Number, ms : Number, volume : Number = 0.25) : Nil
+      Flock::Web.beep(frequency.to_i, ms.to_i)
+    end
+  end
+
+  # Text→texture facade (web). `texture` matches native's; delegates to canvas make_text.
+  class Text < Resource
+    @cache = {} of String => Int32
+
+    def texture(str : String, px : Number = 24) : Int32
+      @cache[str] ||= Flock::Web.make_text(str)
+    end
+  end
 end

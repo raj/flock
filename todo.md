@@ -358,12 +358,11 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       (moved to core; web_backend feeds its position/zoom to renderer.js). One
       `Transform2D`+`Camera2D` game source renders identically on both — spacei dropped its
       Body/converter/place shim (shake is now a camera offset on both). Verified in-browser.
-      Follow-up (still injected, backends differ fundamentally): unify input/audio/text APIs
-      so those hooks can go too. Original note:
-- [ ] **Cross-backend input/audio/text** — native `Sprite2D` (center anchor, y-up) and web
-      (top-left, y-down) diverge, and input/audio/text have two APIs; the demo needed a `Hooks`
-      shim + a `Body`+converter to reconcile. Engine should give ONE `Sprite2D` convention on
-      both backends and a unified input/audio/text API, so a game is truly one code path.
+- [x] **Cross-backend input/audio/text** — done: native + web each expose the SAME class names
+      Flock::Input (shared Flock::Key), Flock::Audio (#beep), Flock::Text (#texture) with matching
+      APIs (they never link together), so game code is identical. spacei dropped its down/play/text
+      hooks — only quit + material shaders remain injected. Verified in-browser.
+      Follow-up: material registration could unify too (native WGSL module vs web WGSL+GLSL).
 
 ### Then (maturity)
 - [ ] **Parallel scheduler** — systems run sequentially; detect query read/write conflicts and

@@ -59,6 +59,7 @@ module Flock
     @device : LibSDL::AudioDeviceID
     @main : LibSDL::AudioStream
     @playing : Array(Playback) = [] of Playback
+    @beeps : Hash(Tuple(Int32, Int32), Sound) = {} of Tuple(Int32, Int32) => Sound
 
     def initialize
       @spec = LibSDL::AudioSpec.new(format: LibSDL::AUDIO_F32LE, channels: 2, freq: 48_000)
@@ -81,6 +82,14 @@ module Flock
 
     def load(path : String) : Sound
       Sound.load(path)
+    end
+
+    # Portable 8-bit-style beep: `frequency` Hz for `ms` milliseconds. Same signature as
+    # the web backend's `Flock::Audio#beep`, so game code is identical on both. Cached.
+    def beep(frequency : Number, ms : Number, volume : Number = 0.25) : Nil
+      key = {frequency.to_i, ms.to_i}
+      snd = (@beeps[key] ||= Sound.beep(frequency.to_f, ms.to_f / 1000.0, volume.to_f))
+      play(snd)
     end
 
     # Plays `sound`. `volume` (0..1) scales this playback; `loop` repeats it until

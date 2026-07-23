@@ -32,5 +32,6 @@ require "./render/renderer3d_skin_morph"
 require "./render/render_plugin"
 
 require "./assets"
+require "./render/text_provider" # Flock::Text facade (needs GpuContext/Renderer2D/Assets)
 require "./diagnostics"
 require "./default_plugins"
