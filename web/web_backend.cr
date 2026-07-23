@@ -127,6 +127,14 @@ module Flock::Web
     JS
   end
 
+  # Measured width (px) of `text` at make_text's font — for UI layout.
+  @[JS::Method]
+  def text_width(text : String) : Int32
+    <<-JS
+      return (globalThis.__flockTextWidth ? globalThis.__flockTextWidth(#{text}) : 0) | 0;
+    JS
+  end
+
   # Registers a custom sprite material and returns its id (0 = default / unsupported).
   # `wgsl_frag` is a `@fragment fn fs(i : VSOut) -> @location(0) vec4<f32>` (WebGPU);
   # `glsl_body` is the GLSL `main()` body setting `o` from `vUv`/`vColor`/`uTex` (WebGL2).
@@ -337,6 +345,13 @@ module Flock
 
     def texture(str : String, px : Number = 24) : Int32
       @cache[str] ||= Flock::Web.make_text(str)
+    end
+
+    # {id, width, height}. make_text rasterizes at ~44px, so scale the measured width to px.
+    def measure(str : String, px : Number = 24) : Tuple(Int32, Float32, Float32)
+      id = texture(str, px)
+      w = Flock::Web.text_width(str).to_f32 * (px.to_f32 / 44.0f32)
+      {id, w, px.to_f32}
     end
   end
 

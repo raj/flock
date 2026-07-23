@@ -452,6 +452,13 @@ globalThis.__flockMakeText = (text) => {
   return id;
 };
 
+// Measured pixel width of `text` at make_text's font (for UI layout).
+globalThis.__flockTextWidth = (text) => {
+  const cv = document.createElement("canvas"), ctx = cv.getContext("2d");
+  ctx.font = "bold 44px system-ui, sans-serif";
+  return Math.ceil(ctx.measureText(text).width) + 16;
+};
+
 // Async image load: reserve a white slot now, swap in the image texture when it arrives.
 globalThis.__flockLoadImage = (url) => {
   const id = textures.length;
