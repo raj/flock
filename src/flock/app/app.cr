@@ -18,12 +18,16 @@ module Flock
     # A registered system plus its ordering metadata: an optional `label`, optional
     # `before`/`after` a label (topologically sorted within the schedule), and an
     # optional `run_if` condition.
-    struct SystemEntry
+    # A class (not a struct) so `last_run` mutates in place and is shared between the
+    # `@systems` arrays and the cached `@order_cache` ordering.
+    class SystemEntry
       getter proc : System
       getter label : Symbol?
       getter before : Symbol?
       getter after : Symbol?
       getter run_if : Proc(World, Bool)?
+      # World change-tick at which this system last ran (for change detection).
+      property last_run : UInt32 = 0_u32
 
       def initialize(@proc : System, @label : Symbol? = nil, @before : Symbol? = nil,
                      @after : Symbol? = nil, @run_if : Proc(World, Bool)? = nil)
@@ -182,7 +186,11 @@ module Flock
         if cond = entry.run_if
           next unless cond.call(@world)
         end
+        # Change-detection window: bump the tick and expose this system's last-run tick,
+        # then record the new tick so its next run sees only newer changes.
+        @world.begin_system(entry.last_run)
         entry.proc.call(@world, cmd)
+        entry.last_run = @world.change_tick
       end
       cmd.apply
     end

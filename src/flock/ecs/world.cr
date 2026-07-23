@@ -29,6 +29,19 @@ module Flock
     @storages : Array(Storage?) = [] of Storage?
     @resources : Hash(String, Resource) = {} of String => Resource
 
+    # Change detection. `change_tick` is bumped once per system run (by App#run_schedule
+    # via begin_system); component writes stamp it, and a query filter / predicate reports
+    # a change when the stamped tick is newer than the running system's last-run tick.
+    getter change_tick : UInt32 = 1_u32
+    @last_run : UInt32 = 0_u32
+
+    # Called by App before each system runs: bumps the change-tick and records the tick the
+    # about-to-run system last executed at (so changed?/added? are relative to it).
+    def begin_system(last_run : UInt32) : Nil
+      @change_tick &+= 1_u32
+      @last_run = last_run
+    end
+
     # --- Entities ----------------------------------------------------------
 
     def spawn : Entity
@@ -86,8 +99,32 @@ module Flock
         # type, so it reaches the right storage). Bundles nest recursively.
         expand_bundle(entity, component.components)
       {% else %}
-        storage(T).insert(entity, component)
+        storage(T).insert(entity, component, @change_tick)
       {% end %}
+    end
+
+    # Re-inserts a component and marks it changed at the current tick. Use after computing
+    # a new value; equivalent to `add` but reads as intent ("I changed this").
+    def set(entity : Entity, component : T) : Nil forall T
+      add(entity, component)
+    end
+
+    # Flags an existing component as changed at the current tick — for in-place pointer
+    # mutations (`query`/`get_ptr`), which the storage can't observe automatically.
+    def mark_changed(entity : Entity, type : T.class) : Nil forall T
+      storage(T).touch(entity, @change_tick)
+    end
+
+    # Did the entity's T component change since the running system last ran?
+    def changed?(entity : Entity, type : T.class) : Bool forall T
+      t = storage(T).changed_tick(entity)
+      t ? t > @last_run : false
+    end
+
+    # Was the entity's T component added since the running system last ran?
+    def added?(entity : Entity, type : T.class) : Bool forall T
+      t = storage(T).added_tick(entity)
+      t ? t > @last_run : false
     end
 
     # Adds each component of a bundle's tuple, one storage insert per element.
@@ -181,9 +218,22 @@ module Flock
     #
     # (Macros cannot be invoked on an instance in Crystal: so we generate a
     # real `query` method overload per arity, 1 to 8 components.)
+    # Optional keyword filters (tuples of component classes, expanded at compile time):
+    #   with:    entity must ALSO own these (not yielded) — like Bevy's `With<T>`
+    #   without: entity must NOT own any of these                 — `Without<T>`
+    #   changed: entity's component must have changed this run     — `Changed<T>`
+    #   added:   entity's component must have been added this run  — `Added<T>`
+    #
+    #   world.query(Sprite, with: {Enemy}, without: {Frozen}) { |e, sp| ... }
+    #   world.query(Score, changed: {Score}) { |e, s| refresh_hud(s.value) }
+    #
+    # `changed`/`added` rely on the tick set by `add`/`set`/`mark_changed`; a raw pointer
+    # write is invisible unless you follow it with `mark_changed` (or write via `set`).
     {% for n in 1..8 %}
       def query(
-        {% for i in 1..n %}t{{i}} : T{{i}}.class{% if i < n %},{% end %}{% end %}
+        {% for i in 1..n %}t{{i}} : T{{i}}.class,{% end %}
+        with _with = Tuple.new, without _without = Tuple.new,
+        changed _changed = Tuple.new, added _added = Tuple.new
       ) : Nil forall {% for i in 1..n %}T{{i}}{% if i < n %},{% end %}{% end %}
         {% for i in 1..n %}
           s{{i}} = storage(T{{i}})
@@ -199,6 +249,14 @@ module Flock
             p{{i}} = s{{i}}.get_ptr(entity)
             next unless p{{i}}
           {% end %}
+
+          keep = true
+          _with.each { |c| keep = false unless has?(entity, c) }
+          _without.each { |c| keep = false if has?(entity, c) }
+          _changed.each { |c| keep = false unless changed?(entity, c) }
+          _added.each { |c| keep = false unless added?(entity, c) }
+          next unless keep
+
           yield entity, {% for i in 1..n %}p{{i}}{% if i < n %},{% end %}{% end %}
         end
       end

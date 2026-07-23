@@ -21,6 +21,10 @@ module Flock
     getter dense : Array(T) = [] of T
     getter entities : Array(Entity) = [] of Entity
     @sparse : Array(Int32) = [] of Int32
+    # Change-detection ticks, aligned with `dense`: the world change-tick at which each
+    # component was added / last changed (see World#changed?/#added?).
+    @added : Array(UInt32) = [] of UInt32
+    @changed : Array(UInt32) = [] of UInt32
 
     def size : Int32
       @dense.size
@@ -61,8 +65,9 @@ module Flock
       end
     end
 
-    # Inserts or updates the entity's component.
-    def insert(entity : Entity, component : T) : Nil
+    # Inserts or updates the entity's component. `tick` is the world change-tick stamped
+    # as the change (and, for a fresh insert, the added) tick.
+    def insert(entity : Entity, component : T, tick : UInt32 = 0_u32) : Nil
       id = entity.id.to_i
       while @sparse.size <= id
         @sparse << -1
@@ -73,12 +78,17 @@ module Flock
         # The slot is occupied — an id has at most one dense entry, so overwrite it in place
         # whether it's the same generation (update) or a stale one (replace); never push a
         # second entry, which would orphan the old one and corrupt iteration.
+        replaced = @entities[index].generation != entity.generation
         @dense[index] = component
         @entities[index] = entity
+        @changed[index] = tick
+        @added[index] = tick if replaced # a stale-generation replace is a new component
       else
         @sparse[id] = @dense.size
         @dense << component
         @entities << entity
+        @added << tick
+        @changed << tick
       end
     end
 
@@ -95,15 +105,40 @@ module Flock
 
       @dense[index] = @dense[last]
       @entities[index] = last_entity
+      @added[index] = @added[last]
+      @changed[index] = @changed[last]
       @sparse[last_entity.id.to_i] = index
 
       @dense.pop
       @entities.pop
+      @added.pop
+      @changed.pop
       @sparse[id] = -1
     end
 
     def remove_untyped(entity : Entity) : Nil
       remove(entity)
+    end
+
+    # Change-detection ticks for an entity (nil if it doesn't own the component).
+    def added_tick(entity : Entity) : UInt32?
+      if index = index_of?(entity)
+        @added[index]
+      end
+    end
+
+    def changed_tick(entity : Entity) : UInt32?
+      if index = index_of?(entity)
+        @changed[index]
+      end
+    end
+
+    # Stamps the entity's component as changed at `tick` (for in-place pointer mutations,
+    # which the storage can't observe on its own).
+    def touch(entity : Entity, tick : UInt32) : Nil
+      if index = index_of?(entity)
+        @changed[index] = tick
+      end
     end
   end
 end

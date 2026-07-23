@@ -134,6 +134,28 @@ world.query(Transform2D, Velocity) do |_e, tf, vel|
 end
 ```
 
+## Query filters & change detection
+
+`query` takes optional keyword filters (tuples of component classes, Bevy-style):
+
+```crystal
+world.query(Sprite, with: {Enemy}, without: {Frozen}) { |e, sp| ... }   # structural
+world.query(Health, changed: {Health}) { |e, h| refresh_bar(h.value) }  # only if it changed
+world.query(Transform2D, added: {Transform2D}) { |e, tf| ... }          # only just-added
+```
+
+Change detection is per-component and relative to when the running system *last ran*:
+`world.changed?(e, T)` / `world.added?(e, T)` are the predicate forms. Because `query`
+yields a raw `Pointer(T)`, an in-place write is invisible to the tracker — write via
+`world.set(e, comp)` **or** flag it with `world.mark_changed(e, T)`:
+
+```crystal
+world.query(Health) do |e, h|
+  h.value = Health.new(h.value.hp - 1)
+  world.mark_changed(e, Health)   # so `changed: {Health}` systems react
+end
+```
+
 ## Architecture
 
 ```

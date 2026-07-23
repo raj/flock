@@ -332,9 +332,14 @@ Prioritized from building the Space Invaders demo (../spacei). Ordered by levera
 day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGame offer.
 
 ### Do first (biggest DX/perf leverage)
-- [ ] **Change detection + query filters** — `Added<T>`, `Changed<T>`, `With`/`Without`/`Or`.
-      Biggest missing ECS ergonomic vs Bevy. The demo hand-tracked `last_score`/`last_lives`;
-      `Changed<Score>` removes that. Needs a per-component version/tick in the sparse sets.
+- [x] **Change detection + query filters** — done (component-level). Per-component add/changed
+      ticks in the sparse sets + a per-system last-run tick (App bumps `World#change_tick` per
+      system run). Query keyword filters `with:`/`without:`/`changed:`/`added:` (tuples of
+      component classes) + predicates `World#changed?`/`#added?`; write paths `set`/`mark_changed`
+      (raw pointer writes need `mark_changed`). See spec/change_detection_spec.cr.
+      Follow-ups: `Or` filter combinator; **resource** change detection (the demo's HUD tracks a
+      `Game` resource field, so it still hand-tracks `last_score`); auto-mark on a `Mut<T>`
+      wrapper so pointer writes don't need `mark_changed`.
 - [ ] **UI system** — absent, the biggest practical gap. Every game needs menus/HUD; the demo
       hand-rolled them from sprites+text. Want layout (flexbox or immediate-mode), text/button
       widgets, keyboard focus. Bevy has `bevy_ui`; a real win over MonoGame.
