@@ -159,6 +159,12 @@ module Flock
       m.id
     end
 
+    # Registers one of Flock's built-in Sprite2D material shaders (see SpriteShaders,
+    # e.g. `:glow`, `:ring`, `:disc`, `:vignette`) and returns its id.
+    def register_builtin(name : Symbol) : Int32
+      register_material(SpriteShaders.native(SpriteShaders.core(name)[0]))
+    end
+
     # Registers a texture for backend-agnostic `Sprite2D` and returns its id. The
     # renderer takes ownership (released on shutdown). id 0 is the built-in white.
     def register_texture(texture : Texture) : Int32

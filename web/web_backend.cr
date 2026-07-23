@@ -134,6 +134,13 @@ module Flock::Web
     JS
   end
 
+  # Registers one of Flock's built-in Sprite2D material shaders (see SpriteShaders,
+  # e.g. `:glow`, `:ring`, `:disc`, `:vignette`) and returns its id.
+  def register_builtin(name : Symbol) : Int32
+    wgsl, glsl = Flock::SpriteShaders.core(name)
+    register_material(Flock::SpriteShaders.web_wgsl(wgsl), Flock::SpriteShaders.web_glsl(glsl))
+  end
+
   # Registers a procedural checkerboard texture and returns its id.
   @[JS::Method]
   def checkerboard : Int32
