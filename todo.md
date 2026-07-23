@@ -362,7 +362,8 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       Flock::Input (shared Flock::Key), Flock::Audio (#beep), Flock::Text (#texture) with matching
       APIs (they never link together), so game code is identical. spacei dropped its down/play/text
       hooks — only quit + material shaders remain injected. Verified in-browser.
-      Follow-up: material registration could unify too (native WGSL module vs web WGSL+GLSL).
+      Materials too: unified via Flock::Materials (builtin(name) + register(wgsl_core, glsl_core))
+      on both backends — spacei's only remaining injected hook is quit.
 
 ### Then (maturity)
 - [ ] **Parallel scheduler** — systems run sequentially; detect query read/write conflicts and

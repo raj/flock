@@ -168,6 +168,7 @@ module Flock::Web
       app.world.insert_resource(Flock::Input.new)
       app.world.insert_resource(Flock::Audio.new)
       app.world.insert_resource(Flock::Text.new)
+      app.world.insert_resource(Flock::Materials.new)
       # Advance the unified input's edge state at the end of each frame.
       app.add_system(Flock::Schedule::Last) { |w, _c| w.resource(Flock::Input).advance }
       app.add_system(Flock::Schedule::Render) do |world, _cmd|
@@ -336,6 +337,22 @@ module Flock
 
     def texture(str : String, px : Number = 24) : Int32
       @cache[str] ||= Flock::Web.make_text(str)
+    end
+  end
+
+  # Custom-material registry (web). Same API as native's Flock::Materials; wraps the shared
+  # shader cores into web fragments (WebGPU WGSL + WebGL2 GLSL).
+  class Materials < Resource
+    @builtins = {} of Symbol => Int32
+    @customs = {} of String => Int32
+
+    def builtin(name : Symbol) : Int32
+      @builtins[name] ||= Flock::Web.register_builtin(name)
+    end
+
+    def register(wgsl_core : String, glsl_core : String) : Int32
+      @customs[wgsl_core] ||= Flock::Web.register_material(
+        Flock::SpriteShaders.web_wgsl(wgsl_core), Flock::SpriteShaders.web_glsl(glsl_core))
     end
   end
 end

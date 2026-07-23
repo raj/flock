@@ -13,6 +13,7 @@ module Flock
       app.add_plugin(MusicPlugin.new)
       app.add_plugin(AssetsPlugin.new)
       app.add_plugin(TextPlugin.new)
+      app.add_plugin(MaterialsPlugin.new)
     end
   end
 end

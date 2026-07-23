@@ -33,5 +33,6 @@ require "./render/render_plugin"
 
 require "./assets"
 require "./render/text_provider" # Flock::Text facade (needs GpuContext/Renderer2D/Assets)
+require "./render/materials"     # Flock::Materials registry (needs Renderer2D)
 require "./diagnostics"
 require "./default_plugins"
