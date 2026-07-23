@@ -58,7 +58,7 @@ module Flock::Web
   GROUPS = Slice(Int32).new(128)         # draw groups: [textureId, count] pairs (sorted by texture)
 
   private record Inst,
-    tex : Int32, x : Float32, y : Float32, w : Float32, h : Float32,
+    tex : Int32, mat : Int32, x : Float32, y : Float32, w : Float32, h : Float32,
     r : Float32, g : Float32, b : Float32, a : Float32,
     u : Float32, v : Float32, uw : Float32, uh : Float32
 
@@ -66,11 +66,11 @@ module Flock::Web
 
   # Hands the grouped instance buffer to the WebGPU renderer (12 floats/instance).
   @[JS::Method]
-  def draw(ptr : Int32, count : Int32, groups_ptr : Int32, group_pairs : Int32) : Nil
+  def draw(ptr : Int32, count : Int32, groups_ptr : Int32, group_count : Int32) : Nil
     <<-JS
       if (__memory.buffer.byteLength === 0) __memory = new DataView(__exports.memory.buffer);
       const f = new Float32Array(__exports.memory.buffer, #{ptr}, #{count} * 12);
-      const g = new Int32Array(__exports.memory.buffer, #{groups_ptr}, #{group_pairs} * 2);
+      const g = new Int32Array(__exports.memory.buffer, #{groups_ptr}, #{group_count} * 3);
       if (globalThis.__flockDraw) globalThis.__flockDraw(f, #{count}, g);
     JS
   end
@@ -124,6 +124,16 @@ module Flock::Web
     JS
   end
 
+  # Registers a custom sprite material and returns its id (0 = default / unsupported).
+  # `wgsl_frag` is a `@fragment fn fs(i : VSOut) -> @location(0) vec4<f32>` (WebGPU);
+  # `glsl_body` is the GLSL `main()` body setting `o` from `vUv`/`vColor`/`uTex` (WebGL2).
+  @[JS::Method]
+  def register_material(wgsl_frag : String, glsl_body : String) : Int32
+    <<-JS
+      return (globalThis.__flockRegisterMaterial ? globalThis.__flockRegisterMaterial(#{wgsl_frag}, #{glsl_body}) : 0) | 0;
+    JS
+  end
+
   # Registers a procedural checkerboard texture and returns its id.
   @[JS::Method]
   def checkerboard : Int32
@@ -151,32 +161,34 @@ module Flock::Web
           next if items.size >= MAX
           p = tf.value.position; s = sp.value.size; c = sp.value.color
           uv = sp.value.uv_min; uz = sp.value.uv_size
-          items << Inst.new(sp.value.texture, p.x, p.y, s.x, s.y, c.r, c.g, c.b, c.a, uv.x, uv.y, uz.x, uz.y)
+          items << Inst.new(sp.value.texture, sp.value.material, p.x, p.y, s.x, s.y, c.r, c.g, c.b, c.a, uv.x, uv.y, uz.x, uz.y)
         end
-        items.sort_by! &.tex
+        # Order by (material, texture) so each draw group is one contiguous run.
+        items.sort_by! { |it| {it.mat, it.tex} }
 
-        pairs = 0
+        groups = 0
         cur_tex = -1
+        cur_mat = -1
         cur_count = 0
         items.each_with_index do |it, i|
           o = i * FLOATS
           BUFFER[o] = it.x; BUFFER[o + 1] = it.y; BUFFER[o + 2] = it.w; BUFFER[o + 3] = it.h
           BUFFER[o + 4] = it.r; BUFFER[o + 5] = it.g; BUFFER[o + 6] = it.b; BUFFER[o + 7] = it.a
           BUFFER[o + 8] = it.u; BUFFER[o + 9] = it.v; BUFFER[o + 10] = it.uw; BUFFER[o + 11] = it.uh
-          if it.tex != cur_tex
-            if cur_tex >= 0
-              GROUPS[pairs * 2] = cur_tex; GROUPS[pairs * 2 + 1] = cur_count; pairs += 1
+          if (it.tex != cur_tex || it.mat != cur_mat)
+            if cur_count > 0 && groups < 42
+              GROUPS[groups * 3] = cur_tex; GROUPS[groups * 3 + 1] = cur_mat; GROUPS[groups * 3 + 2] = cur_count; groups += 1
             end
-            cur_tex = it.tex; cur_count = 0
+            cur_tex = it.tex; cur_mat = it.mat; cur_count = 0
           end
           cur_count += 1
         end
-        if cur_tex >= 0 && pairs < 64
-          GROUPS[pairs * 2] = cur_tex; GROUPS[pairs * 2 + 1] = cur_count; pairs += 1
+        if cur_count > 0 && groups < 42
+          GROUPS[groups * 3] = cur_tex; GROUPS[groups * 3 + 1] = cur_mat; GROUPS[groups * 3 + 2] = cur_count; groups += 1
         end
 
         Flock::Web.draw(BUFFER.to_unsafe.address.to_i64!.to_i32!, items.size,
-          GROUPS.to_unsafe.address.to_i64!.to_i32!, pairs)
+          GROUPS.to_unsafe.address.to_i64!.to_i32!, groups)
       end
     end
   end

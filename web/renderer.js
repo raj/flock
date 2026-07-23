@@ -37,7 +37,10 @@ const WebGPUBackend = {
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.context.configure({ device, format: this.format, alphaMode: "premultiplied" });
 
-    const shader = device.createShaderModule({ code: `
+    // Shared shader preamble (bindings + vertex stage). A material = this preamble + a
+    // custom `fs`; the default material's fs is DEFAULT_FS. All pipelines share one
+    // explicit layout so the group0/texture bind groups are valid for every pipeline.
+    this.preamble = `
       struct Globals { size : vec2<f32> };
       @group(0) @binding(0) var<uniform> g : Globals;
       @group(0) @binding(1) var<storage, read> inst : array<vec4<f32>>;
@@ -61,36 +64,61 @@ const WebGPUBackend = {
         o.color = col;
         return o;
       }
+    `;
+    const DEFAULT_FS = `
       @fragment
       fn fs(i : VSOut) -> @location(0) vec4<f32> {
         let c = i.color * textureSample(tex, samp, i.uv);
         return vec4<f32>(c.rgb * c.a, c.a);
       }
-    ` });
+    `;
 
-    this.pipeline = device.createRenderPipeline({
-      layout: "auto",
-      vertex: { module: shader, entryPoint: "vs" },
-      fragment: {
-        module: shader, entryPoint: "fs",
-        targets: [{ format: this.format, blend: {
-          color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
-          alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
-        } }],
-      },
-      primitive: { topology: "triangle-list" },
-    });
+    this.layout0 = device.createBindGroupLayout({ entries: [
+      { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
+      { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+    ] });
+    this.layout1 = device.createBindGroupLayout({ entries: [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+    ] });
+    this.pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [this.layout0, this.layout1] });
+
+    this._makePipeline = (fsSrc) => {
+      const mod = device.createShaderModule({ code: this.preamble + fsSrc });
+      return device.createRenderPipeline({
+        layout: this.pipelineLayout,
+        vertex: { module: mod, entryPoint: "vs" },
+        fragment: {
+          module: mod, entryPoint: "fs",
+          targets: [{ format: this.format, blend: {
+            color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+          } }],
+        },
+        primitive: { topology: "triangle-list" },
+      });
+    };
+
+    this.pipeline = this._makePipeline(DEFAULT_FS);
+    this.materials = [this.pipeline]; // index 0 = default; registerMaterial appends
 
     this.sampler = device.createSampler({ magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" });
     this.uniformBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.instanceBuf = device.createBuffer({ size: MAX * FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.group0 = device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
+      layout: this.layout0,
       entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }, { binding: 1, resource: { buffer: this.instanceBuf } }],
     });
     const err = await device.popErrorScope();
     if (err) throw new Error("WebGPU validation error: " + err.message);
     this.resize();
+  },
+
+  // Builds a custom-material pipeline from a WGSL fragment (a `@fragment fn fs(i:VSOut)`),
+  // returns its id for use in Sprite2D#material. The GLSL arg is ignored here (WebGL2 uses it).
+  registerMaterial(wgslFrag, _glslFrag) {
+    this.materials.push(this._makePipeline(wgslFrag));
+    return this.materials.length - 1;
   },
 
   resize() {
@@ -111,12 +139,13 @@ const WebGPUBackend = {
       colorAttachments: [{ view: this.context.getCurrentTexture().createView(),
         clearValue: { r: CLEAR[0], g: CLEAR[1], b: CLEAR[2], a: CLEAR[3] }, loadOp: "clear", storeOp: "store" }],
     });
-    pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.group0);
     let offset = 0;
-    for (let gi = 0; gi < groups.length; gi += 2) {
-      const texId = groups[gi], n = groups[gi + 1];
+    // groups: [textureId, materialId, count] triples (sorted by material then texture).
+    for (let gi = 0; gi < groups.length; gi += 3) {
+      const texId = groups[gi], matId = groups[gi + 1], n = groups[gi + 2];
       if (n <= 0) continue;
+      pass.setPipeline(this.materials[matId] || this.pipeline);
       pass.setBindGroup(1, textures[texId] || textures[0]);
       pass.draw(6, n, 0, offset);
       offset += n;
@@ -128,7 +157,7 @@ const WebGPUBackend = {
   // -- private texture helpers --
   _bind(tex) {
     return this.device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(1),
+      layout: this.layout1,
       entries: [{ binding: 0, resource: tex.createView() }, { binding: 1, resource: this.sampler }],
     });
   },
@@ -210,10 +239,14 @@ const WebGL2Backend = {
         vec4 c = vColor * texture(uTex, vUv);
         o = vec4(c.rgb * c.a, c.a); // premultiplied
       }`;
+    this.vsSrc = vs;                       // reused to build custom-material programs
+    this.fsHeader = `#version 300 es\n      precision mediump float;\n      uniform sampler2D uTex;\n      in vec2 vUv; in vec4 vColor;\n      out vec4 o;\n`;
     this.prog = this._program(vs, fs);
     this.uSize = gl.getUniformLocation(this.prog, "uSize");
     gl.useProgram(this.prog);
     gl.uniform1i(gl.getUniformLocation(this.prog, "uTex"), 0);
+    // Material 0 = default; registerMaterial appends {prog, uSize}.
+    this.materials = [{ prog: this.prog, uSize: this.uSize }];
 
     this.vao = gl.createVertexArray();
     gl.bindVertexArray(this.vao);
@@ -248,22 +281,36 @@ const WebGL2Backend = {
   white() { return this._tex(1, 1, { pixels: new Uint8Array([255, 255, 255, 255]) }, false); },
   texture(w, h, src) { return this._tex(w, h, src, true); },
 
+  // Builds a custom-material program from a GLSL fragment body (statements setting `o`,
+  // with `vUv`, `vColor`, `uTex` in scope). Returns its id for Sprite2D#material.
+  registerMaterial(_wgslFrag, glslBody) {
+    const gl = this.gl;
+    const fs = this.fsHeader + "      void main() {\n" + glslBody + "\n      }";
+    const prog = this._program(this.vsSrc, fs);
+    gl.useProgram(prog);
+    gl.uniform1i(gl.getUniformLocation(prog, "uTex"), 0);
+    this.materials.push({ prog, uSize: gl.getUniformLocation(prog, "uSize") });
+    return this.materials.length - 1;
+  },
+
   draw(floats, count, groups) {
     const gl = this.gl;
     gl.clearColor(CLEAR[0], CLEAR[1], CLEAR[2], CLEAR[3]);
     gl.clear(gl.COLOR_BUFFER_BIT);
     count = Math.min(count, MAX); // defensive: buffers are sized for MAX instances
     if (count <= 0) return;
-    gl.useProgram(this.prog);
-    gl.uniform2f(this.uSize, WIDTH, HEIGHT);
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instBuf);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, floats, 0, count * FLOATS);
     gl.activeTexture(gl.TEXTURE0);
     let offset = 0;
-    for (let gi = 0; gi < groups.length; gi += 2) {
-      const texId = groups[gi], n = groups[gi + 1];
+    // groups: [textureId, materialId, count] triples.
+    for (let gi = 0; gi < groups.length; gi += 3) {
+      const texId = groups[gi], matId = groups[gi + 1], n = groups[gi + 2];
       if (n <= 0) continue;
+      const mat = this.materials[matId] || this.materials[0];
+      gl.useProgram(mat.prog);
+      gl.uniform2f(mat.uSize, WIDTH, HEIGHT);
       // WebGL2 has no baseInstance, so offset the instance attributes into the buffer instead.
       const base = offset * STRIDE;
       gl.vertexAttribPointer(1, 4, gl.FLOAT, false, STRIDE, base + 0);
@@ -427,6 +474,11 @@ globalThis.__flockBeep = (freq, ms) => {
 };
 
 globalThis.__flockDraw = (floats, count, groups) => gfx.draw(floats, count, groups);
+
+// Registers a custom sprite material and returns its id (0 if the backend can't build it).
+// wgslFrag is used by the WebGPU backend, glslBody by WebGL2.
+globalThis.__flockRegisterMaterial = (wgslFrag, glslBody) =>
+  (gfx && gfx.registerMaterial ? gfx.registerMaterial(wgslFrag, glslBody) : 0) | 0;
 
 function pollGamepad() {
   const gps = navigator.getGamepads ? navigator.getGamepads() : [];

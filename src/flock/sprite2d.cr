@@ -13,10 +13,15 @@ module Flock
     property uv_min : Vec2
     property uv_size : Vec2
     property z : Float32
+    # Custom-material id (0 = the renderer's default sprite shader). Resolved per
+    # backend: native → Renderer2D#register_material bank; web → a renderer.js pipeline
+    # from Flock::Web.register_material. Lets one Sprite2D carry a custom fragment shader
+    # on both targets (WebGL2 falls back to the default shader).
+    property material : Int32
 
     def initialize(@size : Vec2, @color : Color = Color::WHITE, @texture : Int32 = 0,
                    @uv_min : Vec2 = Vec2.new(0, 0), @uv_size : Vec2 = Vec2.new(1, 1),
-                   @z : Float32 = 0.0f32)
+                   @z : Float32 = 0.0f32, @material : Int32 = 0)
     end
   end
 end

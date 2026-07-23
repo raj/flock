@@ -97,6 +97,8 @@ module Flock
     @group0 : LibWGPU::BindGroup
     # Custom per-sprite materials built via `build_material`, released on shutdown.
     @materials : Array(SpriteMaterial) = [] of SpriteMaterial
+    # id -> custom material for backend-agnostic Sprite2D (see register_material).
+    @material_by_id : Hash(Int32, SpriteMaterial) = {} of Int32 => SpriteMaterial
     # Texture bank for backend-agnostic `Sprite2D` (id -> Texture; id 0 = white).
     @texture_bank : Array(Texture) = [] of Texture
     # Per-viewport region-clear pipeline (fills the scissor rect with a color).
@@ -145,6 +147,16 @@ module Flock
       material = SpriteMaterial.new(build_pipeline(mod), mod)
       @materials << material
       material
+    end
+
+    # Backend-agnostic `Sprite2D` material: builds a custom-WGSL material and returns an
+    # integer id to store in `Sprite2D#material` (0 = default shader). Mirrors the web
+    # backend's `Flock::Web.register_material`, so one game source can carry a custom
+    # shader on both targets.
+    def register_material(wgsl : String) : Int32
+      m = build_material(wgsl)
+      @material_by_id[m.id] = m
+      m.id
     end
 
     # Registers a texture for backend-agnostic `Sprite2D` and returns its id. The
@@ -516,8 +528,12 @@ module Flock
       world.query(Transform2D, Sprite2D) do |_e, tf, sp|
         id = sp.value.texture
         texture = (0 <= id < @texture_bank.size) ? @texture_bank[id] : @white
+        mid = sp.value.material
+        mat = mid > 0 ? @material_by_id[mid]? : nil
+        pipeline = mat ? mat.pipeline : @pipeline
+        mat_id = mat ? mat.id : 0
         model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
-        sprites << {sp.value.z, 0, @pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
+        sprites << {sp.value.z, mat_id, pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
       end
       # Sort by layer (z), then material, then texture: correct layering + batching.
       sprites.sort_by! { |s| {s[0], s[1], s[3].view.address} }
