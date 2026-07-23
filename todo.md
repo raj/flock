@@ -325,3 +325,50 @@ notes buried in the completed entries plus the two open sections:
 ### Cross-platform validation
 - [ ] **sdl3-cr surface setup**: X11/Wayland/HWND are cross-compile-verified only; validate
       at runtime on real Linux/Windows machines.
+
+## Roadmap — improvements vs Bevy / MonoGame
+
+Prioritized from building the Space Invaders demo (../spacei). Ordered by leverage on the
+day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGame offer.
+
+### Do first (biggest DX/perf leverage)
+- [ ] **Change detection + query filters** — `Added<T>`, `Changed<T>`, `With`/`Without`/`Or`.
+      Biggest missing ECS ergonomic vs Bevy. The demo hand-tracked `last_score`/`last_lives`;
+      `Changed<Score>` removes that. Needs a per-component version/tick in the sparse sets.
+- [ ] **UI system** — absent, the biggest practical gap. Every game needs menus/HUD; the demo
+      hand-rolled them from sprites+text. Want layout (flexbox or immediate-mode), text/button
+      widgets, keyboard focus. Bevy has `bevy_ui`; a real win over MonoGame.
+- [ ] **Proper text** — today `render_texture` is one texture per string, no glyph atlas, no
+      layout/wrapping. Add a glyph atlas + shaping + dynamic-text cache. Underpins the UI.
+      (Also listed under "Polish" above — promote it.)
+- [ ] **Cross-backend parity in the engine** — native `Sprite2D` (center anchor, y-up) and web
+      (top-left, y-down) diverge, and input/audio/text have two APIs; the demo needed a `Hooks`
+      shim + a `Body`+converter to reconcile. Engine should give ONE `Sprite2D` convention on
+      both backends and a unified input/audio/text API, so a game is truly one code path.
+
+### Then (maturity)
+- [ ] **Parallel scheduler** — systems run sequentially; detect query read/write conflicts and
+      run non-conflicting systems in parallel (Bevy does this automatically).
+- [ ] **Asset server** — async load, ref-counted `Handle<T>`, hot-reload (web already live-reloads).
+      Current `Assets` is a plain cache.
+- [ ] **Render graph + post-processing stack** — renderer is fairly fixed-function; a modular
+      render graph + post-fx (bloom especially) would make glow/flame/starfield shine.
+- [ ] **Input action-mapping in core** — `InputMap<Action>` (logical actions ← keyboard/pad/touch).
+      The demo reimplemented this (leafwing-input-manager style).
+
+### Libraries
+- [ ] **flock-collision**: finish 3D narrowphase (GJK/EPA), continuous collision (CCD) for fast
+      projectiles, contact events / sensors, sleeping bodies, spatial-hash broadphase; ship a
+      real `PhysicsPlugin` with events (rival rapier).
+- [ ] **tilemap / ldtk / aseprite**: a core **sprite-sheet animation** component (not only in
+      aseprite), tilemap rendering integrated into the renderer (not re-spawned sprites),
+      auto-tiling, and **collision generated from tilemaps**.
+- [ ] **flock-cli**: project templates, asset pipeline, one-command build for web/native/**mobile**,
+      native hot-reload dev server (exists for web).
+
+### Smaller wins
+- [ ] **Gizmos / debug-draw** (lines/shapes) — very useful during development.
+- [ ] **Multi-window** support.
+- [ ] **Reflection / scene** expansion (JSON `save_plugin` exists → enables an editor).
+- [ ] **Audio**: mixing bus, spatial audio, effects (SDL3 mixing is basic today).
+- [ ] **Diagnostics**: per-system timings, frame-time graph.
