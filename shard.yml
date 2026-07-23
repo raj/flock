@@ -24,3 +24,5 @@ targets:
     main: examples/window_app.cr
   custom_shader:
     main: examples/custom_shader.cr
+  change_detection:
+    main: examples/change_detection.cr

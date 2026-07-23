@@ -43,6 +43,7 @@ crystal run examples/window_app.cr         # 2D camera + colored sprites
 crystal run examples/custom_shader.cr      # plasma effect (custom WGSL shader)
 crystal run examples/mouse_demo.cr         # a square follows the mouse, red on click
 crystal run examples/events_demo.cr        # wheel + text input (console)
+crystal run examples/change_detection.cr   # query filters + change detection (headless)
 crystal run examples/cube3d.cr             # a spinning lit 3D cube (Camera3D + depth)
 crystal run examples/split_screen.cr       # two viewports, each its own clear color
 
