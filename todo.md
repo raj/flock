@@ -340,9 +340,12 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       Follow-ups: `Or` filter combinator; **resource** change detection (the demo's HUD tracks a
       `Game` resource field, so it still hand-tracks `last_score`); auto-mark on a `Mut<T>`
       wrapper so pointer writes don't need `mark_changed`.
-- [ ] **UI system** — absent, the biggest practical gap. Every game needs menus/HUD; the demo
-      hand-rolled them from sprites+text. Want layout (flexbox or immediate-mode), text/button
-      widgets, keyboard focus. Bevy has `bevy_ui`; a real win over MonoGame.
+- [~] **UI system** — the **flock-ui** companion shard (../flock-ui): retained-ECS, flexbox
+      layout (incl. flex-wrap), widgets panel/label/button/checkbox/slider/progress/text-input,
+      pointer interaction, keyboard focus + Tab, and a Theme; rendered as Sprite2D quads with
+      text + coordinate mapping injected (backend-agnostic). Headless specs cover layout,
+      interaction, text editing and wrapping. Remaining: scroll + nine-slice (need renderer
+      scissor/clipping, not on the Sprite2D path), blinking caret. Could port spacei's menu/HUD onto it.
 - [ ] **Proper text** — today `render_texture` is one texture per string, no glyph atlas, no
       layout/wrapping. Add a glyph atlas + shaping + dynamic-text cache. Underpins the UI.
       (Also listed under "Polish" above — promote it.)
