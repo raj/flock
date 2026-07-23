@@ -23,7 +23,8 @@ module Flock
       new(handle)
     end
 
-    private def self.ensure_init
+    # Public so GlyphAtlas (and others) can guarantee SDL_ttf is initialized.
+    def self.ensure_init
       return if @@initialized
       raise "TTF_Init: #{String.new(LibSDL.get_error)}" unless LibSDL.ttf_init
       @@initialized = true

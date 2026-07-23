@@ -11,6 +11,7 @@ module Flock
     @textures = {} of String => Texture
     @fonts = {} of Tuple(String, Float32) => Font
     @sounds = {} of String => Sound
+    @atlases = {} of Tuple(String, Float32) => GlyphAtlas
 
     def initialize(@gpu : GpuContext)
     end
@@ -30,6 +31,12 @@ module Flock
       @sounds[path] ||= Sound.load(path)
     end
 
+    # Glyph atlas for a (font, size), cached. Rasterizes every printable glyph once; text
+    # then draws as batched quads (see GlyphAtlas / TextLabel).
+    def glyph_atlas(path : String, size : Number) : GlyphAtlas
+      @atlases[{path, size.to_f32}] ||= GlyphAtlas.new(@gpu, path, size)
+    end
+
     # Registers an already-created texture (e.g. text rendering) under a key, to
     # reuse it and release it with the others.
     def store_texture(key : String, texture : Texture) : Texture
@@ -44,9 +51,11 @@ module Flock
     def release : Nil
       @textures.each_value &.release
       @fonts.each_value &.release
+      @atlases.each_value &.texture.release
       @textures.clear
       @fonts.clear
       @sounds.clear
+      @atlases.clear
     end
   end
 

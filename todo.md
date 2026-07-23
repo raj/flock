@@ -313,7 +313,10 @@ notes buried in the completed entries plus the two open sections:
 
 ### Polish left on shipped features
 - [ ] **Mouse**: cursor control (hide/capture/relative mode).
-- [ ] **Text**: per-string texture cache + glyph atlas (native side; web already caches).
+- [x] **Text**: glyph atlas (native) — `GlyphAtlas` rasterizes every printable glyph once into
+      one texture (+ metrics via new SDL_ttf bindings); `TextLabel` + `TextLabelPlugin` draw
+      strings as batched quads, rebuilt only on change. `Assets#glyph_atlas` caches. See
+      examples/text_atlas.cr. (`Font#render_texture` kept for one-off strings.)
 - [~] **3D**: see the dedicated **"3D — remaining"** section. Done: lighting, directional shadow
       mapping, transparency, MSAA, native mipmaps, HDR post-processing/tonemapping, glTF material
       completeness (emissive/occlusion/alpha modes), scene import (`KHR_lights_punctual` + cameras),
@@ -346,9 +349,10 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       text + coordinate mapping injected (backend-agnostic). Headless specs cover layout,
       interaction, text editing and wrapping. Remaining: scroll + nine-slice (need renderer
       scissor/clipping, not on the Sprite2D path), blinking caret. Could port spacei's menu/HUD onto it.
-- [ ] **Proper text** — today `render_texture` is one texture per string, no glyph atlas, no
-      layout/wrapping. Add a glyph atlas + shaping + dynamic-text cache. Underpins the UI.
-      (Also listed under "Polish" above — promote it.)
+- [x] **Proper text** — done (native): glyph atlas + layout (measure, `\n`, baseline via glyph
+      metrics) + `TextLabel` batched, change-detected rebuilds. See the Polish "Text" entry.
+      Follow-ups: word-wrap to a max width, kerning, non-ASCII/Unicode ranges, and a web-backend
+      glyph atlas (web currently caches whole-string canvas textures).
 - [ ] **Cross-backend parity in the engine** — native `Sprite2D` (center anchor, y-up) and web
       (top-left, y-down) diverge, and input/audio/text have two APIs; the demo needed a `Hooks`
       shim + a `Body`+converter to reconcile. Engine should give ONE `Sprite2D` convention on

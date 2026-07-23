@@ -44,6 +44,7 @@ crystal run examples/custom_shader.cr      # plasma effect (custom WGSL shader)
 crystal run examples/mouse_demo.cr         # a square follows the mouse, red on click
 crystal run examples/events_demo.cr        # wheel + text input (console)
 crystal run examples/change_detection.cr   # query filters + change detection (headless)
+crystal run examples/text_atlas.cr         # glyph-atlas text (batched, dynamic labels)
 crystal run examples/cube3d.cr             # a spinning lit 3D cube (Camera3D + depth)
 crystal run examples/split_screen.cr       # two viewports, each its own clear color
 
@@ -82,12 +83,25 @@ snd = assets.sound("assets/shoot.wav")
 
 ## Text
 
+**Glyph atlas (preferred for dynamic text)** — every glyph is rasterized once into a single
+texture; strings draw as batched quads, so changing text costs nothing (no per-string GPU
+texture). `TextLabel` rebuilds only when the text changes (change detection):
+
+```crystal
+app.add_plugin(Flock::TextLabelPlugin.new)
+atlas = assets.glyph_atlas("/System/Library/Fonts/Supplemental/Arial.ttf", 40)
+cmd.spawn(Flock::Transform2D.at(80, 460), Flock::TextLabel.new(atlas, "Score: 0"))
+# update: rewrite .text then world.mark_changed(e, Flock::TextLabel)  — see examples/text_atlas.cr
+```
+
+**One-off texture** (simple, allocates a texture per string — cache it yourself):
+
 ```crystal
 font = assets.font("/System/Library/Fonts/Supplemental/Arial.ttf", 40)
 tex  = font.render_texture(gpu, "Score: 42")    # RGBA texture (white text)
 cmd.spawn(Flock::Transform2D.at(0, 260),
   Flock::Sprite.new(Flock::Vec2.new(tex.width, tex.height), Flock::Color::WHITE, tex))
-# The sprite tint colors the text. Cache it for text that changes often.
+# The sprite tint colors the text.
 ```
 
 Space Invaders: **arrows / A-D** or **left stick** to move, **Space / A button** to shoot.
