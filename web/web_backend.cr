@@ -65,13 +65,16 @@ module Flock::Web
   # --- JS bridges (WebGPU renderer / text / audio live in renderer.js) ---
 
   # Hands the grouped instance buffer to the WebGPU renderer (12 floats/instance).
+  # Camera is passed as ints (JS::Method can't take Float32): position in pixels, zoom ×1000
+  # (0 = no camera → renderer defaults to centering [0,W]x[0,H] at zoom 1).
   @[JS::Method]
-  def draw(ptr : Int32, count : Int32, groups_ptr : Int32, group_count : Int32) : Nil
+  def draw(ptr : Int32, count : Int32, groups_ptr : Int32, group_count : Int32,
+           camx : Int32, camy : Int32, zoom_milli : Int32) : Nil
     <<-JS
       if (__memory.buffer.byteLength === 0) __memory = new DataView(__exports.memory.buffer);
       const f = new Float32Array(__exports.memory.buffer, #{ptr}, #{count} * 12);
       const g = new Int32Array(__exports.memory.buffer, #{groups_ptr}, #{group_count} * 3);
-      if (globalThis.__flockDraw) globalThis.__flockDraw(f, #{count}, g);
+      if (globalThis.__flockDraw) globalThis.__flockDraw(f, #{count}, g, #{camx}, #{camy}, #{zoom_milli} / 1000);
     JS
   end
 
@@ -195,8 +198,18 @@ module Flock::Web
           GROUPS[groups * 3] = cur_tex; GROUPS[groups * 3 + 1] = cur_mat; GROUPS[groups * 3 + 2] = cur_count; groups += 1
         end
 
+        # Camera (backend-agnostic Camera2D): pass its center + zoom, or a zoom<=0 sentinel
+        # when there's none (renderer.js then centers on [0,W]x[0,H] at zoom 1).
+        camx = 0; camy = 0; zoom_milli = 0
+        world.query(Flock::Camera2D) do |_e, cam|
+          next unless cam.value.active
+          camx = cam.value.position.x.to_i
+          camy = cam.value.position.y.to_i
+          zoom_milli = (cam.value.zoom * 1000).to_i
+        end
+
         Flock::Web.draw(BUFFER.to_unsafe.address.to_i64!.to_i32!, items.size,
-          GROUPS.to_unsafe.address.to_i64!.to_i32!, groups)
+          GROUPS.to_unsafe.address.to_i64!.to_i32!, groups, camx, camy, zoom_milli)
       end
     end
   end

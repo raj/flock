@@ -11,6 +11,7 @@ require "./flock/ecs/entity"
 require "./flock/ecs/component"
 require "./flock/transform"
 require "./flock/sprite2d"
+require "./flock/render/camera"         # Camera2D/3D + Viewport (backend-agnostic; used by native + web)
 require "./flock/render/sprite_shaders" # built-in Sprite2D material shaders (pure strings)
 require "./flock/ecs/bundle"
 require "./flock/ecs/sparse_set"

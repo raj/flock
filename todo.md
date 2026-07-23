@@ -353,7 +353,14 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       metrics) + `TextLabel` batched, change-detected rebuilds. See the Polish "Text" entry.
       Follow-ups: word-wrap to a max width, kerning, non-ASCII/Unicode ranges, and a web-backend
       glyph atlas (web currently caches whole-string canvas textures).
-- [ ] **Cross-backend parity in the engine** — native `Sprite2D` (center anchor, y-up) and web
+- [x] **Cross-backend parity (Sprite2D + Camera2D)** — done: the web renderer now uses the
+      SAME convention as native (center-anchor, y-up) and honors a backend-agnostic `Camera2D`
+      (moved to core; web_backend feeds its position/zoom to renderer.js). One
+      `Transform2D`+`Camera2D` game source renders identically on both — spacei dropped its
+      Body/converter/place shim (shake is now a camera offset on both). Verified in-browser.
+      Follow-up (still injected, backends differ fundamentally): unify input/audio/text APIs
+      so those hooks can go too. Original note:
+- [ ] **Cross-backend input/audio/text** — native `Sprite2D` (center anchor, y-up) and web
       (top-left, y-down) diverge, and input/audio/text have two APIs; the demo needed a `Hooks`
       shim + a `Body`+converter to reconcile. Engine should give ONE `Sprite2D` convention on
       both backends and a unified input/audio/text API, so a game is truly one code path.

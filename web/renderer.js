@@ -52,8 +52,11 @@ const WebGPUBackend = {
     // Shared shader preamble (bindings + vertex stage). A material = this preamble + a
     // custom `fs`; the default material's fs is DEFAULT_FS. All pipelines share one
     // explicit layout so the group0/texture bind groups are valid for every pipeline.
+    // Sprite2D convention (matches the native renderer): rect.xy is the sprite CENTER,
+    // world space is y-UP, and a Camera2D (g.cam center + g.zoom) frames it. `c` is a
+    // 0..1 corner; the UV flips v so textures stay upright under y-up.
     this.preamble = `
-      struct Globals { size : vec2<f32> };
+      struct Globals { size : vec2<f32>, cam : vec2<f32>, zoom : vec2<f32> };
       @group(0) @binding(0) var<uniform> g : Globals;
       @group(0) @binding(1) var<storage, read> inst : array<vec4<f32>>;
       @group(1) @binding(0) var tex : texture_2d<f32>;
@@ -68,11 +71,12 @@ const WebGPUBackend = {
         let col  = inst[ii * 3u + 1u];
         let uvr  = inst[ii * 3u + 2u];
         let c = corners[vi];
-        let p = rect.xy + c * rect.zw;
-        let ndc = vec2<f32>(p.x / g.size.x * 2.0 - 1.0, 1.0 - p.y / g.size.y * 2.0);
+        let world = rect.xy + (c - vec2<f32>(0.5, 0.5)) * rect.zw;
+        let view = (world - g.cam) * g.zoom.x;
+        let ndc = vec2<f32>(view.x / (g.size.x * 0.5), view.y / (g.size.y * 0.5));
         var o : VSOut;
         o.pos = vec4<f32>(ndc, 0.0, 1.0);
-        o.uv = uvr.xy + c * uvr.zw;
+        o.uv = uvr.xy + vec2<f32>(c.x, 1.0 - c.y) * uvr.zw;
         o.color = col;
         return o;
       }
@@ -115,7 +119,7 @@ const WebGPUBackend = {
     this.materials = [this.pipeline]; // index 0 = default; registerMaterial appends
 
     this.sampler = device.createSampler({ magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" });
-    this.uniformBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.uniformBuf = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.instanceBuf = device.createBuffer({ size: MAX * FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.group0 = device.createBindGroup({
       layout: this.layout0,
@@ -137,13 +141,14 @@ const WebGPUBackend = {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     fitStyle(this.canvas);
     this.canvas.width = Math.round(WIDTH * dpr); this.canvas.height = Math.round(HEIGHT * dpr);
-    this.device.queue.writeBuffer(this.uniformBuf, 0, new Float32Array([WIDTH, HEIGHT, 0, 0]));
   },
 
   white() { return this._bind(this._solid(1, 1, [255, 255, 255, 255])); },
   texture(w, h, src) { return this._bind(this._mipped(w, h, src)); },
 
-  draw(floats, count, groups) {
+  draw(floats, count, groups, camx, camy, zoom) {
+    // Globals: size(vec2), cam(vec2), zoom(vec2, .x used) — 8 floats (32 bytes).
+    this.device.queue.writeBuffer(this.uniformBuf, 0, new Float32Array([WIDTH, HEIGHT, camx, camy, zoom, 0, 0, 0]));
     count = Math.min(count, MAX); // defensive: buffers are sized for MAX instances
     if (count > 0) this.device.queue.writeBuffer(this.instanceBuf, 0, floats, 0, count * FLOATS);
     const enc = this.device.createCommandEncoder();
@@ -227,19 +232,23 @@ const WebGL2Backend = {
     if (!gl) throw new Error("WebGL2 unavailable");
     this.gl = gl; this.canvas = canvas;
 
-    // Vertex shader: per-vertex corner (0..1) + per-instance rect/color/uv -> pixel-space quad.
+    // Vertex shader: rect.xy = sprite CENTER, y-up world, framed by uCam/uZoom (matches
+    // the native renderer + the WebGPU backend). v flipped so textures stay upright.
     const vs = `#version 300 es
       uniform vec2 uSize;
+      uniform vec2 uCam;
+      uniform float uZoom;
       layout(location=0) in vec2 aCorner;
-      layout(location=1) in vec4 aRect;   // x, y, w, h  (per instance)
+      layout(location=1) in vec4 aRect;   // cx, cy, w, h  (per instance)
       layout(location=2) in vec4 aColor;  // r, g, b, a  (per instance)
       layout(location=3) in vec4 aUv;     // u, v, uw, uh (per instance)
       out vec2 vUv; out vec4 vColor;
       void main() {
-        vec2 p = aRect.xy + aCorner * aRect.zw;
-        vec2 ndc = vec2(p.x / uSize.x * 2.0 - 1.0, 1.0 - p.y / uSize.y * 2.0);
+        vec2 world = aRect.xy + (aCorner - vec2(0.5)) * aRect.zw;
+        vec2 view = (world - uCam) * uZoom;
+        vec2 ndc = vec2(view.x / (uSize.x * 0.5), view.y / (uSize.y * 0.5));
         gl_Position = vec4(ndc, 0.0, 1.0);
-        vUv = aUv.xy + aCorner * aUv.zw;
+        vUv = aUv.xy + vec2(aCorner.x, 1.0 - aCorner.y) * aUv.zw;
         vColor = aColor;
       }`;
     const fs = `#version 300 es
@@ -254,11 +263,10 @@ const WebGL2Backend = {
     this.vsSrc = vs;                       // reused to build custom-material programs
     this.fsHeader = `#version 300 es\n      precision mediump float;\n      uniform sampler2D uTex;\n      in vec2 vUv; in vec4 vColor;\n      out vec4 o;\n`;
     this.prog = this._program(vs, fs);
-    this.uSize = gl.getUniformLocation(this.prog, "uSize");
     gl.useProgram(this.prog);
     gl.uniform1i(gl.getUniformLocation(this.prog, "uTex"), 0);
-    // Material 0 = default; registerMaterial appends {prog, uSize}.
-    this.materials = [{ prog: this.prog, uSize: this.uSize }];
+    // Material 0 = default; registerMaterial appends the same shape.
+    this.materials = [this._matInfo(this.prog)];
 
     this.vao = gl.createVertexArray();
     gl.bindVertexArray(this.vao);
@@ -301,11 +309,21 @@ const WebGL2Backend = {
     const prog = this._program(this.vsSrc, fs);
     gl.useProgram(prog);
     gl.uniform1i(gl.getUniformLocation(prog, "uTex"), 0);
-    this.materials.push({ prog, uSize: gl.getUniformLocation(prog, "uSize") });
+    this.materials.push(this._matInfo(prog));
     return this.materials.length - 1;
   },
 
-  draw(floats, count, groups) {
+  _matInfo(prog) {
+    const gl = this.gl;
+    return {
+      prog,
+      uSize: gl.getUniformLocation(prog, "uSize"),
+      uCam: gl.getUniformLocation(prog, "uCam"),
+      uZoom: gl.getUniformLocation(prog, "uZoom"),
+    };
+  },
+
+  draw(floats, count, groups, camx, camy, zoom) {
     const gl = this.gl;
     gl.clearColor(CLEAR[0], CLEAR[1], CLEAR[2], CLEAR[3]);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -323,6 +341,8 @@ const WebGL2Backend = {
       const mat = this.materials[matId] || this.materials[0];
       gl.useProgram(mat.prog);
       gl.uniform2f(mat.uSize, WIDTH, HEIGHT);
+      gl.uniform2f(mat.uCam, camx, camy);
+      gl.uniform1f(mat.uZoom, zoom);
       // WebGL2 has no baseInstance, so offset the instance attributes into the buffer instead.
       const base = offset * STRIDE;
       gl.vertexAttribPointer(1, 4, gl.FLOAT, false, STRIDE, base + 0);
@@ -485,7 +505,11 @@ globalThis.__flockBeep = (freq, ms) => {
   osc.connect(gain).connect(masterGain); osc.start(t); osc.stop(t + ms / 1000);
 };
 
-globalThis.__flockDraw = (floats, count, groups) => gfx.draw(floats, count, groups);
+globalThis.__flockDraw = (floats, count, groups, camx, camy, zoom) => {
+  // No Camera2D provided (zoom<=0): default to one centered on [0,W]x[0,H] at zoom 1.
+  if (!(zoom > 0)) { camx = WIDTH / 2; camy = HEIGHT / 2; zoom = 1; }
+  gfx.draw(floats, count, groups, camx, camy, zoom);
+};
 
 // Registers a custom sprite material and returns its id (0 if the backend can't build it).
 // wgslFrag is used by the WebGPU backend, glslBody by WebGL2.
