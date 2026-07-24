@@ -315,7 +315,10 @@ notes buried in the completed entries plus the two open sections:
       ships on both. Remaining web polish tracked in that section / flock-ui (sampler example).
 
 ### Polish left on shipped features
-- [ ] **Mouse**: cursor control (hide/capture/relative mode).
+- [x] **Mouse cursor control** — `Flock::Input`: `relative_mouse_mode=`/`?` (FPS mouse-look:
+      hide + grab + delta-only motion), `hide_cursor`/`show_cursor`/`cursor_visible?`,
+      `grab_mouse=`/`?` (confine to window, cursor visible — added `SDL_SetWindowMouseGrab`/`Get`
+      to sdl3-cr), and `warp_mouse`. Demo `examples/mouse_cursor.cr` (smokes 30 frames).
 - [x] **Text**: glyph atlas (native) — `GlyphAtlas` rasterizes every printable glyph once into
       one texture (+ metrics via new SDL_ttf bindings); `TextLabel` + `TextLabelPlugin` draw
       strings as batched quads, rebuilt only on change. `Assets#glyph_atlas` caches. See

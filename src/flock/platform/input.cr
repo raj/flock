@@ -168,6 +168,16 @@ module Flock
       LibSDL.cursor_visible
     end
 
+    # Confines the cursor to the window (grab/capture) — the cursor stays visible and reports
+    # absolute position, unlike `relative_mouse_mode=` which also hides + delivers deltas only.
+    def grab_mouse=(grabbed : Bool) : Nil
+      LibSDL.set_window_mouse_grab(@window, grabbed) unless @window.null?
+    end
+
+    def grab_mouse? : Bool
+      !@window.null? && LibSDL.get_window_mouse_grab(@window)
+    end
+
     # Warps the cursor to (x, y) in window points.
     def warp_mouse(x : Number, y : Number) : Nil
       LibSDL.warp_mouse_in_window(@window, x.to_f32, y.to_f32) unless @window.null?
