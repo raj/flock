@@ -444,9 +444,13 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       Follow-ups: gamepad/mouse-button/touch triggers; 2-D axis (Vec2) helper; runtime rebinding UI.
 
 ### Libraries
-- [ ] **flock-collision**: finish 3D narrowphase (GJK/EPA), continuous collision (CCD) for fast
-      projectiles, contact events / sensors, sleeping bodies, spatial-hash broadphase; ship a
-      real `PhysicsPlugin` with events (rival rapier).
+- [x] **flock-collision** — 3D is complete (was already implemented; verified now): GJK+EPA
+      narrowphase (sphere/box/capsule + OBB), broadphases `SpatialHash3D` / `SweepPrune3D` /
+      `BVH3D`, continuous collision (`RigidBody3D#ccd`, swept vs statics — no tunnelling), contact
+      events (`Contact3D` via `send_event`) + sensors (`Collider3D#sensor` — reports, no impulse),
+      sleeping bodies with union-find contact islands, joints, raycasts/queries, and a
+      `Physics3DPlugin`. Added CCD/sensor/sleeping coverage to `spec/physics3d_spec.cr` (72 specs
+      green). Follow-up: 3D speculative contacts + a broadphase auto-select heuristic.
 - [x] **tilemap / ldtk / aseprite** — all four done. **Core sprite-sheet animation**:
       `Flock::SpriteSheet` (grid → UV) + `SpriteAnimation` (frames/fps/loop/ping-pong, pure
       `step`) + `SpriteAnimationPlugin` writing the frame's UV to `Sprite2D` — portable, not tied
