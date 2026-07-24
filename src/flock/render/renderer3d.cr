@@ -755,15 +755,15 @@ module Flock
     # rendering into an offscreen `RenderTarget` that differs from the window (else the
     # depth/MSAA attachments mismatch the color target and wgpu rejects the pass).
     def render_into(world : World, target : LibWGPU::TextureView,
-                    width : UInt32 = @gpu.width, height : UInt32 = @gpu.height) : Nil
+                    width : UInt32 = @gpu.width, height : UInt32 = @gpu.height, window : Int32 = 0) : Nil
       ensure_depth(width, height)
 
-      # Every active Camera3D, drawn in ascending `order` (split-screen / overlays / minimaps).
-      # Stable ordering on ties: `sort_by!` is unstable, so key on (order, spawn index) to keep
-      # the primary camera (drives culling + the full-frame clear) deterministic.
+      # Every active Camera3D for this `window` (0 = primary), drawn in ascending `order`
+      # (split-screen / overlays / minimaps). Stable ordering on ties: `sort_by!` is unstable,
+      # so key on (order, spawn index) to keep the primary camera deterministic.
       cameras = [] of Camera3D
       world.query(Camera3D) do |_e, cam|
-        cameras << cam.value if cam.value.active
+        cameras << cam.value if cam.value.active && cam.value.window == window
       end
       indexed = cameras.map_with_index { |c, idx| {c, idx} }
       indexed.sort_by! { |(c, idx)| {c.order, idx} }

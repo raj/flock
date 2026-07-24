@@ -467,7 +467,17 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
 
 ### Smaller wins
 - [ ] **Gizmos / debug-draw** (lines/shapes) — very useful during development.
-- [ ] **Multi-window** support.
+- [x] **Multi-window** (native) — one GPU device, N swapchains. `Flock::Window` = a secondary
+      SDL window + wgpu surface sharing the primary `GpuContext`'s device/queue/instance/adapter
+      (acquire/present/reconfigure/release); `Flock::Windows` registry (`open(title,w,h)`) inserted
+      by `MultiWindowPlugin`, which draws each secondary window every Render frame. Cameras bind to
+      a window via `Camera2D#window`/`Camera3D#window` (0 = primary, else a window's `slot`);
+      `render_into` filters cameras by window (default 0 → single-window path unchanged). The runner
+      routes resize + close by SDL `window_id` (added `SDL_GetWindowID`/`GetWindowFromID` to
+      sdl3-cr): closing a secondary closes just it, closing the primary quits. Verified:
+      `examples/multi_window.cr` (two windows, one shared sprite from two cameras) smokes 30 frames;
+      2D/3D readback + 115 specs + spacei native/web unaffected. Follow-up: per-window Input (mouse
+      position/focus are still primary-window only; keyboard is global).
 - [ ] **Reflection / scene** expansion (JSON `save_plugin` exists → enables an editor).
 - [ ] **Audio**: mixing bus, spatial audio, effects (SDL3 mixing is basic today).
 - [ ] **Diagnostics**: per-system timings, frame-time graph.

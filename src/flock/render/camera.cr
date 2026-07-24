@@ -22,11 +22,13 @@ module Flock
     property order : Int32
     property clear_color : Color?
     property active : Bool
+    # Which window renders this camera (0 = primary; a secondary window's `slot` otherwise).
+    property window : Int32
 
     def initialize(@position : Vec2 = Vec2.new, @zoom : Float32 = 1.0f32,
                    @rotation : Float32 = 0.0f32, @viewport : Viewport? = nil,
                    @order : Int32 = 0, @clear_color : Color? = Color::BLACK,
-                   @active : Bool = true)
+                   @active : Bool = true, @window : Int32 = 0)
     end
 
     # Converts a screen position (framebuffer pixels, top-left origin) into
@@ -75,12 +77,14 @@ module Flock
     property order : Int32
     property clear_color : Color?
     property active : Bool
+    # Which window renders this camera (0 = primary; a secondary window's `slot` otherwise).
+    property window : Int32
 
     def initialize(@position : Vec3 = Vec3.new(0, 0, 5), @target : Vec3 = Vec3.new,
                    @up : Vec3 = Vec3.new(0, 1, 0), @fov_y : Float32 = 1.0f32,
                    @near : Float32 = 0.1f32, @far : Float32 = 1000.0f32,
                    @viewport : Viewport? = nil, @order : Int32 = 0,
-                   @clear_color : Color? = Color::BLACK, @active : Bool = true)
+                   @clear_color : Color? = Color::BLACK, @active : Bool = true, @window : Int32 = 0)
     end
 
     def view_projection(aspect : Float32) : Mat4

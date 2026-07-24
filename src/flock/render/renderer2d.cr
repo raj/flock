@@ -569,11 +569,13 @@ module Flock
     # `load_previous` keeps whatever is already in `target` (LoadOp::Load) instead of
     # clearing — used to draw sprites/HUD ON TOP of a prior pass (e.g. the 3D scene),
     # so 2D and 3D can share one frame (see Render2D3DPlugin).
+    # `window` selects which cameras render here: only cameras whose `window` matches (default
+    # 0 = the primary window). Secondary windows pass their `slot` (see MultiWindowPlugin).
     def render_into(target : LibWGPU::TextureView, width : UInt32, height : UInt32, world : World,
-                    load_previous : Bool = false) : Nil
+                    load_previous : Bool = false, window : Int32 = 0) : Nil
       @last_draw_calls = 0
       cameras = [] of Camera2D
-      world.query(Camera2D) { |_e, cam| cameras << cam.value if cam.value.active }
+      world.query(Camera2D) { |_e, cam| cameras << cam.value if cam.value.active && cam.value.window == window }
       cameras << Camera2D.new(clear_color: Color.new(0.05, 0.05, 0.08)) if cameras.empty?
       # Stable order on ties: `sort_by!` is unstable, so key on (order, spawn index) to keep
       # the primary (full-frame clear) camera deterministic when two share an `order`.

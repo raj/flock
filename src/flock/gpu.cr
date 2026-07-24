@@ -8,6 +8,7 @@ require "../../../sdl3-cr/src/sdl3"   # SDL3 binding (neighboring shard, relativ
 require "./platform/gpu_errors"
 require "./platform/gpu_context"
 require "./platform/window"
+require "./platform/windows"    # Flock::Window / Windows / MultiWindowPlugin (multi-window)
 require "./platform/input"
 require "./platform/audio"
 require "./platform/music"

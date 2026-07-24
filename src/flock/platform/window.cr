@@ -42,10 +42,60 @@ module Flock
     end
   end
 
-  # Creates the SDL3 window + the wgpu surface (dispatched per platform: Metal on
-  # macOS, X11/Wayland on Linux, HWND on Windows — via `make_surface`), inserts the
-  # GpuContext resource, and installs the runner: the main loop (SDL events + one
-  # frame per turn). `WGPU_FRAMES=N` quits after N frames (headless test).
+  # Creates the wgpu surface for an SDL window, dispatched per platform (Metal on macOS,
+  # X11/Wayland on Linux, HWND on Windows) via the native handles from SDL. Returns
+  # {surface, MetalView} (the view is null off macOS). Shared by WindowPlugin (primary
+  # window) and Flock::Window (secondary windows).
+  def self.make_window_surface(instance : LibWGPU::Instance, window : LibSDL::Window) : {LibWGPU::Surface, LibSDL::MetalView}
+    no_view = Pointer(Void).null.as(LibSDL::MetalView)
+    {% if flag?(:darwin) %}
+      view = LibSDL.metal_create_view(window)
+      layer = LibSDL.metal_get_layer(view)
+      raise "SDL_Metal_GetLayer null" if layer.null?
+      src = LibWGPU::SurfaceSourceMetalLayer.new
+      src.chain.s_type = LibWGPU::SType::SurfaceSourceMetalLayer
+      src.layer = layer
+      {create_window_surface_from(instance, pointerof(src).as(Pointer(Void))), view}
+    {% elsif flag?(:win32) %}
+      props = LibSDL.get_window_properties(window)
+      src = LibWGPU::SurfaceSourceWindowsHWND.new
+      src.chain.s_type = LibWGPU::SType::SurfaceSourceWindowsHWND
+      src.hwnd = LibSDL.get_pointer_property(props, "SDL.window.win32.hwnd".to_unsafe, Pointer(Void).null)
+      src.hinstance = LibSDL.get_pointer_property(props, "SDL.window.win32.instance".to_unsafe, Pointer(Void).null)
+      {create_window_surface_from(instance, pointerof(src).as(Pointer(Void))), no_view}
+    {% elsif flag?(:linux) %}
+      props = LibSDL.get_window_properties(window)
+      driver = String.new(LibSDL.get_current_video_driver)
+      if driver == "wayland"
+        src = LibWGPU::SurfaceSourceWaylandSurface.new
+        src.chain.s_type = LibWGPU::SType::SurfaceSourceWaylandSurface
+        src.display = LibSDL.get_pointer_property(props, "SDL.window.wayland.display".to_unsafe, Pointer(Void).null)
+        src.surface = LibSDL.get_pointer_property(props, "SDL.window.wayland.surface".to_unsafe, Pointer(Void).null)
+        {create_window_surface_from(instance, pointerof(src).as(Pointer(Void))), no_view}
+      else # x11
+        src = LibWGPU::SurfaceSourceXlibWindow.new
+        src.chain.s_type = LibWGPU::SType::SurfaceSourceXlibWindow
+        src.display = LibSDL.get_pointer_property(props, "SDL.window.x11.display".to_unsafe, Pointer(Void).null)
+        src.window = LibSDL.get_number_property(props, "SDL.window.x11.window".to_unsafe, 0_i64).to_u64
+        {create_window_surface_from(instance, pointerof(src).as(Pointer(Void))), no_view}
+      end
+    {% else %}
+      {% raise "Flock: surface creation not supported on this platform" %}
+    {% end %}
+  end
+
+  def self.create_window_surface_from(instance : LibWGPU::Instance, source : Pointer(Void)) : LibWGPU::Surface
+    sdesc = LibWGPU::SurfaceDescriptor.new
+    sdesc.label = WGPU.empty_string_view
+    sdesc.next_in_chain = source.as(Pointer(LibWGPU::ChainedStruct))
+    surface = LibWGPU.instance_create_surface(instance, pointerof(sdesc))
+    raise "instance_create_surface failed" if surface.null?
+    surface
+  end
+
+  # Creates the SDL3 window + the wgpu surface (via `Flock.make_window_surface`), inserts the
+  # GpuContext resource, and installs the runner: the main loop (SDL events + one frame per
+  # turn). `WGPU_FRAMES=N` quits after N frames (headless test).
   class WindowPlugin < Plugin
     def initialize(@title : String = "Flock", @width : Int32 = 800, @height : Int32 = 600)
     end
@@ -63,7 +113,7 @@ module Flock
       raise "SDL_CreateWindow: #{String.new(LibSDL.get_error)}" if window.null?
 
       instance = WGPU.create_instance
-      surface, view = make_surface(instance, window)
+      surface, view = Flock.make_window_surface(instance, window)
 
       adapter = WGPU.request_adapter(instance, compatible_surface: surface)
       device = Flock.request_device(instance, adapter) # device + wgpu error callbacks
@@ -82,57 +132,6 @@ module Flock
       app.world.insert_resource(WindowState.new)
 
       install_runner(app, gpu)
-    end
-
-    # Creates the wgpu surface per platform, via the native handles exposed by SDL
-    # (`SDL_GetWindowProperties`). Returns {surface, MetalView} (the view exists only
-    # on macOS; null elsewhere). The non-macOS branches are written but have not
-    # been tested at runtime on this machine.
-    private def make_surface(instance : LibWGPU::Instance, window : LibSDL::Window) : {LibWGPU::Surface, LibSDL::MetalView}
-      no_view = Pointer(Void).null.as(LibSDL::MetalView)
-      {% if flag?(:darwin) %}
-        view = LibSDL.metal_create_view(window)
-        layer = LibSDL.metal_get_layer(view)
-        raise "SDL_Metal_GetLayer null" if layer.null?
-        src = LibWGPU::SurfaceSourceMetalLayer.new
-        src.chain.s_type = LibWGPU::SType::SurfaceSourceMetalLayer
-        src.layer = layer
-        {create_surface_from(instance, pointerof(src).as(Pointer(Void))), view}
-      {% elsif flag?(:win32) %}
-        props = LibSDL.get_window_properties(window)
-        src = LibWGPU::SurfaceSourceWindowsHWND.new
-        src.chain.s_type = LibWGPU::SType::SurfaceSourceWindowsHWND
-        src.hwnd = LibSDL.get_pointer_property(props, "SDL.window.win32.hwnd".to_unsafe, Pointer(Void).null)
-        src.hinstance = LibSDL.get_pointer_property(props, "SDL.window.win32.instance".to_unsafe, Pointer(Void).null)
-        {create_surface_from(instance, pointerof(src).as(Pointer(Void))), no_view}
-      {% elsif flag?(:linux) %}
-        props = LibSDL.get_window_properties(window)
-        driver = String.new(LibSDL.get_current_video_driver)
-        if driver == "wayland"
-          src = LibWGPU::SurfaceSourceWaylandSurface.new
-          src.chain.s_type = LibWGPU::SType::SurfaceSourceWaylandSurface
-          src.display = LibSDL.get_pointer_property(props, "SDL.window.wayland.display".to_unsafe, Pointer(Void).null)
-          src.surface = LibSDL.get_pointer_property(props, "SDL.window.wayland.surface".to_unsafe, Pointer(Void).null)
-          {create_surface_from(instance, pointerof(src).as(Pointer(Void))), no_view}
-        else # x11
-          src = LibWGPU::SurfaceSourceXlibWindow.new
-          src.chain.s_type = LibWGPU::SType::SurfaceSourceXlibWindow
-          src.display = LibSDL.get_pointer_property(props, "SDL.window.x11.display".to_unsafe, Pointer(Void).null)
-          src.window = LibSDL.get_number_property(props, "SDL.window.x11.window".to_unsafe, 0_i64).to_u64
-          {create_surface_from(instance, pointerof(src).as(Pointer(Void))), no_view}
-        end
-      {% else %}
-        {% raise "Flock: surface creation not supported on this platform" %}
-      {% end %}
-    end
-
-    private def create_surface_from(instance : LibWGPU::Instance, source : Pointer(Void)) : LibWGPU::Surface
-      sdesc = LibWGPU::SurfaceDescriptor.new
-      sdesc.label = WGPU.empty_string_view
-      sdesc.next_in_chain = source.as(Pointer(LibWGPU::ChainedStruct))
-      surface = LibWGPU.instance_create_surface(instance, pointerof(sdesc))
-      raise "instance_create_surface failed" if surface.null?
-      surface
     end
 
     private def install_runner(app : App, gpu : GpuContext) : Nil
@@ -156,7 +155,15 @@ module Flock
               running = false
               win.try &.on_close_requested
             when LibSDL::EVENT_WINDOW_CLOSE_REQUESTED
-              win.try &.on_close_requested
+              # Route by window id: closing a SECONDARY window just closes that window;
+              # closing the primary (or when there are none) quits the app.
+              we = pointerof(event).as(Pointer(LibSDL::WindowEvent)).value
+              wins = a.world.resource?(Windows)
+              if wins && (w2 = wins.by_sdl_id(we.window_id))
+                wins.close(w2)
+              else
+                win.try &.on_close_requested
+              end
             when LibSDL::EVENT_MOUSE_WHEEL
               if inp = input
                 we = pointerof(event).as(Pointer(LibSDL::MouseWheelEvent)).value
@@ -202,6 +209,8 @@ module Flock
           if w.to_u32 != gpu.width || h.to_u32 != gpu.height
             gpu.reconfigure(w.to_u32, h.to_u32)
           end
+          # Secondary windows: reconfigure each to its current size too.
+          a.world.resource?(Windows).try &.each(&.reconfigure_to_window)
 
           a.update
           LibWGPU.instance_process_events(gpu.instance) # flush the wgpu error callbacks
