@@ -11,6 +11,7 @@ require "./flock/ecs/entity"
 require "./flock/ecs/component"
 require "./flock/transform"
 require "./flock/sprite2d"
+require "./flock/sprite_batch"          # Flock::SpriteBatch: many quads, one entity, one draw
 require "./flock/keys"                  # Flock::Key enum (shared by native + web input)
 require "./flock/render/camera"         # Camera2D/3D + Viewport (backend-agnostic; used by native + web)
 require "./flock/render/sprite_shaders" # built-in Sprite2D material shaders (pure strings)
@@ -30,6 +31,7 @@ require "./flock/app/plugin"
 require "./flock/time"
 require "./flock/app/app"
 require "./flock/app/parallel"    # opt-in parallel scheduler (Access + wave batching + executor)
+require "./flock/sprite_anim"     # Flock::SpriteSheet + SpriteAnimation (needs Sprite2D/Plugin/Time)
 require "./flock/hierarchy"        # Parent component + HierarchyPlugin (needs Component, Plugin, Schedule)
 require "./flock/scene/save_plugin" # periodic autosave (needs Scene, Plugin, Time)
 

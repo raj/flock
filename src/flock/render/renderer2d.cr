@@ -603,6 +603,21 @@ module Flock
         model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
         sprites << {sp.value.z, mat_id, pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size, sp.value.clip}
       end
+
+      # SpriteBatch: expand one entity's quads into instances (all share texture+material, so
+      # they collapse into a single instanced draw). No per-tile entities.
+      world.query(Transform2D, SpriteBatch) do |_e, tf, sb|
+        b = sb.value
+        texture = (0 <= b.texture < @texture_bank.size) ? @texture_bank[b.texture] : @white
+        mat = b.material > 0 ? @material_by_id[b.material]? : nil
+        pipeline = mat ? mat.pipeline : @pipeline
+        mat_id = mat ? mat.id : 0
+        base = tf.value.matrix
+        b.items.each do |it|
+          model = base * Flock::Transform2D.at(it.pos.x, it.pos.y).matrix * Mat4.scale(Vec3.new(it.size.x, it.size.y, 1.0f32))
+          sprites << {b.z, mat_id, pipeline, texture, model, it.color, it.uv_min, it.uv_size, nil.as(ClipRect?)}
+        end
+      end
       # Sort by layer (z), then material, then texture: correct layering + batching.
       sprites.sort_by! { |s| {s[0], s[1], s[3].view.address} }
       @last_sprites = sprites.size

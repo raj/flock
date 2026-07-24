@@ -198,6 +198,17 @@ module Flock::Web
           end
           items << Inst.new(sp.value.z, sp.value.texture, sp.value.material, p.x, p.y, s.x, s.y, c.r, c.g, c.b, c.a, uv.x, uv.y, uz.x, uz.y, cx0, cy0, cx1, cy1)
         end
+        # SpriteBatch: expand one entity's quads into instances (parity with native).
+        world.query(Flock::Transform2D, Flock::SpriteBatch) do |_e, tf, sb|
+          b = sb.value; bp = tf.value.position
+          b.items.each do |it|
+            next if items.size >= MAX
+            ic = it.color
+            items << Inst.new(b.z, b.texture, b.material, bp.x + it.pos.x, bp.y + it.pos.y,
+              it.size.x, it.size.y, ic.r, ic.g, ic.b, ic.a,
+              it.uv_min.x, it.uv_min.y, it.uv_size.x, it.uv_size.y, 0.0f32, 0.0f32, 0.0f32, 0.0f32)
+          end
+        end
         # Order by layer (z), then (material, texture): correct back-to-front layering
         # (matches the native renderer) with contiguous draw groups.
         items.sort_by! { |it| {it.z, it.mat, it.tex} }

@@ -447,9 +447,17 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
 - [ ] **flock-collision**: finish 3D narrowphase (GJK/EPA), continuous collision (CCD) for fast
       projectiles, contact events / sensors, sleeping bodies, spatial-hash broadphase; ship a
       real `PhysicsPlugin` with events (rival rapier).
-- [ ] **tilemap / ldtk / aseprite**: a core **sprite-sheet animation** component (not only in
-      aseprite), tilemap rendering integrated into the renderer (not re-spawned sprites),
-      auto-tiling, and **collision generated from tilemaps**.
+- [x] **tilemap / ldtk / aseprite** — all four done. **Core sprite-sheet animation**:
+      `Flock::SpriteSheet` (grid → UV) + `SpriteAnimation` (frames/fps/loop/ping-pong, pure
+      `step`) + `SpriteAnimationPlugin` writing the frame's UV to `Sprite2D` — portable, not tied
+      to Aseprite (`spec/sprite_anim_spec.cr`). **Batched tilemap rendering**: a core
+      `Flock::SpriteBatch` component (many quads, one entity → ONE instanced draw, native + web) —
+      `Flock::Tilemap.batch_items` bakes a tile layer into one batch, so a map draws without
+      per-tile entities (`examples/sprite_batch_test.cr` proves draws == 1). **Collision from
+      tilemaps**: `Flock::Tilemap.build_collision` emits horizontally-merged `TileBox`es from solid
+      cells. **Auto-tiling**: `Flock::Tilemap::Autotile` (4/8-bit neighbour mask + `remap`
+      mask→gid). tilemap features verified in `flock-tilemap/spec/features_spec.cr`. Follow-up:
+      route flock-aseprite/ldtk onto the shared `SpriteAnimation`/`SpriteBatch`.
 - [ ] **flock-cli**: project templates, asset pipeline, one-command build for web/native/**mobile**,
       native hot-reload dev server (exists for web).
 
