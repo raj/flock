@@ -309,7 +309,10 @@ notes buried in the completed entries plus the two open sections:
 
 ### Standalone (own sections above)
 - [x] **Forward wgpu-native detailed logs** (Diagnostics) — done, opt-in via `FLOCK_WGPU_LOG`.
-- [ ] **Web / WASM export** — deferred; real project (see the section above).
+- [x] **Web / WASM export** — done (see the "Web / WASM export" section above): the full core
+      ECS + Sprite2D/Camera2D + input/audio/text/materials run in the browser (WebGPU/WebGL2),
+      one game source compiles to native AND web. Cross-backend parity verified in Chrome; spacei
+      ships on both. Remaining web polish tracked in that section / flock-ui (sampler example).
 
 ### Polish left on shipped features
 - [ ] **Mouse**: cursor control (hide/capture/relative mode).
@@ -384,6 +387,20 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       access from queries.
 - [ ] **Asset server** — async load, ref-counted `Handle<T>`, hot-reload (web already live-reloads).
       Current `Assets` is a plain cache.
+- [ ] **Asset packing / content pipeline** (MonoGame `.xnb` equivalent) — an offline build step that
+      pre-processes source assets (PNG/OGG/glTF/TTF/TMX…) into a compact, engine-ready binary format
+      and bundles them into one (or few) pack files, loaded at runtime instead of raw files.
+      Goals: (a) **preprocessing** — decode/transcode once at build time (premultiplied + mipmapped
+      textures, GPU-block-compressed where supported, decoded audio, pre-parsed glyph atlases / glTF
+      meshes) so runtime load is a near-zero-copy read, not a parse; (b) **one archive** — a `.flkpack`
+      container (header + index + optionally-compressed blobs, e.g. zstd) so a shipped game is a
+      binary + a pack, not a tree of loose files; (c) **stable keys** — assets addressed by logical
+      name/path so game code (`Assets#texture("player")`) is identical whether reading loose files
+      (dev) or the pack (release); (d) a CLI (`flock pack`, likely in **flock-cli**) with a manifest
+      describing inputs + per-asset processor options, incremental rebuilds, and a content hash for
+      cache-busting. Web target: the same pack fetched once over HTTP (one request, ranged reads via
+      the index) instead of many asset fetches. Ties into the **Asset server** (the `Handle<T>` layer
+      loads from either backend) and **flock-cli** (owns the build command).
 - [ ] **Render graph + post-processing stack** — renderer is fairly fixed-function; a modular
       render graph + post-fx (bloom especially) would make glow/flame/starfield shine.
 - [ ] **Input action-mapping in core** — `InputMap<Action>` (logical actions ← keyboard/pad/touch).
