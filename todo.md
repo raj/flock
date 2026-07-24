@@ -430,8 +430,14 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       existing tonemap/material/readback tests unchanged. **Not done:** a general declarative
       render graph (node/dependency + automatic target aliasing) — the stack covers the concrete
       post-fx need; and **web-backend post-fx** (renderer.js) — native only for now.
-- [ ] **Input action-mapping in core** — `InputMap<Action>` (logical actions ← keyboard/pad/touch).
-      The demo reimplemented this (leafwing-input-manager style).
+- [x] **Input action-mapping in core** — `Flock::InputMap(A)` (core, portable): bind an action
+      enum to keys (`bind`) or a negative/positive key pair (`bind_axis`), call `update(input)`
+      once per frame with the backend's `Flock::Input`, then query by action — `pressed?`,
+      `just_pressed?`/`just_released?` (edges derived here, so no reliance on the backend's edge
+      API), and `axis` in [-1, 1]. `update` is duck-typed (needs only `input.pressed?(Flock::Key)`,
+      which both native + web provide), so the same map + query code runs on both targets.
+      Verified: `spec/input_map_spec.cr` (bind, edges, multi-key, axis) + `examples/input_map_demo.cr`.
+      Follow-ups: gamepad/mouse-button/touch triggers; 2-D axis (Vec2) helper; runtime rebinding UI.
 
 ### Libraries
 - [ ] **flock-collision**: finish 3D narrowphase (GJK/EPA), continuous collision (CCD) for fast

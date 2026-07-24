@@ -17,6 +17,7 @@ require "./flock/render/sprite_shaders" # built-in Sprite2D material shaders (pu
 require "./flock/ecs/bundle"
 require "./flock/ecs/sparse_set"
 require "./flock/ecs/world"
+require "./flock/input_map"             # Flock::InputMap(A): logical actions ← keys (portable)
 require "./flock/ecs/commands"
 require "./flock/ecs/events"
 require "./flock/ecs/state"
