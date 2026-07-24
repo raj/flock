@@ -352,8 +352,12 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       text + coordinate mapping injected (backend-agnostic). Headless specs cover layout,
       interaction, text editing and wrapping. **spacei's menu + HUD are ported onto it** (keyboard-
       driven, identical native + web; needed `Flock::Text#measure` for layout, added on both
-      backends). Remaining: scroll + nine-slice (need renderer scissor/clipping, not on the
-      Sprite2D path).
+      backends). **Scroll views done**: `Sprite2D#clip` (a world-space `ClipRect`) is honored as
+      a per-batch/per-group scissor by BOTH renderers (native `Renderer2D` + web `renderer.js`,
+      WebGPU + WebGL2); flock-ui has a `Scroll` component + `Build.scroll` widget (wheel/drag,
+      children clipped + offset). Verified by readback (`clip_test`, `scroll_clip_test`) + web
+      regression. Remaining: nine-slice (9-patch; independent of clipping — draws 9 sub-quads via
+      `uv_min`/`uv_size`).
 - [x] **Proper text** — done (native): glyph atlas + layout (measure, `\n`, baseline via glyph
       metrics) + `TextLabel` batched, change-detected rebuilds. See the Polish "Text" entry.
       Follow-ups: word-wrap to a max width, kerning, non-ASCII/Unicode ranges, and a web-backend

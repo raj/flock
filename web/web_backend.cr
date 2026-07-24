@@ -53,14 +53,18 @@ module Flock::Web
     end
   end
 
-  FLOATS = 12                            # per instance: x,y,w,h, r,g,b,a, u,v,uw,uh
-  BUFFER = Slice(Float32).new(MAX * FLOATS)
-  GROUPS = Slice(Int32).new(128)         # draw groups: [textureId, count] pairs (sorted by texture)
+  FLOATS  = 12                           # per instance: x,y,w,h, r,g,b,a, u,v,uw,uh
+  MGROUPS =  64                          # max draw groups per frame
+  BUFFER  = Slice(Float32).new(MAX * FLOATS)
+  GROUPS  = Slice(Int32).new(MGROUPS * 3)  # draw groups: [textureId, materialId, count]
+  # Per-group world-space clip rect [minx, miny, maxx, maxy]; maxx<=minx ⇒ no clip.
+  CLIPS = Slice(Float32).new(MGROUPS * 4)
 
   private record Inst,
     z : Float32, tex : Int32, mat : Int32, x : Float32, y : Float32, w : Float32, h : Float32,
     r : Float32, g : Float32, b : Float32, a : Float32,
-    u : Float32, v : Float32, uw : Float32, uh : Float32
+    u : Float32, v : Float32, uw : Float32, uh : Float32,
+    cx0 : Float32, cy0 : Float32, cx1 : Float32, cy1 : Float32
 
   # --- JS bridges (WebGPU renderer / text / audio live in renderer.js) ---
 
@@ -69,12 +73,13 @@ module Flock::Web
   # (0 = no camera → renderer defaults to centering [0,W]x[0,H] at zoom 1).
   @[JS::Method]
   def draw(ptr : Int32, count : Int32, groups_ptr : Int32, group_count : Int32,
-           camx : Int32, camy : Int32, zoom_milli : Int32) : Nil
+           clips_ptr : Int32, camx : Int32, camy : Int32, zoom_milli : Int32) : Nil
     <<-JS
       if (__memory.buffer.byteLength === 0) __memory = new DataView(__exports.memory.buffer);
       const f = new Float32Array(__exports.memory.buffer, #{ptr}, #{count} * 12);
       const g = new Int32Array(__exports.memory.buffer, #{groups_ptr}, #{group_count} * 3);
-      if (globalThis.__flockDraw) globalThis.__flockDraw(f, #{count}, g, #{camx}, #{camy}, #{zoom_milli} / 1000);
+      const cl = new Float32Array(__exports.memory.buffer, #{clips_ptr}, #{group_count} * 4);
+      if (globalThis.__flockDraw) globalThis.__flockDraw(f, #{count}, g, #{camx}, #{camy}, #{zoom_milli} / 1000, cl);
     JS
   end
 
@@ -186,31 +191,42 @@ module Flock::Web
           next if items.size >= MAX
           p = tf.value.position; s = sp.value.size; c = sp.value.color
           uv = sp.value.uv_min; uz = sp.value.uv_size
-          items << Inst.new(sp.value.z, sp.value.texture, sp.value.material, p.x, p.y, s.x, s.y, c.r, c.g, c.b, c.a, uv.x, uv.y, uz.x, uz.y)
+          cl = sp.value.clip
+          cx0 = cy0 = cx1 = cy1 = 0.0f32
+          if cl
+            cx0 = cl.min.x; cy0 = cl.min.y; cx1 = cl.max.x; cy1 = cl.max.y
+          end
+          items << Inst.new(sp.value.z, sp.value.texture, sp.value.material, p.x, p.y, s.x, s.y, c.r, c.g, c.b, c.a, uv.x, uv.y, uz.x, uz.y, cx0, cy0, cx1, cy1)
         end
         # Order by layer (z), then (material, texture): correct back-to-front layering
         # (matches the native renderer) with contiguous draw groups.
         items.sort_by! { |it| {it.z, it.mat, it.tex} }
 
         groups = 0
-        cur_tex = -1
-        cur_mat = -1
+        cur = nil.as(Inst?)
         cur_count = 0
+        write_group = ->(it : Inst, n : Int32) do
+          return if groups >= MGROUPS
+          GROUPS[groups * 3] = it.tex; GROUPS[groups * 3 + 1] = it.mat; GROUPS[groups * 3 + 2] = n
+          CLIPS[groups * 4] = it.cx0; CLIPS[groups * 4 + 1] = it.cy0
+          CLIPS[groups * 4 + 2] = it.cx1; CLIPS[groups * 4 + 3] = it.cy1
+          groups += 1
+        end
         items.each_with_index do |it, i|
           o = i * FLOATS
           BUFFER[o] = it.x; BUFFER[o + 1] = it.y; BUFFER[o + 2] = it.w; BUFFER[o + 3] = it.h
           BUFFER[o + 4] = it.r; BUFFER[o + 5] = it.g; BUFFER[o + 6] = it.b; BUFFER[o + 7] = it.a
           BUFFER[o + 8] = it.u; BUFFER[o + 9] = it.v; BUFFER[o + 10] = it.uw; BUFFER[o + 11] = it.uh
-          if (it.tex != cur_tex || it.mat != cur_mat)
-            if cur_count > 0 && groups < 42
-              GROUPS[groups * 3] = cur_tex; GROUPS[groups * 3 + 1] = cur_mat; GROUPS[groups * 3 + 2] = cur_count; groups += 1
-            end
-            cur_tex = it.tex; cur_mat = it.mat; cur_count = 0
+          c = cur
+          if c.nil? || it.tex != c.tex || it.mat != c.mat ||
+             it.cx0 != c.cx0 || it.cy0 != c.cy0 || it.cx1 != c.cx1 || it.cy1 != c.cy1
+            write_group.call(c, cur_count) if c && cur_count > 0
+            cur = it; cur_count = 0
           end
           cur_count += 1
         end
-        if cur_count > 0 && groups < 42
-          GROUPS[groups * 3] = cur_tex; GROUPS[groups * 3 + 1] = cur_mat; GROUPS[groups * 3 + 2] = cur_count; groups += 1
+        if (c = cur) && cur_count > 0
+          write_group.call(c, cur_count)
         end
 
         # Camera (backend-agnostic Camera2D): pass its center + zoom, or a zoom<=0 sentinel
@@ -224,7 +240,8 @@ module Flock::Web
         end
 
         Flock::Web.draw(BUFFER.to_unsafe.address.to_i64!.to_i32!, items.size,
-          GROUPS.to_unsafe.address.to_i64!.to_i32!, groups, camx, camy, zoom_milli)
+          GROUPS.to_unsafe.address.to_i64!.to_i32!, groups,
+          CLIPS.to_unsafe.address.to_i64!.to_i32!, camx, camy, zoom_milli)
       end
     end
   end

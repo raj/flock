@@ -146,11 +146,12 @@ const WebGPUBackend = {
   white() { return this._bind(this._solid(1, 1, [255, 255, 255, 255])); },
   texture(w, h, src) { return this._bind(this._mipped(w, h, src)); },
 
-  draw(floats, count, groups, camx, camy, zoom) {
+  draw(floats, count, groups, camx, camy, zoom, clips) {
     // Globals: size(vec2), cam(vec2), zoom(vec2, .x used) — 8 floats (32 bytes).
     this.device.queue.writeBuffer(this.uniformBuf, 0, new Float32Array([WIDTH, HEIGHT, camx, camy, zoom, 0, 0, 0]));
     count = Math.min(count, MAX); // defensive: buffers are sized for MAX instances
     if (count > 0) this.device.queue.writeBuffer(this.instanceBuf, 0, floats, 0, count * FLOATS);
+    const fbW = this.canvas.width, fbH = this.canvas.height;
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: this.context.getCurrentTexture().createView(),
@@ -162,6 +163,10 @@ const WebGPUBackend = {
     for (let gi = 0; gi < groups.length; gi += 3) {
       const texId = groups[gi], matId = groups[gi + 1], n = groups[gi + 2];
       if (n <= 0) continue;
+      // Per-group scissor from its world-space clip rect (WebGPU scissor is top-left).
+      const sc = clips && clipScissor(clips, gi / 3, camx, camy, zoom, fbW, fbH);
+      if (sc) pass.setScissorRect(sc[0], sc[1], sc[2], sc[3]);
+      else pass.setScissorRect(0, 0, fbW, fbH);
       pass.setPipeline(this.materials[matId] || this.pipeline);
       pass.setBindGroup(1, textures[texId] || textures[0]);
       pass.draw(6, n, 0, offset);
@@ -323,12 +328,13 @@ const WebGL2Backend = {
     };
   },
 
-  draw(floats, count, groups, camx, camy, zoom) {
+  draw(floats, count, groups, camx, camy, zoom, clips) {
     const gl = this.gl;
     gl.clearColor(CLEAR[0], CLEAR[1], CLEAR[2], CLEAR[3]);
     gl.clear(gl.COLOR_BUFFER_BIT);
     count = Math.min(count, MAX); // defensive: buffers are sized for MAX instances
     if (count <= 0) return;
+    const fbW = this.canvas.width, fbH = this.canvas.height;
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instBuf);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, floats, 0, count * FLOATS);
@@ -338,6 +344,10 @@ const WebGL2Backend = {
     for (let gi = 0; gi < groups.length; gi += 3) {
       const texId = groups[gi], matId = groups[gi + 1], n = groups[gi + 2];
       if (n <= 0) continue;
+      // Per-group scissor (GL origin is bottom-left, so flip Y).
+      const sc = clips && clipScissor(clips, gi / 3, camx, camy, zoom, fbW, fbH);
+      if (sc) { gl.enable(gl.SCISSOR_TEST); gl.scissor(sc[0], fbH - (sc[1] + sc[3]), sc[2], sc[3]); }
+      else gl.disable(gl.SCISSOR_TEST);
       const mat = this.materials[matId] || this.materials[0];
       gl.useProgram(mat.prog);
       gl.uniform2f(mat.uSize, WIDTH, HEIGHT);
@@ -352,6 +362,7 @@ const WebGL2Backend = {
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
       offset += n;
     }
+    gl.disable(gl.SCISSOR_TEST);
     gl.bindVertexArray(null);
   },
 
@@ -512,10 +523,29 @@ globalThis.__flockBeep = (freq, ms) => {
   osc.connect(gain).connect(masterGain); osc.start(t); osc.stop(t + ms / 1000);
 };
 
-globalThis.__flockDraw = (floats, count, groups, camx, camy, zoom) => {
+// Converts a group's world-space clip rect (clips[gidx*4 .. +3] = minx,miny,maxx,maxy) to a
+// top-left framebuffer scissor rect [x, y, w, h] in device pixels, using the same world→screen
+// mapping as the sprite shader. Returns null when the group has no clip (maxx <= minx).
+function clipScissor(clips, gidx, camx, camy, zoom, fbW, fbH) {
+  const b = gidx * 4, minx = clips[b], miny = clips[b + 1], maxx = clips[b + 2], maxy = clips[b + 3];
+  if (!(maxx > minx && maxy > miny)) return null;
+  const toS = (wx, wy) => {
+    const vx = (wx - camx) * zoom, vy = (wy - camy) * zoom;
+    const ndcx = vx / (WIDTH * 0.5), ndcy = vy / (HEIGHT * 0.5);
+    return [(ndcx * 0.5 + 0.5) * fbW, (1 - (ndcy * 0.5 + 0.5)) * fbH];
+  };
+  const p0 = toS(minx, miny), p1 = toS(maxx, maxy);
+  let x0 = Math.max(0, Math.min(p0[0], p1[0])), x1 = Math.min(fbW, Math.max(p0[0], p1[0]));
+  let y0 = Math.max(0, Math.min(p0[1], p1[1])), y1 = Math.min(fbH, Math.max(p0[1], p1[1]));
+  const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
+  if (w <= 0 || h <= 0) return [0, 0, 0, 0]; // fully clipped → empty scissor draws nothing
+  return [Math.round(x0), Math.round(y0), w, h];
+}
+
+globalThis.__flockDraw = (floats, count, groups, camx, camy, zoom, clips) => {
   // No Camera2D provided (zoom<=0): default to one centered on [0,W]x[0,H] at zoom 1.
   if (!(zoom > 0)) { camx = WIDTH / 2; camy = HEIGHT / 2; zoom = 1; }
-  gfx.draw(floats, count, groups, camx, camy, zoom);
+  gfx.draw(floats, count, groups, camx, camy, zoom, clips);
 };
 
 // Registers a custom sprite material and returns its id (0 if the backend can't build it).

@@ -276,6 +276,28 @@ module Flock
       end
     end
 
+    # Converts a world-space clip rect to a framebuffer scissor rect (x, y, w, h in px), via
+    # the camera's view-projection. Returns nil when the rect is empty (fully clipped).
+    private def clip_scissor(vp : Mat4, clip : ClipRect, vw : Float32, vh : Float32,
+                             viewport : Viewport?) : Tuple(UInt32, UInt32, UInt32, UInt32)?
+      ox = viewport.try(&.x) || 0.0f32
+      oy = viewport.try(&.y) || 0.0f32
+      to_px = ->(wx : Float32, wy : Float32) do
+        n = vp.transform_point(Vec3.new(wx, wy, 0.0f32))
+        {ox + (n.x * 0.5f32 + 0.5f32) * vw, oy + (1.0f32 - (n.y * 0.5f32 + 0.5f32)) * vh}
+      end
+      p0 = to_px.call(clip.min.x, clip.min.y)
+      p1 = to_px.call(clip.max.x, clip.max.y)
+      x0 = Math.min(p0[0], p1[0]); x1 = Math.max(p0[0], p1[0])
+      y0 = Math.min(p0[1], p1[1]); y1 = Math.max(p0[1], p1[1])
+      vx0 = ox; vy0 = oy; vx1 = ox + vw; vy1 = oy + vh
+      x0 = x0.clamp(vx0, vx1); x1 = x1.clamp(vx0, vx1)
+      y0 = y0.clamp(vy0, vy1); y1 = y1.clamp(vy0, vy1)
+      w = x1 - x0; h = y1 - y0
+      return nil if w <= 0.5f32 || h <= 0.5f32
+      {x0.to_u32, y0.to_u32, w.to_u32, h.to_u32}
+    end
+
     # (Re)allocates the offscreen scene target for the 2D post path when the size changes.
     private def ensure_scene_target(w : UInt32, h : UInt32) : Nil
       return if @scene_w == w && @scene_h == h && !@scene_view.null?
@@ -557,8 +579,8 @@ module Flock
       # the primary (full-frame clear) camera deterministic when two share an `order`.
       cameras = cameras.map_with_index { |c, idx| {c, idx} }.sort_by! { |(c, idx)| {c.order, idx} }.map { |(c, _idx)| c }
 
-      # Collect: (z, material_id, pipeline, texture, model, color, uv_min, uv_size).
-      sprites = [] of {Float32, Int32, LibWGPU::RenderPipeline, Texture, Mat4, Color, Vec2, Vec2}
+      # Collect: (z, material_id, pipeline, texture, model, color, uv_min, uv_size, clip).
+      sprites = [] of {Float32, Int32, LibWGPU::RenderPipeline, Texture, Mat4, Color, Vec2, Vec2, ClipRect?}
       world.query(Transform2D, Sprite) do |_e, tf, sp|
         texture = sp.value.texture || @white
         mat = sp.value.material
@@ -566,7 +588,7 @@ module Flock
         pipeline = mat ? mat.pipeline : @pipeline
         # The shader quad is unit [-0.5, 0.5]: apply the sprite's size.
         model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
-        sprites << {sp.value.z, mat_id, pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
+        sprites << {sp.value.z, mat_id, pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size, nil.as(ClipRect?)}
       end
 
       # Backend-agnostic Sprite2D: texture is an id into the bank (0 = white). Lets the
@@ -579,7 +601,7 @@ module Flock
         pipeline = mat ? mat.pipeline : @pipeline
         mat_id = mat ? mat.id : 0
         model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
-        sprites << {sp.value.z, mat_id, pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size}
+        sprites << {sp.value.z, mat_id, pipeline, texture, model, sp.value.color, sp.value.uv_min, sp.value.uv_size, sp.value.clip}
       end
       # Sort by layer (z), then material, then texture: correct layering + batching.
       sprites.sort_by! { |s| {s[0], s[1], s[3].view.address} }
@@ -589,7 +611,7 @@ module Flock
       # Fill the instance storage buffer (in sorted order).
       unless sprites.empty?
         @scratch.clear
-        sprites.each do |(_z, _mid, _pipe, _tex, model, color, uv_min, uv_size)|
+        sprites.each do |(_z, _mid, _pipe, _tex, model, color, uv_min, uv_size, _clip)|
           @scratch.concat(model.m)
           @scratch.push(color.r, color.g, color.b, color.a)
           @scratch.push(uv_min.x, uv_min.y, uv_size.x, uv_size.y)
@@ -644,17 +666,36 @@ module Flock
         end
 
         unless sprites.empty?
-          # One draw per contiguous run of the same (material, texture), in sorted
-          # layer order. group0 (uniform+instances) is shared via the explicit layout.
+          # One draw per contiguous run of the same (material, texture, clip), in sorted
+          # layer order. group0 (uniform+instances) is shared via the explicit layout. A
+          # per-sprite `clip` sets the scissor for its run (world rect → framebuffer px).
+          full = cam.viewport
           i = 0
           while i < sprites.size
             mat_id = sprites[i][1]
             pipeline = sprites[i][2]
             tex = sprites[i][3]
+            clip = sprites[i][8]
             j = i + 1
-            while j < sprites.size && sprites[j][1] == mat_id && sprites[j][3].view.address == tex.view.address
+            while j < sprites.size && sprites[j][1] == mat_id &&
+                  sprites[j][3].view.address == tex.view.address && sprites[j][8] == clip
               j += 1
             end
+
+            # Scissor: the sprite's clip rect if any, else the camera viewport / full frame.
+            if clip
+              sc = clip_scissor(vp, clip, vw, vh, full)
+              if sc.nil?
+                i = j # fully clipped away — skip this run
+                next
+              end
+              LibWGPU.render_pass_encoder_set_scissor_rect(pass, sc[0], sc[1], sc[2], sc[3])
+            elsif fr = full
+              LibWGPU.render_pass_encoder_set_scissor_rect(pass, fr.x.to_u32, fr.y.to_u32, fr.width.to_u32, fr.height.to_u32)
+            else
+              LibWGPU.render_pass_encoder_set_scissor_rect(pass, 0_u32, 0_u32, width, height)
+            end
+
             LibWGPU.render_pass_encoder_set_pipeline(pass, pipeline)
             LibWGPU.render_pass_encoder_set_bind_group(pass, 0_u32, @group0, 0_u64, Pointer(UInt32).null)
             LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(tex), 0_u64, Pointer(UInt32).null)
