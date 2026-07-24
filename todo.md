@@ -356,8 +356,10 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       a per-batch/per-group scissor by BOTH renderers (native `Renderer2D` + web `renderer.js`,
       WebGPU + WebGL2); flock-ui has a `Scroll` component + `Build.scroll` widget (wheel/drag,
       children clipped + offset). Verified by readback (`clip_test`, `scroll_clip_test`) + web
-      regression. Remaining: nine-slice (9-patch; independent of clipping — draws 9 sub-quads via
-      `uv_min`/`uv_size`).
+      regression. **Nine-slice done too**: a `NineSlice` component + `Build.nine_slice` draw a
+      9-patch background (native-size corners, stretched edges) as 9 `Sprite2D` uv sub-rects —
+      works on both backends, no renderer change (`nine_slice_test.cr` readback). The flock-ui
+      widget set is now complete.
 - [x] **Proper text** — done (native): glyph atlas + layout (measure, `\n`, baseline via glyph
       metrics) + `TextLabel` batched, change-detected rebuilds. See the Polish "Text" entry.
       Follow-ups: word-wrap to a max width, kerning, non-ASCII/Unicode ranges, and a web-backend
