@@ -1063,32 +1063,39 @@ module Flock
         WGPU.release_pass(cmd, pass, encoder)
       end
 
-      # Post pass (once, whole frame): tonemap the HDR target into `target`.
+      # Post / output pass (once, whole frame): HDR scene target → `target`.
       unless @tonemap.none?
-        pcol = LibWGPU::RenderPassColorAttachment.new
-        pcol.view = target
-        pcol.depth_slice = 0xFFFFFFFF_u32
-        pcol.load_op = LibWGPU::LoadOp::Clear
-        pcol.store_op = LibWGPU::StoreOp::Store
-        pcol.clear_value = LibWGPU::Color.new(r: 0.0, g: 0.0, b: 0.0, a: 1.0)
-        pdesc = LibWGPU::RenderPassDescriptor.new
-        pdesc.label = WGPU.empty_string_view
-        pdesc.color_attachment_count = 1_u64
-        pdesc.color_attachments = pointerof(pcol)
-        penc_desc = LibWGPU::CommandEncoderDescriptor.new
-        penc_desc.label = WGPU.empty_string_view
-        pencoder = LibWGPU.device_create_command_encoder(@gpu.device, pointerof(penc_desc))
-        post = LibWGPU.command_encoder_begin_render_pass(pencoder, pointerof(pdesc))
-        LibWGPU.render_pass_encoder_set_pipeline(post, @post_pipeline)
-        LibWGPU.render_pass_encoder_set_bind_group(post, 0_u32, @post_group, 0_u64, Pointer(UInt32).null)
-        LibWGPU.render_pass_encoder_draw(post, 3_u32, 1_u32, 0_u32, 0_u32)
-        LibWGPU.render_pass_encoder_end(post)
-        pcmd_desc = LibWGPU::CommandBufferDescriptor.new
-        pcmd_desc.label = WGPU.empty_string_view
-        pcmd = LibWGPU.command_encoder_finish(pencoder, pointerof(pcmd_desc))
-        pcmds = StaticArray(LibWGPU::CommandBuffer, 1).new(pcmd)
-        LibWGPU.queue_submit(@gpu.queue, 1_u64, pcmds.to_unsafe)
-        WGPU.release_pass(pcmd, post, pencoder)
+        if stack = world.resource?(PostStack)
+          # Modular post stack (bloom, fxaa, vignette, …) then tonemap → surface. The
+          # renderer's own @tonemap stays authoritative for the output pass.
+          stack.run(@hdr_view, target, width, height, @scene_format, @tonemap)
+        else
+          # Built-in tonemap-only fullscreen pass (the original inline path).
+          pcol = LibWGPU::RenderPassColorAttachment.new
+          pcol.view = target
+          pcol.depth_slice = 0xFFFFFFFF_u32
+          pcol.load_op = LibWGPU::LoadOp::Clear
+          pcol.store_op = LibWGPU::StoreOp::Store
+          pcol.clear_value = LibWGPU::Color.new(r: 0.0, g: 0.0, b: 0.0, a: 1.0)
+          pdesc = LibWGPU::RenderPassDescriptor.new
+          pdesc.label = WGPU.empty_string_view
+          pdesc.color_attachment_count = 1_u64
+          pdesc.color_attachments = pointerof(pcol)
+          penc_desc = LibWGPU::CommandEncoderDescriptor.new
+          penc_desc.label = WGPU.empty_string_view
+          pencoder = LibWGPU.device_create_command_encoder(@gpu.device, pointerof(penc_desc))
+          post = LibWGPU.command_encoder_begin_render_pass(pencoder, pointerof(pdesc))
+          LibWGPU.render_pass_encoder_set_pipeline(post, @post_pipeline)
+          LibWGPU.render_pass_encoder_set_bind_group(post, 0_u32, @post_group, 0_u64, Pointer(UInt32).null)
+          LibWGPU.render_pass_encoder_draw(post, 3_u32, 1_u32, 0_u32, 0_u32)
+          LibWGPU.render_pass_encoder_end(post)
+          pcmd_desc = LibWGPU::CommandBufferDescriptor.new
+          pcmd_desc.label = WGPU.empty_string_view
+          pcmd = LibWGPU.command_encoder_finish(pencoder, pointerof(pcmd_desc))
+          pcmds = StaticArray(LibWGPU::CommandBuffer, 1).new(pcmd)
+          LibWGPU.queue_submit(@gpu.queue, 1_u64, pcmds.to_unsafe)
+          WGPU.release_pass(pcmd, post, pencoder)
+        end
       end
     end
   end

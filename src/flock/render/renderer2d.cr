@@ -108,6 +108,13 @@ module Flock
     @clear_uniform : LibWGPU::Buffer
     @clear_group : LibWGPU::BindGroup
 
+    # Offscreen scene target for the 2D post-processing path (allocated lazily when a
+    # PostStack resource is present; same format as the surface → no pipeline rebuild).
+    @scene_tex : LibWGPU::Texture = Pointer(Void).null.as(LibWGPU::Texture)
+    @scene_view : LibWGPU::TextureView = Pointer(Void).null.as(LibWGPU::TextureView)
+    @scene_w : UInt32 = 0_u32
+    @scene_h : UInt32 = 0_u32
+
     # Statistics for the last frame (batching).
     getter last_sprites : Int32 = 0
     getter last_draw_calls : Int32 = 0
@@ -263,6 +270,30 @@ module Flock
       LibWGPU.bind_group_layout_release(@group1_layout)
       LibWGPU.shader_module_release(@shader)
       @white.release
+      unless @scene_view.null?
+        LibWGPU.texture_view_release(@scene_view)
+        LibWGPU.texture_release(@scene_tex)
+      end
+    end
+
+    # (Re)allocates the offscreen scene target for the 2D post path when the size changes.
+    private def ensure_scene_target(w : UInt32, h : UInt32) : Nil
+      return if @scene_w == w && @scene_h == h && !@scene_view.null?
+      unless @scene_view.null?
+        LibWGPU.texture_view_release(@scene_view)
+        LibWGPU.texture_release(@scene_tex)
+      end
+      d = LibWGPU::TextureDescriptor.new
+      d.label = WGPU.empty_string_view
+      d.usage = LibWGPU::TextureUsage::RenderAttachment | LibWGPU::TextureUsage::TextureBinding
+      d.dimension = LibWGPU::TextureDimension::N2D
+      d.size = LibWGPU::Extent3D.new(width: w, height: h, depth_or_array_layers: 1_u32)
+      d.format = @gpu.format
+      d.mip_level_count = 1_u32
+      d.sample_count = 1_u32
+      @scene_tex = LibWGPU.device_create_texture(@gpu.device, pointerof(d))
+      @scene_view = LibWGPU.texture_create_view(@scene_tex, Pointer(LibWGPU::TextureViewDescriptor).null)
+      @scene_w = w; @scene_h = h
     end
 
     private def make_buffer(size : UInt64, usage : LibWGPU::BufferUsage) : LibWGPU::Buffer
@@ -486,7 +517,16 @@ module Flock
       when .success_optimal?, .success_suboptimal?
         # Suboptimal is still presentable; the surface will be reconfigured on the next resize.
         target = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
-        render_into(target, @gpu.width, @gpu.height, world)
+        if post = world.resource?(PostStack)
+          # 2D post-processing: render the scene into an offscreen color target, then run the
+          # effect chain (bloom, etc.) into the swapchain. Same surface format → no pipeline
+          # rebuild (LDR path). Lets a pure-2D game (sprites/glow/starfield) bloom.
+          ensure_scene_target(@gpu.width, @gpu.height)
+          render_into(@scene_view, @gpu.width, @gpu.height, world)
+          post.run(@scene_view, target, @gpu.width, @gpu.height, @gpu.format, post.tonemap)
+        else
+          render_into(target, @gpu.width, @gpu.height, world)
+        end
         LibWGPU.surface_present(@gpu.surface)
         WGPU.release_surface(target, st.texture)
       when .outdated?, .lost?

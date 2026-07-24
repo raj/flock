@@ -401,8 +401,19 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       cache-busting. Web target: the same pack fetched once over HTTP (one request, ranged reads via
       the index) instead of many asset fetches. Ties into the **Asset server** (the `Handle<T>` layer
       loads from either backend) and **flock-cli** (owns the build command).
-- [ ] **Render graph + post-processing stack** — renderer is fairly fixed-function; a modular
-      render graph + post-fx (bloom especially) would make glow/flame/starfield shine.
+- [~] **Render graph + post-processing stack** — done (post-fx stack, native): a reusable
+      `FullscreenPass` primitive + a `PostStack` (resource, via `PostProcessPlugin`) chaining
+      `PostEffect`s (built-ins **Bloom**, **Fxaa**, **Vignette**) followed by a tonemap/output
+      pass, ping-ponging two scratch targets. `Renderer2D` routes a 2D-only frame through it
+      (offscreen scene target, surface format → no pipeline rebuild), so a pure-2D game's
+      sprites/glow bloom (spacei native enables it). `Renderer3D` routes its HDR scene through
+      the stack in place of the inline tonemap pass (requires `Render3DPlugin(tonemap: …)`); the
+      2D-over-3D unified path post-processes the 3D layer then draws the 2D overlay on top.
+      Verified by readback: `examples/postfx_test.cr` (bloom spreads light past a quad edge),
+      `examples/postfx3d_test.cr` (3D HDR→bloom→tonemap), `examples/postfx_demo.cr` (windowed),
+      existing tonemap/material/readback tests unchanged. **Not done:** a general declarative
+      render graph (node/dependency + automatic target aliasing) — the stack covers the concrete
+      post-fx need; and **web-backend post-fx** (renderer.js) — native only for now.
 - [ ] **Input action-mapping in core** — `InputMap<Action>` (logical actions ← keyboard/pad/touch).
       The demo reimplemented this (leafwing-input-manager style).
 
