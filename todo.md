@@ -403,20 +403,18 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       The old path-keyed cache API is unchanged (back-compat). Native only (web already
       live-reloads + fetch-async). Verified: `examples/asset_server_test.cr` (dedup, ref-count,
       hot-reload, free→placeholder, async load — non-MT and `-Dpreview_mt`).
-- [ ] **Asset packing / content pipeline** (MonoGame `.xnb` equivalent) — an offline build step that
-      pre-processes source assets (PNG/OGG/glTF/TTF/TMX…) into a compact, engine-ready binary format
-      and bundles them into one (or few) pack files, loaded at runtime instead of raw files.
-      Goals: (a) **preprocessing** — decode/transcode once at build time (premultiplied + mipmapped
-      textures, GPU-block-compressed where supported, decoded audio, pre-parsed glyph atlases / glTF
-      meshes) so runtime load is a near-zero-copy read, not a parse; (b) **one archive** — a `.flkpack`
-      container (header + index + optionally-compressed blobs, e.g. zstd) so a shipped game is a
-      binary + a pack, not a tree of loose files; (c) **stable keys** — assets addressed by logical
-      name/path so game code (`Assets#texture("player")`) is identical whether reading loose files
-      (dev) or the pack (release); (d) a CLI (`flock pack`, likely in **flock-cli**) with a manifest
-      describing inputs + per-asset processor options, incremental rebuilds, and a content hash for
-      cache-busting. Web target: the same pack fetched once over HTTP (one request, ranged reads via
-      the index) instead of many asset fetches. Ties into the **Asset server** (the `Handle<T>` layer
-      loads from either backend) and **flock-cli** (owns the build command).
+- [~] **Asset packing / content pipeline** (MonoGame `.xnb` equivalent) — **bundling done**: a
+      `.flkpack` container (magic + index of {logical key, offset, stored, raw, deflate flag} +
+      concatenated blobs, DEFLATE-compressed when it shrinks) via `Flock::PackWriter`
+      (`add_file`/`add_bytes`/`add_dir`) + `Flock::Pack.open`/`read`. **Stable keys**:
+      `Assets#mount(pack)` makes `load(Texture, key)` / `bytes(key)` resolve from the pack first,
+      loose file otherwise — game code is identical loose (dev) or packed (release). CLI:
+      `examples/pack_tool.cr` (`crystal run … -- <dir> <out.flkpack>`). Native only (the DEFLATE
+      codec doesn't link on wasm; web loads via fetch). Verified: `examples/pack_test.cr` (raw blob
+      round-trip + a packed image renders byte-identically to a loose load). **Not done** (dropped
+      from scope): GPU preprocessing (premultiply / mip-bake / block-compress at pack time) — blobs
+      are the raw file bytes, decoded at load like loose; also async-load-from-pack, web pack mount,
+      and a manifest/incremental CLI.
 - [~] **Render graph + post-processing stack** — done (post-fx stack, native): a reusable
       `FullscreenPass` primitive + a `PostStack` (resource, via `PostProcessPlugin`) chaining
       `PostEffect`s (built-ins **Bloom**, **Fxaa**, **Vignette**) followed by a tonemap/output

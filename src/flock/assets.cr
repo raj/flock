@@ -51,8 +51,34 @@ module Flock
     @pending = [] of UInt32
     @decoded = [] of Tuple(UInt32, Bytes)
     @async_lock = Mutex.new
+    @pack : Pack?
 
     def initialize(@gpu : GpuContext)
+    end
+
+    # Mounts a `.flkpack`: subsequent texture loads (and `bytes`) resolve their key from the
+    # pack first, falling back to a loose file when it isn't packed. Same logical keys either
+    # way, so game code is unchanged whether it ships loose files or a pack.
+    def mount(pack : Pack) : Nil
+      @pack = pack
+    end
+
+    # Raw bytes for a key: from the mounted pack if present, else the loose file.
+    def bytes(key : String) : Bytes
+      if (pk = @pack) && pk.has?(key)
+        pk.read(key)
+      else
+        File.open(key, "rb", &.getb_to_end)
+      end
+    end
+
+    # Builds a Texture for `path`, decoding packed bytes when mounted, else loading the file.
+    private def build_texture(path : String) : Texture
+      if (pk = @pack) && pk.has?(path)
+        Texture.from_encoded(@gpu, pk.read(path))
+      else
+        Texture.load(@gpu, path)
+      end
     end
 
     # Loads a texture WITHOUT blocking: returns a Handle immediately (get() yields the white
@@ -128,7 +154,7 @@ module Flock
     # Loads (or reuses) a texture by path, returning a ref-counted Handle. Loading the same
     # path again returns the same handle and bumps its ref-count.
     def load(type : Texture.class, path : String) : Handle(Texture)
-      Handle(Texture).new(load_entry("tex:#{path}", path) { |e| e.texture = Texture.load(@gpu, path) })
+      Handle(Texture).new(load_entry("tex:#{path}", path) { |e| e.texture = build_texture(path) })
     end
 
     def load(type : Sound.class, path : String) : Handle(Sound)

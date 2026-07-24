@@ -32,6 +32,7 @@ require "./render/renderer3d_shadow_post_ibl"
 require "./render/renderer3d_skin_morph"
 require "./render/render_plugin"
 
+require "./pack"                 # Flock::Pack / PackWriter — .flkpack asset archives (native)
 require "./assets"
 require "./render/text_provider" # Flock::Text facade (needs GpuContext/Renderer2D/Assets)
 require "./render/materials"     # Flock::Materials registry (needs Renderer2D)
