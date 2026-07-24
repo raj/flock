@@ -25,7 +25,8 @@ require "./render/renderer2d"
 require "./render/glyph_atlas"
 require "./render/text_label"
 require "./render/render_types"
-require "./render/post" # modular post-processing stack (FullscreenPass + effects + PostStack)
+require "./render/post"         # modular post-processing stack (FullscreenPass + effects + PostStack)
+require "./render/render_graph" # declarative render graph (named resources + nodes + auto-alias)
 require "./render/renderer3d"
 require "./render/renderer3d_shaders"
 require "./render/renderer3d_shadow_post_ibl"

@@ -415,7 +415,7 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       from scope): GPU preprocessing (premultiply / mip-bake / block-compress at pack time) — blobs
       are the raw file bytes, decoded at load like loose; also async-load-from-pack, web pack mount,
       and a manifest/incremental CLI.
-- [~] **Render graph + post-processing stack** — done (post-fx stack, native): a reusable
+- [x] **Render graph + post-processing stack** — done (post-fx stack + declarative graph, native): a reusable
       `FullscreenPass` primitive + a `PostStack` (resource, via `PostProcessPlugin`) chaining
       `PostEffect`s (built-ins **Bloom**, **Fxaa**, **Vignette**) followed by a tonemap/output
       pass, ping-ponging two scratch targets. `Renderer2D` routes a 2D-only frame through it
@@ -425,9 +425,15 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       2D-over-3D unified path post-processes the 3D layer then draws the 2D overlay on top.
       Verified by readback: `examples/postfx_test.cr` (bloom spreads light past a quad edge),
       `examples/postfx3d_test.cr` (3D HDR→bloom→tonemap), `examples/postfx_demo.cr` (windowed),
-      existing tonemap/material/readback tests unchanged. **Not done:** a general declarative
-      render graph (node/dependency + automatic target aliasing) — the stack covers the concrete
-      post-fx need; and **web-backend post-fx** (renderer.js) — native only for now.
+      existing tonemap/material/readback tests unchanged. **Declarative render graph done too**:
+      `Flock::RenderGraph` — declare named texture resources + nodes (`reads`/`writes`/execute);
+      it topo-orders nodes by resource deps (single-writer DAG), allocates transient textures from
+      a pool that ALIASES resources with non-overlapping lifetimes (fewer physical than logical),
+      and runs each node with resolved views (`GraphContext#view`). Fullscreen nodes reuse
+      `FullscreenPass`; imported views (surface) are never pooled. Verified:
+      `examples/render_graph_test.cr` (topo order + 3 logical→2 physical alias + correct final
+      image). **Not done:** retrofitting Renderer2D/3D onto the graph (they stay imperative), and
+      **web-backend post-fx** (renderer.js) — native only for now.
 - [x] **Input action-mapping in core** — `Flock::InputMap(A)` (core, portable): bind an action
       enum to keys (`bind`) or a negative/positive key pair (`bind_axis`), call `update(input)`
       once per frame with the backend's `Flock::Input`, then query by action — `pressed?`,
