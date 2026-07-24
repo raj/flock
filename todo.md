@@ -391,15 +391,18 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       deferred spawns) and `examples/parallel_test.cr` (~2.6× on 3 disjoint systems, `-Dpreview_mt`).
       Follow-ups: non-adjacent wave packing, per-system (not per-wave) change ticks, auto-derive
       access from queries.
-- [~] **Asset server** — done (handles + ref-count + hot-reload): `Assets#load(Texture|Sound, path)`
-      returns a ref-counted `Handle(T)` (same path → same handle, +1 ref); `get(handle)` resolves
-      (a shared white placeholder once freed), `retain`/`release` manage the count and free the
-      GPU/audio resource at zero. `poll_hot_reload` (via `AssetHotReloadPlugin`, a Last-schedule
-      system) reloads any tracked file whose mtime changed, in place — the handle stays valid, its
-      `version` bumps. The old path-keyed cache API is unchanged (back-compat). Native only (web
-      already live-reloads + loads async). Verified: `examples/asset_server_test.cr` (dedup,
-      ref-count, hot-reload, free→placeholder). **Not done:** true async background loading
-      (loads are synchronous) — deferred.
+- [x] **Asset server** — done (handles + ref-count + async + hot-reload): `Assets#load(Texture|
+      Sound, path)` returns a ref-counted `Handle(T)` (same path → same handle, +1 ref);
+      `get(handle)` resolves (a shared white placeholder once freed), `retain`/`release` manage
+      the count and free the GPU/audio resource at zero. **Async**: `load_async(Texture, path)`
+      returns a handle immediately (placeholder), a worker fiber reads the file off the main
+      thread under `-Dpreview_mt` (else the main-thread pump reads it), and `pump_async` (wired
+      each frame by `AssetsPlugin`) decodes + GPU-uploads on the main thread; `ready?` reports
+      completion. **Hot-reload**: `poll_hot_reload` (via `AssetHotReloadPlugin`) reloads any
+      tracked file whose mtime changed, in place — the handle stays valid, its `version` bumps.
+      The old path-keyed cache API is unchanged (back-compat). Native only (web already
+      live-reloads + fetch-async). Verified: `examples/asset_server_test.cr` (dedup, ref-count,
+      hot-reload, free→placeholder, async load — non-MT and `-Dpreview_mt`).
 - [ ] **Asset packing / content pipeline** (MonoGame `.xnb` equivalent) — an offline build step that
       pre-processes source assets (PNG/OGG/glTF/TTF/TMX…) into a compact, engine-ready binary format
       and bundles them into one (or few) pack files, loaded at runtime instead of raw files.

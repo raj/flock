@@ -44,6 +44,21 @@ p2 = assets.get(h2)
 report.call("freed → placeholder (stable)", p1.id == p2.id)
 report.call("placeholder differs from original", p1.id != tex.id)
 
+# async load: handle returns immediately (placeholder), the pump finishes it. The texture is
+# only assigned by pump (main thread), so it's never ready before we pump — MT or not.
+ha = assets.load_async(Flock::Texture, tmp)
+report.call("async: not ready before pump", !assets.ready?(ha))
+report.call("async: get is placeholder before pump", assets.get(ha).id == p1.id)
+# Spin the pump (yielding so a worker fiber can read the file under -Dpreview_mt).
+tries = 0
+until assets.ready?(ha) || tries > 10_000
+  assets.pump_async
+  Fiber.yield
+  tries += 1
+end
+report.call("async: ready after pump", assets.ready?(ha))
+report.call("async: real texture after pump", assets.get(ha).id > 0_u64 && assets.get(ha).id != p1.id)
+
 File.delete(tmp)
 Flock.release_all(assets, gpu)
 

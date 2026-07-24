@@ -46,8 +46,83 @@ module Flock
     @id_by_key = {} of String => UInt32
     @next_handle = 0_u32
     @placeholder : Texture?
+    # Async loading: @pending = ids whose file the main-thread pump still has to read (non-MT
+    # path); @decoded = bytes read by a worker fiber, awaiting GPU upload on the main thread.
+    @pending = [] of UInt32
+    @decoded = [] of Tuple(UInt32, Bytes)
+    @async_lock = Mutex.new
 
     def initialize(@gpu : GpuContext)
+    end
+
+    # Loads a texture WITHOUT blocking: returns a Handle immediately (get() yields the white
+    # placeholder until it's ready). Under -Dpreview_mt a worker fiber reads the file off the
+    # main thread; otherwise the main-thread pump reads it. Either way the GPU upload happens on
+    # the main thread in `pump_async` (wired by AssetsPlugin). Dedup + ref-count like `load`.
+    def load_async(type : Texture.class, path : String) : Handle(Texture)
+      key = "tex:#{path}"
+      if id = @id_by_key[key]?
+        @entries[id].refs += 1
+        return Handle(Texture).new(id)
+      end
+      id = (@next_handle += 1)
+      e = AssetEntry.new(key, path)
+      e.refs = 1
+      e.mtime = mtime_of(path)
+      @entries[id] = e
+      @id_by_key[key] = id
+      {% if flag?(:preview_mt) || flag?(:execution_context) %}
+        spawn do
+          if bytes = read_bytes(path)
+            @async_lock.synchronize { @decoded << {id, bytes} }
+          end
+        end
+      {% else %}
+        @pending << id
+      {% end %}
+      Handle(Texture).new(id)
+    end
+
+    # True once an async handle's texture has finished loading (get() returns the real texture).
+    def ready?(handle : Handle(Texture)) : Bool
+      (e = @entries[handle.id]?) ? !e.texture.nil? : false
+    end
+
+    # Main-thread: finish pending async loads (read bytes if needed, decode + GPU-upload).
+    # `budget` caps main-thread reads per call so a burst of loads doesn't hitch one frame.
+    # Called each frame by AssetsPlugin. Returns how many finished.
+    def pump_async(budget : Int32 = 4) : Int32
+      done = 0
+      while done < budget && (id = @pending.shift?)
+        if bytes = read_bytes(@entries[id]?.try(&.path) || "")
+          upload_decoded(id, bytes); done += 1
+        end
+      end
+      ready = @async_lock.synchronize do
+        d = @decoded.dup; @decoded.clear; d
+      end
+      ready.each { |(id, bytes)| upload_decoded(id, bytes); done += 1 }
+      done
+    end
+
+    private def upload_decoded(id : UInt32, bytes : Bytes) : Nil
+      e = @entries[id]?
+      return unless e # released mid-flight → discard
+      old = e.texture
+      begin
+        e.texture = Texture.from_encoded(@gpu, bytes)
+        old.try &.release
+        e.version += 1
+      rescue
+        # decode failed → leave the placeholder in place
+      end
+    end
+
+    private def read_bytes(path : String) : Bytes?
+      return nil if path.empty?
+      File.open(path, "rb", &.getb_to_end)
+    rescue
+      nil
     end
 
     # Loads (or reuses) a texture by path, returning a ref-counted Handle. Loading the same
@@ -193,11 +268,15 @@ module Flock
     end
   end
 
-  # Inserts the Assets resource at startup (from the GpuContext).
+  # Inserts the Assets resource at startup (from the GpuContext) and pumps async loads each
+  # frame (decode + GPU upload on the main thread; cheap no-op when nothing is loading).
   class AssetsPlugin < Plugin
     def build(app : App) : Nil
       app.add_startup do |world, _cmd|
         world.insert_resource(Assets.new(world.resource(GpuContext)))
+      end
+      app.add_system(Flock::Schedule::First) do |world, _cmd|
+        world.resource?(Assets).try &.pump_async
       end
     end
   end
