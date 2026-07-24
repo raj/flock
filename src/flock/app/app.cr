@@ -26,19 +26,30 @@ module Flock
       getter before : Symbol?
       getter after : Symbol?
       getter run_if : Proc(World, Bool)?
+      # Declared data access (parallel scheduler); a barrier unless reads/writes were given.
+      getter access : Access
+      # Warms declared storages before a parallel wave (nil if nothing declared).
+      getter prewarm : Proc(World, Nil)?
       # World change-tick at which this system last ran (for change detection).
       property last_run : UInt32 = 0_u32
 
       def initialize(@proc : System, @label : Symbol? = nil, @before : Symbol? = nil,
-                     @after : Symbol? = nil, @run_if : Proc(World, Bool)? = nil)
+                     @after : Symbol? = nil, @run_if : Proc(World, Bool)? = nil,
+                     @access : Access = Access.barrier, @prewarm : Proc(World, Nil)? = nil)
       end
     end
 
     getter world : World
     getter fixed_dt : Float64 = 1.0 / 60.0
+    # When true (and the binary is MT-capable), each schedule runs as parallel waves of
+    # non-conflicting systems. Off by default; results are identical either way — see
+    # `add_system`'s `reads:`/`writes:` and `parallel_plan`. On a non-MT build it falls back
+    # to sequential wave execution (warned once).
+    property parallel : Bool = false
 
     @systems : Hash(Schedule, Array(SystemEntry)) = {} of Schedule => Array(SystemEntry)
     @order_cache : Hash(Schedule, Array(SystemEntry)) = {} of Schedule => Array(SystemEntry)
+    @wave_cache : Hash(Schedule, Array(Array(SystemEntry))) = {} of Schedule => Array(Array(SystemEntry))
     @runner : Proc(App, Nil)? = nil
     @accumulator : Float64 = 0.0
     # OnEnter/OnExit systems keyed by "State(S)=value".
@@ -52,12 +63,15 @@ module Flock
       time.fixed_delta = @fixed_dt
     end
 
-    # Central registration: appends a system entry and invalidates the cached order.
+    # Central registration: appends a system entry and invalidates the cached order/waves.
     private def register(schedule : Schedule, proc : System, label : Symbol? = nil,
                          before : Symbol? = nil, after : Symbol? = nil,
-                         run_if : Proc(World, Bool)? = nil) : Nil
-      @systems[schedule] << SystemEntry.new(proc, label, before, after, run_if)
+                         run_if : Proc(World, Bool)? = nil,
+                         access : Access = Access.barrier,
+                         prewarm : Proc(World, Nil)? = nil) : Nil
+      @systems[schedule] << SystemEntry.new(proc, label, before, after, run_if, access, prewarm)
       @order_cache.delete(schedule)
+      @wave_cache.delete(schedule)
     end
 
     # Fixed timestep (seconds) of the FixedUpdate systems.
@@ -90,10 +104,23 @@ module Flock
 
     # Adds a system to a schedule. Optional ordering: `label` names it; `before`/`after`
     # order it relative to another label; `run_if` gates it on a condition.
+    #
+    # For the parallel scheduler (`App#parallel = true`), declare the system's data access
+    # as tuples of component / resource classes:
+    #   reads:/writes:          component storages it reads / mutates
+    #   reads_res:/writes_res:  resources it reads / mutates
+    # Systems whose declared access doesn't overlap on a write run in the same wave (in
+    # parallel). Declaring nothing makes the system a barrier (runs alone) — always safe.
+    #
+    #   app.add_system(Update, reads: {Position}, writes: {Velocity}, reads_res: {Time}) { |w, c| ... }
     def add_system(schedule : Schedule, *, label : Symbol? = nil, before : Symbol? = nil,
                    after : Symbol? = nil, run_if : Proc(World, Bool)? = nil,
+                   reads _reads = Tuple.new, writes _writes = Tuple.new,
+                   reads_res _reads_res = Tuple.new, writes_res _writes_res = Tuple.new,
                    &block : World, Commands ->) : self
-      register(schedule, block, label, before, after, run_if)
+      register(schedule, block, label, before, after, run_if,
+        build_access(_reads, _writes, _reads_res, _writes_res),
+        build_prewarm(_reads, _writes))
       self
     end
 
@@ -102,8 +129,13 @@ module Flock
       self
     end
 
-    def add_fixed_system(&block : World, Commands ->) : self
-      register(Schedule::FixedUpdate, block)
+    # Fixed-timestep system. Accepts the same `reads:`/`writes:`/`reads_res:`/`writes_res:`
+    # access declaration as `add_system`, so physics steps can parallelize too.
+    def add_fixed_system(*, reads _reads = Tuple.new, writes _writes = Tuple.new,
+                         reads_res _reads_res = Tuple.new, writes_res _writes_res = Tuple.new,
+                         &block : World, Commands ->) : self
+      register(Schedule::FixedUpdate, block, access: build_access(_reads, _writes, _reads_res, _writes_res),
+        prewarm: build_prewarm(_reads, _writes))
       self
     end
 
@@ -178,9 +210,17 @@ module Flock
 
     # --- Execution ---------------------------------------------------------
 
-    # Runs all systems of a schedule (in resolved order, honoring run_if) then applies
-    # the queued commands.
+    # Runs all systems of a schedule (in resolved order, honoring run_if) then applies the
+    # queued commands. Dispatches to the parallel path when `parallel` is on.
     def run_schedule(schedule : Schedule) : Nil
+      if @parallel
+        run_schedule_parallel(schedule)
+      else
+        run_schedule_sequential(schedule)
+      end
+    end
+
+    private def run_schedule_sequential(schedule : Schedule) : Nil
       cmd = Commands.new(@world)
       ordered_systems(schedule).each do |entry|
         if cond = entry.run_if

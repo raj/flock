@@ -347,8 +347,10 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       layout (incl. flex-wrap), widgets panel/label/button/checkbox/slider/progress/text-input,
       pointer interaction, keyboard focus + Tab, and a Theme; rendered as Sprite2D quads with
       text + coordinate mapping injected (backend-agnostic). Headless specs cover layout,
-      interaction, text editing and wrapping. Remaining: scroll + nine-slice (need renderer
-      scissor/clipping, not on the Sprite2D path), blinking caret. Could port spacei's menu/HUD onto it.
+      interaction, text editing and wrapping. **spacei's menu + HUD are ported onto it** (keyboard-
+      driven, identical native + web; needed `Flock::Text#measure` for layout, added on both
+      backends). Remaining: scroll + nine-slice (need renderer scissor/clipping, not on the
+      Sprite2D path).
 - [x] **Proper text** — done (native): glyph atlas + layout (measure, `\n`, baseline via glyph
       metrics) + `TextLabel` batched, change-detected rebuilds. See the Polish "Text" entry.
       Follow-ups: word-wrap to a max width, kerning, non-ASCII/Unicode ranges, and a web-backend
@@ -366,8 +368,20 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       on both backends — spacei's only remaining injected hook is quit.
 
 ### Then (maturity)
-- [ ] **Parallel scheduler** — systems run sequentially; detect query read/write conflicts and
-      run non-conflicting systems in parallel (Bevy does this automatically).
+- [x] **Parallel scheduler** — opt-in (`App#parallel = true`). Systems declare data access via
+      `add_system(..., reads:/writes:/reads_res:/writes_res: {…})` (tuples of component/resource
+      classes; an undeclared system is a barrier that runs alone). `Access#conflicts?` (write-vs-
+      read/write; read-read is free) drives a deterministic wave partition (`build_waves`,
+      `parallel_plan`) that honours before/after ordering; each wave's systems have disjoint writes
+      so they run concurrently. Native executor uses `WaitGroup` + `spawn` under `-Dpreview_mt`
+      (fibers across worker threads); non-MT builds and web fall back to sequential wave execution
+      (identical results, warned once). Change detection runs at wave granularity (one tick/wave,
+      `last_run` = oldest system — conservative), each system gets its own Commands (applied in
+      order after the schedule), and entity-id allocation is locked only inside a wave
+      (`World#parallel_scope`). Verified: `spec/parallel_spec.cr` (waves + parallel≡sequential +
+      deferred spawns) and `examples/parallel_test.cr` (~2.6× on 3 disjoint systems, `-Dpreview_mt`).
+      Follow-ups: non-adjacent wave packing, per-system (not per-wave) change ticks, auto-derive
+      access from queries.
 - [ ] **Asset server** — async load, ref-counted `Handle<T>`, hot-reload (web already live-reloads).
       Current `Assets` is a plain cache.
 - [ ] **Render graph + post-processing stack** — renderer is fairly fixed-function; a modular

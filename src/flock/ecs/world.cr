@@ -35,6 +35,12 @@ module Flock
     getter change_tick : UInt32 = 1_u32
     @last_run : UInt32 = 0_u32
 
+    # Set by the App around a parallel wave. While true, entity id allocation is locked so
+    # concurrent `spawn`s (via Commands) don't corrupt the id bookkeeping. Off = no locking
+    # cost on the normal sequential path.
+    property parallel_scope : Bool = false
+    @entity_lock = Mutex.new
+
     # Called by App before each system runs: bumps the change-tick and records the tick the
     # about-to-run system last executed at (so changed?/added? are relative to it).
     def begin_system(last_run : UInt32) : Nil
@@ -45,6 +51,11 @@ module Flock
     # --- Entities ----------------------------------------------------------
 
     def spawn : Entity
+      return @entity_lock.synchronize { alloc_entity } if @parallel_scope
+      alloc_entity
+    end
+
+    private def alloc_entity : Entity
       if id = @free_ids.pop?
         @generations[id] += 1
         Entity.new(id, @generations[id])

@@ -28,6 +28,7 @@ require "./flock/app/schedule"
 require "./flock/app/plugin"
 require "./flock/time"
 require "./flock/app/app"
+require "./flock/app/parallel"    # opt-in parallel scheduler (Access + wave batching + executor)
 require "./flock/hierarchy"        # Parent component + HierarchyPlugin (needs Component, Plugin, Schedule)
 require "./flock/scene/save_plugin" # periodic autosave (needs Scene, Plugin, Time)
 
