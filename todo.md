@@ -489,7 +489,13 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       `examples/multi_window.cr` (two windows, one shared sprite from two cameras) smokes 30 frames;
       2D/3D readback + 115 specs + spacei native/web unaffected. Follow-up: per-window Input (mouse
       position/focus are still primary-window only; keyboard is global).
-- [ ] **Reflection / scene** expansion (JSON `save_plugin` exists → enables an editor).
+- [x] **Reflection / scene** — scene save/load (Saveable capture/restore, entity-ref remap,
+      migrations, autosave) already existed. Added the **reflection API for an editor/inspector**:
+      `Scene.component_names`/`resource_names`, `Scene.fields(name)` (per-field {name, type} schema
+      via compile-time `instance_vars`), and per-entity generic access — `components_of(world, e)`
+      (all components as JSON), `get_component`/`set_component`/`remove_component` by type name.
+      Verified: `spec/reflection_spec.cr` (schema, enumerate, editor get/set/remove round-trip).
+      Follow-up: an actual editor GUI (flock-ui inspector) on top of this + resource field schemas.
 - [x] **Audio: mixing bus, spatial, pitch** (native) — named mixing buses (`bus_volume(name)`/
       `(name, v)`; effective gain = master × bus × playback × spatial), `play(…, bus:, pitch:)`.
       **Spatial**: `Audio#listener` + `play_spatial(sound, at, max_distance:)` with linear distance

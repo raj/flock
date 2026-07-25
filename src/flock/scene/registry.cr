@@ -14,6 +14,14 @@ module Flock
       # Deserializes `json` and adds it to `entity`, remapping any entity-reference fields
       # through `map` (old entity id -> freshly spawned Entity).
       abstract def spawn(world : World, entity : Entity, json : JSON::Any, map : Hash(UInt32, Entity)) : Nil
+      # --- Reflection (for an editor / inspector) ---
+      abstract def has?(world : World, entity : Entity) : Bool
+      # This entity's component as JSON, or nil if it doesn't have one.
+      abstract def get(world : World, entity : Entity) : JSON::Any?
+      abstract def remove(world : World, entity : Entity) : Nil
+      # Field schema: {name, type-name} for each of the component's fields (compile-time
+      # introspection — Crystal has no runtime reflection).
+      abstract def fields : Array(Tuple(String, String))
     end
 
     class ComponentSerializerFor(T) < ComponentSerializer
@@ -27,6 +35,30 @@ module Flock
         # don't respond to it (compile-time), so the branch is elided and they're added as-is.
         component = component.remap_entities(map) if component.responds_to?(:remap_entities)
         world.add(entity, component)
+      end
+
+      def has?(world : World, entity : Entity) : Bool
+        world.has?(entity, T)
+      end
+
+      def get(world : World, entity : Entity) : JSON::Any?
+        if c = world.get(entity, T)
+          JSON.parse(c.to_json)
+        end
+      end
+
+      def remove(world : World, entity : Entity) : Nil
+        world.remove(entity, T)
+      end
+
+      def fields : Array(Tuple(String, String))
+        {% begin %}
+          [
+            {% for iv in T.instance_vars %}
+              { {{ iv.name.stringify }}, {{ iv.type.stringify }} },
+            {% end %}
+          ] of Tuple(String, String)
+        {% end %}
       end
     end
 
@@ -58,6 +90,54 @@ module Flock
 
     def self.register_resource(name : String, serializer : ResourceSerializer) : Nil
       RESOURCES[name] = serializer
+    end
+
+    # --- Reflection (enables a generic inspector / editor) ---
+
+    # Names of every registered (Saveable) component / resource type.
+    def self.component_names : Array(String)
+      COMPONENTS.keys
+    end
+
+    def self.resource_names : Array(String)
+      RESOURCES.keys
+    end
+
+    # Field schema {name, type-name} of a registered component, or nil if unknown.
+    def self.fields(name : String) : Array(Tuple(String, String))?
+      COMPONENTS[name]?.try &.fields
+    end
+
+    # Every registered component on `entity`, as JSON keyed by type name (inspector data).
+    def self.components_of(world : World, entity : Entity) : Hash(String, JSON::Any)
+      out = {} of String => JSON::Any
+      COMPONENTS.each do |name, ser|
+        if j = ser.get(world, entity)
+          out[name] = j
+        end
+      end
+      out
+    end
+
+    # One named component of `entity` as JSON (nil if absent / unregistered).
+    def self.get_component(world : World, entity : Entity, name : String) : JSON::Any?
+      COMPONENTS[name]?.try &.get(world, entity)
+    end
+
+    # Sets/replaces a named component on `entity` from JSON (editor write). False if the type
+    # isn't registered.
+    def self.set_component(world : World, entity : Entity, name : String, json : JSON::Any) : Bool
+      ser = COMPONENTS[name]?
+      return false unless ser
+      ser.spawn(world, entity, json, {} of UInt32 => Entity)
+      true
+    end
+
+    def self.remove_component(world : World, entity : Entity, name : String) : Bool
+      ser = COMPONENTS[name]?
+      return false unless ser
+      ser.remove(world, entity)
+      true
     end
   end
 
