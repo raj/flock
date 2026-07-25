@@ -33,7 +33,28 @@ module Flock
     @min : Float64 = Float64::INFINITY
     @max : Float64 = 0.0
 
+    # Rolling ring of the last HISTORY_LEN frame times (ms) — for a frame-time graph/sparkline.
+    HISTORY_LEN = 90
+    BARS        = "▁▂▃▄▅▆▇█".chars
+    @history = Array(Float64).new(HISTORY_LEN, 0.0)
+    @hpos = 0
+
     def initialize(@window : Float64 = 0.5)
+    end
+
+    # The last HISTORY_LEN frame times (ms) oldest→newest (for a graph).
+    def frame_history : Array(Float64)
+      (0...HISTORY_LEN).map { |i| @history[(@hpos + i) % HISTORY_LEN] }
+    end
+
+    # A unicode-block sparkline of the frame-time history (normalised to its max).
+    def sparkline : String
+      h = frame_history
+      mx = h.max
+      return "" if mx <= 0.0
+      String.build do |s|
+        h.each { |v| s << BARS[((v / mx) * (BARS.size - 1)).round.to_i.clamp(0, BARS.size - 1)] }
+      end
     end
 
     # Samples one frame. Returns true when the rolling window just rolled over (a fresh
@@ -45,6 +66,8 @@ module Flock
       @accum_frames += 1
       @min = ms if ms < @min
       @max = ms if ms > @max
+      @history[@hpos] = ms
+      @hpos = (@hpos + 1) % HISTORY_LEN
 
       count_scene(world)
 
@@ -116,17 +139,28 @@ module Flock
   class DiagnosticsPlugin < Plugin
     def initialize(*, @console : Bool = true, @overlay : Bool = false,
                    @font : String? = nil, @font_size : Int32 = 16,
-                   @interval : Float64 = 0.5, @color : Color = Color.new(0.6, 1.0, 0.7))
+                   @interval : Float64 = 0.5, @color : Color = Color.new(0.6, 1.0, 0.7),
+                   @profile : Bool = false)
     end
 
     def build(app : App) : Nil
       app.world.insert_resource(Diagnostics.new(@interval))
+      app.enable_profiling if @profile # per-system CPU timing
 
       # Sample after Render so the renderers' per-frame counters are already current.
       console = @console
+      profile = @profile
       app.add_system(Schedule::Last) do |world, _cmd|
         rolled = world.resource(Diagnostics).sample(world)
-        puts "[flock] #{world.resource(Diagnostics).summary}" if console && rolled
+        if console && rolled
+          diag = world.resource(Diagnostics)
+          puts "[flock] #{diag.summary}"
+          puts "[flock] frametime #{diag.sparkline}"
+          if profile && (prof = world.resource?(SystemProfiler))
+            prof.roll
+            puts "[flock] systems: #{prof.report}"
+          end
+        end
       end
 
       setup_overlay(app) if @overlay

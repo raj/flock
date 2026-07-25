@@ -46,6 +46,9 @@ module Flock
     # `add_system`'s `reads:`/`writes:` and `parallel_plan`. On a non-MT build it falls back
     # to sequential wave execution (warned once).
     property parallel : Bool = false
+    # When true, the sequential scheduler times each system into a SystemProfiler resource
+    # (see `enable_profiling`). Off by default → zero overhead.
+    property profiling : Bool = false
 
     @systems : Hash(Schedule, Array(SystemEntry)) = {} of Schedule => Array(SystemEntry)
     @order_cache : Hash(Schedule, Array(SystemEntry)) = {} of Schedule => Array(SystemEntry)
@@ -94,6 +97,14 @@ module Flock
 
     def add_plugin(plugin : Plugin) : self
       plugin.build(self)
+      self
+    end
+
+    # Turns on per-system CPU timing (sequential scheduler) and inserts the SystemProfiler
+    # resource. `DiagnosticsPlugin(profile: true)` calls this for you.
+    def enable_profiling : self
+      @profiling = true
+      @world.insert_resource(SystemProfiler.new)
       self
     end
 
@@ -222,17 +233,29 @@ module Flock
 
     private def run_schedule_sequential(schedule : Schedule) : Nil
       cmd = Commands.new(@world)
-      ordered_systems(schedule).each do |entry|
+      prof = @profiling ? @world.resource?(SystemProfiler) : nil
+      ordered_systems(schedule).each_with_index do |entry, i|
         if cond = entry.run_if
           next unless cond.call(@world)
         end
         # Change-detection window: bump the tick and expose this system's last-run tick,
         # then record the new tick so its next run sees only newer changes.
         @world.begin_system(entry.last_run)
-        entry.proc.call(@world, cmd)
+        if prof
+          t0 = ::Time.instant
+          entry.proc.call(@world, cmd)
+          prof.record(system_label(schedule, entry, i), (::Time.instant - t0).total_seconds)
+        else
+          entry.proc.call(@world, cmd)
+        end
         entry.last_run = @world.change_tick
       end
       cmd.apply
+    end
+
+    # Profiling display name for a system: its `label` if any, else "schedule#index".
+    private def system_label(schedule : Schedule, entry : SystemEntry, index : Int32) : String
+      (l = entry.label) ? l.to_s : "#{schedule}##{index}"
     end
 
     private def ordered_systems(schedule : Schedule) : Array(SystemEntry)

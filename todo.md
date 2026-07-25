@@ -490,4 +490,11 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       `SDL_SetAudioStreamFrequencyRatio` (bound in sdl3-cr). Verified: `examples/audio_bus_test.cr`
       (buses, attenuation curve, pitch). Follow-up: stereo pan + DSP effects (reverb/low-pass) need
       a per-stream mix callback; web-backend bus/spatial parity (WebAudio pan/gain nodes).
-- [ ] **Diagnostics**: per-system timings, frame-time graph.
+- [x] **Diagnostics: per-system timings + frame-time graph** — `Flock::SystemProfiler` (core,
+      opt-in via `App#enable_profiling`): the sequential scheduler times each system (by `label`,
+      else `schedule#index`); `roll` → per-system average ms, `report` lists the hottest. `Diagnostics`
+      gained a rolling frame-time history ring + `sparkline` (unicode-block frame-time graph).
+      `DiagnosticsPlugin(profile: true)` enables it and prints the sparkline + per-system report each
+      window. Off by default (zero overhead). Verified: `spec/profiler_spec.cr` (per-system recording,
+      heavier system costs more, off-by-default) + `examples/diagnostics_profile.cr`. Follow-up: GPU
+      timings (needs the wgpu TimestampQuery feature at device creation).

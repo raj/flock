@@ -19,6 +19,7 @@ require "./flock/ecs/bundle"
 require "./flock/ecs/sparse_set"
 require "./flock/ecs/world"
 require "./flock/input_map"             # Flock::InputMap(A): logical actions ← keys (portable)
+require "./flock/profiler"              # Flock::SystemProfiler: opt-in per-system CPU timing
 require "./flock/ecs/commands"
 require "./flock/ecs/events"
 require "./flock/ecs/state"
