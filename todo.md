@@ -477,7 +477,11 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       toolchains).
 
 ### Smaller wins
-- [ ] **Gizmos / debug-draw** (lines/shapes) — very useful during development.
+- [x] **Gizmos / debug-draw** — `Flock::Gizmos` (immediate-mode): `line`/`ray`/`rect`/`circle`/
+      `cross` re-issued each frame; `Renderer2D` draws each segment as a thin rotated quad on top
+      (primary window, reuses the sprite pipeline — no new pipeline); `GizmosPlugin` clears them
+      after Render. Native, world-space 2D. Verified: `examples/gizmos_test.cr` (line/circle
+      readback) + `gizmos_demo.cr`. Follow-up: 3D gizmos (line pipeline for Camera3D) + web.
 - [x] **Multi-window** (native) — one GPU device, N swapchains. `Flock::Window` = a secondary
       SDL window + wgpu surface sharing the primary `GpuContext`'s device/queue/instance/adapter
       (acquire/present/reconfigure/release); `Flock::Windows` registry (`open(title,w,h)`) inserted

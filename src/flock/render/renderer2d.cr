@@ -620,6 +620,19 @@ module Flock
           sprites << {b.z, mat_id, pipeline, texture, model, it.color, it.uv_min, it.uv_size, nil.as(ClipRect?)}
         end
       end
+      # Gizmos (immediate-mode debug): each line → a thin rotated quad on top, primary window.
+      if window == 0 && (giz = world.resource?(Gizmos))
+        giz.lines.each do |ln|
+          dx = ln.b.x - ln.a.x
+          dy = ln.b.y - ln.a.y
+          len = Math.sqrt(dx * dx + dy * dy).to_f32
+          next if len <= 0.0f32
+          mid = Vec2.new((ln.a.x + ln.b.x) * 0.5f32, (ln.a.y + ln.b.y) * 0.5f32)
+          angle = Math.atan2(dy, dx).to_f32
+          model = Transform2D.new(position: mid, rotation: angle, scale: Vec2.new(len, ln.thickness)).matrix
+          sprites << {9_000.0f32, 0, @pipeline, @white, model, ln.color, Vec2.new(0, 0), Vec2.new(1, 1), nil.as(ClipRect?)}
+        end
+      end
       # Sort by layer (z), then material, then texture: correct layering + batching.
       sprites.sort_by! { |s| {s[0], s[1], s[3].view.address} }
       @last_sprites = sprites.size
