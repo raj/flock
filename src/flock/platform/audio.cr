@@ -44,6 +44,14 @@ module Flock
     property? loop : Bool
     property volume : Float32
     property? active : Bool = true
+    # Mixing bus this playback belongs to (its volume multiplies in). Default :sfx.
+    property bus : Symbol = :sfx
+    # Spatial emitter position (nil = non-spatial / 2D UI sound); `max_distance` past which it's
+    # silent; `spatial_gain` is the computed distance attenuation (1 = full).
+    property emitter : Vec2? = nil
+    property max_distance : Float32 = 500.0f32
+    property spatial_gain : Float32 = 1.0f32
+    property pitch : Float32 = 1.0f32
 
     def initialize(@stream : LibSDL::AudioStream, @sound : Sound, @loop : Bool, @volume : Float32)
     end
@@ -60,6 +68,9 @@ module Flock
     @main : LibSDL::AudioStream
     @playing : Array(Playback) = [] of Playback
     @beeps : Hash(Tuple(Int32, Int32), Sound) = {} of Tuple(Int32, Int32) => Sound
+    # Named mixing buses (volume multiplier, default 1.0) + the spatial listener position.
+    @buses : Hash(Symbol, Float32) = {} of Symbol => Float32
+    property listener : Vec2 = Vec2.new
 
     def initialize
       @spec = LibSDL::AudioSpec.new(format: LibSDL::AUDIO_F32LE, channels: 2, freq: 48_000)
@@ -92,13 +103,27 @@ module Flock
       play(snd)
     end
 
-    # Plays `sound`. `volume` (0..1) scales this playback; `loop` repeats it until
-    # stopped. Returns a Playback handle (for `stop`).
-    def play(sound : Sound, volume : Number = 1.0, loop : Bool = false) : Playback
+    # Volume (0..1) of a named mixing bus (default 1.0). Buses multiply between the master and
+    # each playback's own volume (e.g. separate :music / :sfx sliders).
+    def bus_volume(name : Symbol) : Float32
+      @buses[name]? || 1.0f32
+    end
+
+    def bus_volume(name : Symbol, v : Number) : Nil
+      @buses[name] = v.to_f32
+      @playing.each { |pb| apply_gain(pb) if pb.bus == name }
+    end
+
+    # Plays `sound`. `volume` (0..1) scales this playback; `loop` repeats until stopped; `bus`
+    # picks a mixing bus; `pitch` is a playback-speed/pitch ratio (1 = normal). Returns a handle.
+    def play(sound : Sound, volume : Number = 1.0, loop : Bool = false,
+             bus : Symbol = :sfx, pitch : Number = 1.0) : Playback
       vol = volume.to_f32
       src = sound.spec
       stream = LibSDL.create_audio_stream(pointerof(src), pointerof(@spec))
       pb = Playback.new(stream, sound, loop, vol)
+      pb.bus = bus
+      pb.pitch = pitch.to_f32
       if stream.null?
         # Stream creation failed: the handle isn't playing and isn't tracked in
         # @playing, so mark it inactive to reflect its real state.
@@ -106,12 +131,56 @@ module Flock
         return pb
       end
 
-      LibSDL.set_audio_stream_gain(stream, vol * @master_volume)
+      apply_gain(pb)
+      LibSDL.set_audio_stream_frequency_ratio(stream, pb.pitch) if pb.pitch != 1.0f32
       LibSDL.put_audio_stream_data(stream, sound.data.to_unsafe.as(Void*), sound.data.size)
       LibSDL.bind_audio_stream(@device, stream)
       LibSDL.resume_audio_stream_device(stream)
       @playing << pb
       pb
+    end
+
+    # Plays `sound` at a world position: its volume attenuates with distance to `listener`
+    # (linear, silent past `max_distance`), recomputed each frame by `update_spatial`.
+    def play_spatial(sound : Sound, at : Vec2, volume : Number = 1.0, loop : Bool = false,
+                     bus : Symbol = :sfx, max_distance : Number = 500.0, pitch : Number = 1.0) : Playback
+      pb = play(sound, volume, loop, bus, pitch)
+      return pb unless pb.active?
+      pb.emitter = at
+      pb.max_distance = max_distance.to_f32
+      pb.spatial_gain = attenuation(at, pb.max_distance)
+      apply_gain(pb)
+      pb
+    end
+
+    # Recomputes distance attenuation for every spatial playback from the current `listener`.
+    # Call once per frame after moving the listener (wired into AudioPlugin's Last system).
+    def update_spatial : Nil
+      @playing.each do |pb|
+        if e = pb.emitter
+          pb.spatial_gain = attenuation(e, pb.max_distance)
+          apply_gain(pb)
+        end
+      end
+    end
+
+    private def attenuation(pos : Vec2, max_distance : Float32) : Float32
+      return 1.0f32 if max_distance <= 0.0f32
+      d = (pos - @listener).length
+      (1.0f32 - d / max_distance).clamp(0.0f32, 1.0f32)
+    end
+
+    # Sets a playback's live gain = master × bus × its volume × spatial attenuation.
+    private def apply_gain(pb : Playback) : Nil
+      return if pb.stream.null?
+      LibSDL.set_audio_stream_gain(pb.stream, @master_volume * bus_volume(pb.bus) * pb.volume * pb.spatial_gain)
+    end
+
+    # Changes a live playback's pitch/speed ratio (1 = normal).
+    def pitch(pb : Playback, ratio : Number) : Nil
+      return unless pb.active?
+      pb.pitch = ratio.to_f32
+      LibSDL.set_audio_stream_frequency_ratio(pb.stream, pb.pitch)
     end
 
     # Stops (and frees) a playback.
@@ -133,7 +202,7 @@ module Flock
     # Master gain (0..1) applied on top of each playback's own volume.
     def master_volume=(v : Number) : Nil
       @master_volume = v.to_f32
-      @playing.each { |pb| LibSDL.set_audio_stream_gain(pb.stream, pb.volume * @master_volume) }
+      @playing.each { |pb| apply_gain(pb) }
     end
 
     def playing_count : Int32
@@ -168,7 +237,10 @@ module Flock
         world.insert_resource(Audio.new)
       end
       app.add_system(Schedule::Last) do |world, _cmd|
-        world.resource?(Audio).try &.reap
+        if a = world.resource?(Audio)
+          a.update_spatial
+          a.reap
+        end
       end
     end
   end

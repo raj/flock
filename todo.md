@@ -482,5 +482,12 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       2D/3D readback + 115 specs + spacei native/web unaffected. Follow-up: per-window Input (mouse
       position/focus are still primary-window only; keyboard is global).
 - [ ] **Reflection / scene** expansion (JSON `save_plugin` exists → enables an editor).
-- [ ] **Audio**: mixing bus, spatial audio, effects (SDL3 mixing is basic today).
+- [x] **Audio: mixing bus, spatial, pitch** (native) — named mixing buses (`bus_volume(name)`/
+      `(name, v)`; effective gain = master × bus × playback × spatial), `play(…, bus:, pitch:)`.
+      **Spatial**: `Audio#listener` + `play_spatial(sound, at, max_distance:)` with linear distance
+      attenuation, recomputed each frame from the listener (`update_spatial`, wired into
+      AudioPlugin). **Pitch effect**: `play(pitch:)` / `Audio#pitch(pb, ratio)` via
+      `SDL_SetAudioStreamFrequencyRatio` (bound in sdl3-cr). Verified: `examples/audio_bus_test.cr`
+      (buses, attenuation curve, pitch). Follow-up: stereo pan + DSP effects (reverb/low-pass) need
+      a per-stream mix callback; web-backend bus/spatial parity (WebAudio pan/gain nodes).
 - [ ] **Diagnostics**: per-system timings, frame-time graph.
