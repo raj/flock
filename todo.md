@@ -465,8 +465,16 @@ day-to-day experience of writing a game, not by size. Anchors: what Bevy/MonoGam
       cells. **Auto-tiling**: `Flock::Tilemap::Autotile` (4/8-bit neighbour mask + `remap`
       mask→gid). tilemap features verified in `flock-tilemap/spec/features_spec.cr`. Follow-up:
       route flock-aseprite/ldtk onto the shared `SpriteAnimation`/`SpriteBatch`.
-- [ ] **flock-cli**: project templates, asset pipeline, one-command build for web/native/**mobile**,
-      native hot-reload dev server (exists for web).
+- [~] **flock-cli** — scaffolding (`new` 2D/3D + tilemap/ldtk/collision), Rails-style generators
+      (component/entity/system/resource/plugin), native hot-reload `dev`, `build`/`run` were already
+      done. Added: **`flock pack [dir] [-o out.flkpack]`** (asset pipeline → `.flkpack` via
+      `Flock::PackWriter`, run through the project's Flock checkout on `CRYSTAL_PATH`); **`flock build
+      --target web`** and **`flock dev --target web`** (delegate to the project's `web/build.sh` /
+      `web/dev.sh` wesh toolchain — one command for the WASM build / web dev-server, clear error if
+      the project has no web target). Verified end-to-end (pack round-trips a real archive; web
+      targets delegate + pass flags) + 18 CLI specs. **Not done:** scaffolding a web target from
+      `flock new` (project must add `web/` itself for now); **mobile** builds (iOS/Android
+      toolchains).
 
 ### Smaller wins
 - [ ] **Gizmos / debug-draw** (lines/shapes) — very useful during development.
