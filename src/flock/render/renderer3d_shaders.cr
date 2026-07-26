@@ -145,6 +145,8 @@ module Flock
       // Alpha MASK (glTF): hard cutout when a cutoff is set (mr.z / in.cutoff > 0).
       if (in.cutoff > 0.0 && alpha < in.cutoff) { discard; }
       let base = in.color * btex.rgb;
+      // KHR_materials_unlit (bit 8 of the UV-set mask): output the base color, no lighting.
+      if ((bits & 256u) != 0u) { return vec4<f32>(base, alpha); }
       let mrs = textureSample(mr_tex, samp, uv_mr);
       let metal = clamp(mrs.b * in.mr.x, 0.0, 1.0);
       let rough = clamp(mrs.g * in.mr.y, 0.045, 1.0);

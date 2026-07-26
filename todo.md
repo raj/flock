@@ -202,10 +202,12 @@ Real 3D features never planned, ordered by rendering impact. Confirmed absent in
       worldJoint · inverseBind` (`Mat4#inverse`), so a skinned mesh whose node has a non-identity
       transform renders correctly (see `examples/skinned_node_transform_test.cr`).
       **KHR extensions:** `KHR_texture_transform` (base-color offset/scale/rotation baked into
-      the mesh UVs at load) and `KHR_materials_emissive_strength` (scales `emissiveFactor`,
-      HDR-capable) — `Mesh.read_texture_transform`/`apply_uv_transform`/`read_emissive_strength`,
-      verified in `examples/gltf_khr_test.cr`. **Not yet:** other `KHR_materials_*` (unlit, ior,
-      specular, transmission, clearcoat, sheen — most need shader work).
+      the mesh UVs at load), `KHR_materials_emissive_strength` (scales `emissiveFactor`,
+      HDR-capable), and `KHR_materials_unlit` (flat base color, no lighting — `MeshRenderer#unlit`,
+      flagged via bit 8 of the per-instance UV-set mask, branched in the PBR shader; parsed by
+      `Mesh.read_unlit`). Verified in `examples/gltf_khr_test.cr` + `unlit_test.cr`. **Not yet:**
+      the heavier `KHR_materials_*` (ior, specular, transmission, clearcoat, sheen — extra BRDF
+      lobes / screen-space refraction).
 - [x] **Camera / misc polish.** `OrbitCamera` (arcball: target/distance/yaw/pitch, dolly,
       clamps) and `FlyCamera` (position/yaw/pitch, WASD move + mouse look) controller helpers — pure,
       input-agnostic structs that write into a `Camera3D` (see `spec/camera_controller_spec.cr` and

@@ -43,13 +43,16 @@ module Flock
     # culling by those bounds can wrongly drop (or keep) them. Set false to always draw the
     # instance regardless of its bounding sphere. The CPU skinning/morph models set this.
     property cull : Bool
+    # KHR_materials_unlit: render the base color directly (no lighting/PBR) — flat/stylized.
+    property unlit : Bool
 
     def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil,
                    @tint : Color = Color::WHITE, @metallic_roughness : Texture? = nil,
                    @normal_map : Texture? = nil, @metallic : Float32 = 0.0f32, @roughness : Float32 = 1.0f32,
                    @transparent : Bool = false, @emissive : Texture? = nil,
                    @emissive_factor : Color = Color::BLACK, @occlusion : Texture? = nil,
-                   @alpha_cutoff : Float32 = 0.0f32, @tex_coords : UInt32 = 0_u32, @cull : Bool = true)
+                   @alpha_cutoff : Float32 = 0.0f32, @tex_coords : UInt32 = 0_u32, @cull : Bool = true,
+                   @unlit : Bool = false)
     end
   end
 

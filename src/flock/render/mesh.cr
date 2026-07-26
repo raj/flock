@@ -527,6 +527,7 @@ module Flock
       metallic = 1.0f32; roughness = 1.0f32
       emissive_factor = Color::BLACK
       transparent = false; alpha_cutoff = 0.0f32
+      unlit = false
       tex_coords = 0_u32 # UV-set bitmask (bit i set = texture i uses TEXCOORD_1)
 
       # This convenience loader returns ONE material's worth of maps/factors: the first.
@@ -574,12 +575,13 @@ module Flock
         when "BLEND" then transparent = true
         when "MASK"  then alpha_cutoff = m["alphaCutoff"]?.try(&.as_f.to_f32) || 0.5f32
         end
+        unlit = read_unlit(m)
       end
 
       {mesh: mesh, base_color: base, metallic_roughness: mr, normal: normal,
        metallic: metallic, roughness: roughness, emissive: emissive,
        emissive_factor: emissive_factor, occlusion: occlusion,
-       transparent: transparent, alpha_cutoff: alpha_cutoff, tex_coords: tex_coords}
+       transparent: transparent, alpha_cutoff: alpha_cutoff, tex_coords: tex_coords, unlit: unlit}
     end
 
     private def self.gltf_texture_at(gpu : GpuContext, doc : JSON::Any, buffers : Array(Bytes),
@@ -802,6 +804,11 @@ module Flock
     # KHR_materials_emissive_strength multiplier (default 1.0 when absent).
     def self.read_emissive_strength(m : JSON::Any) : Float32
       m.dig?("extensions", "KHR_materials_emissive_strength", "emissiveStrength").try(&.as_f.to_f32) || 1.0f32
+    end
+
+    # KHR_materials_unlit: the material renders as flat base color (no lighting).
+    def self.read_unlit(m : JSON::Any) : Bool
+      !m.dig?("extensions", "KHR_materials_unlit").nil?
     end
 
     # The base-color texture's KHR_texture_transform for a primitive's material, or nil.

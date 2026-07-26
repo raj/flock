@@ -828,6 +828,7 @@ module Flock
         occ_tex = m.occlusion || @white   # R channel (default white -> no occlusion)
 
         uvbits = m.tex_coords.to_f32
+        uvbits += 256.0f32 if m.unlit # KHR_materials_unlit flag (bit 8), read by the PBR shader
 
         if m.transparent
           c = model.transform_point(mesh.bounds_center)
