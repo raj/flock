@@ -333,7 +333,11 @@ notes buried in the completed entries plus the two open sections:
       morph targets (CPU + GPU), multiple UV sets, vertex colors on skinned meshes, camera
       controllers, skinned normal matrix, and deformed-mesh cull opt-out. Left only: assorted other
       KHR extensions.
-- [ ] **Audio**: one-shots are reclaimed at `queued==0` (input side), which can clip the tail.
+- [x] **Audio one-shot tail** — a drained one-shot (input `queued == 0`) is now held for a
+      `DRAIN_GRACE` (0.2s) before its stream is destroyed, so the device's buffered tail plays
+      out instead of being clipped. `reap(dt)` accumulates the grace (fed from `Time.delta` by
+      AudioPlugin); loops + explicit `stop` unchanged. Verified: `examples/audio_bus_test.cr`
+      (a still-queued one-shot survives a large-dt reap).
 
 ### Cross-platform validation
 - [ ] **sdl3-cr surface setup**: X11/Wayland/HWND are cross-compile-verified only; validate

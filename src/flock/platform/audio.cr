@@ -52,6 +52,9 @@ module Flock
     property max_distance : Float32 = 500.0f32
     property spatial_gain : Float32 = 1.0f32
     property pitch : Float32 = 1.0f32
+    # Seconds since this one-shot's input queue drained — reclaimed only after a grace so the
+    # device's buffered tail finishes playing (avoids clipping the end of short sounds).
+    property drain : Float32 = 0.0f32
 
     def initialize(@stream : LibSDL::AudioStream, @sound : Sound, @loop : Bool, @volume : Float32)
     end
@@ -209,8 +212,13 @@ module Flock
       @playing.size
     end
 
-    # Per-frame: re-queue looping playbacks, reclaim finished one-shots.
-    def reap : Nil
+    # Grace (seconds) to keep a drained one-shot alive so the device's buffered tail plays out.
+    DRAIN_GRACE = 0.2f32
+
+    # Per-frame: re-queue looping playbacks, reclaim finished one-shots (after the drain grace so
+    # their tail isn't clipped). `dt` is the frame delta (from AudioPlugin); with dt = 0 a drained
+    # one-shot is held rather than cut.
+    def reap(dt : Float32 = 0.0f32) : Nil
       @playing.reject! do |pb|
         if pb.loop?
           # keep at least one copy queued for a seamless loop.
@@ -219,10 +227,17 @@ module Flock
           end
           false
         elsif LibSDL.get_audio_stream_queued(pb.stream) <= 0
-          LibSDL.destroy_audio_stream(pb.stream)
-          pb.active = false
-          true
+          # Input drained: wait out the grace (device tail) before destroying.
+          pb.drain += dt
+          if pb.drain >= DRAIN_GRACE
+            LibSDL.destroy_audio_stream(pb.stream)
+            pb.active = false
+            true
+          else
+            false
+          end
         else
+          pb.drain = 0.0f32 # still feeding → not draining
           false
         end
       end
@@ -239,7 +254,7 @@ module Flock
       app.add_system(Schedule::Last) do |world, _cmd|
         if a = world.resource?(Audio)
           a.update_spatial
-          a.reap
+          a.reap(world.resource(Time).delta.to_f32)
         end
       end
     end

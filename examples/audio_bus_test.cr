@@ -46,6 +46,13 @@ audio.pitch(p, 0.5)
 report.call("pitch changed live", p.pitch == 0.5f32)
 audio.stop(p)
 
+# --- One-shot tail: reap must not cut a sound whose data is still queued ---
+long = Flock::Sound.beep(440.0, 0.5, 0.0) # 0.5s → plenty still queued right after play
+lp = audio.play(long)
+audio.reap(10.0) # huge dt, but input queue is non-empty → kept (tail not clipped)
+report.call("one-shot kept while data queued", audio.playing_count >= 1)
+audio.stop(lp)
+
 audio.stop_all
 audio.release
 
