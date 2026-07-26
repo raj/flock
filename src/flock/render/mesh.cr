@@ -237,6 +237,7 @@ module Flock
       colf, cn = (ci = attrs["COLOR_0"]?) ? gltf_read_floats(accessors, views, buffers, ci.as_i) : {nil, 0}
       uvf = (ti = attrs["TEXCOORD_0"]?) ? gltf_read_floats(accessors, views, buffers, ti.as_i)[0] : nil
       uvf1 = (ti1 = attrs["TEXCOORD_1"]?) ? gltf_read_floats(accessors, views, buffers, ti1.as_i)[0] : nil
+      uvt = gltf_texture_transform(doc, prim) # KHR_texture_transform on the base-color texture
       mr, mg, mb = gltf_material_rgb(doc, prim, color)
 
       prim_indices =
@@ -262,6 +263,7 @@ module Flock
         end
         u = uvf ? uvf[v * 2] : 0.0f32
         vv = uvf ? uvf[v * 2 + 1] : 0.0f32
+        u, vv = apply_uv_transform(u, vv, uvt) if uvt # KHR_texture_transform
         # Second UV set (TEXCOORD_1); falls back to uv0 so texCoord:1 lookups stay sane.
         u1 = uvf1 ? uvf1[v * 2] : u
         vv1 = uvf1 ? uvf1[v * 2 + 1] : vv
@@ -562,6 +564,11 @@ module Flock
         if ef = m["emissiveFactor"]?.try(&.as_a)
           emissive_factor = Color.new(ef[0].as_f, ef[1].as_f, ef[2].as_f)
         end
+        # KHR_materials_emissive_strength scales the emissive (values may exceed 1 → HDR glow).
+        str = read_emissive_strength(m)
+        if str != 1.0f32
+          emissive_factor = Color.new(emissive_factor.r * str, emissive_factor.g * str, emissive_factor.b * str)
+        end
         # Alpha mode: BLEND -> transparent pass; MASK -> hard cutout (default cutoff 0.5).
         case m["alphaMode"]?.try(&.as_s)
         when "BLEND" then transparent = true
@@ -765,6 +772,45 @@ module Flock
         return {1.0f32, 1.0f32, 1.0f32}
       end
       {fallback.r, fallback.g, fallback.b}
+    end
+
+    # --- KHR extensions (load-time) ---
+
+    # Parses `KHR_texture_transform` from a texture-info extension: {offset_x, offset_y,
+    # scale_x, scale_y, rotation}. Defaults: no offset, unit scale, no rotation.
+    def self.read_texture_transform(tt : JSON::Any) : Tuple(Float32, Float32, Float32, Float32, Float32)
+      off = tt["offset"]?.try(&.as_a)
+      scl = tt["scale"]?.try(&.as_a)
+      ox = off ? off[0].as_f.to_f32 : 0.0f32
+      oy = off ? off[1].as_f.to_f32 : 0.0f32
+      sx = scl ? scl[0].as_f.to_f32 : 1.0f32
+      sy = scl ? scl[1].as_f.to_f32 : 1.0f32
+      rot = tt["rotation"]?.try(&.as_f.to_f32) || 0.0f32
+      {ox, oy, sx, sy, rot}
+    end
+
+    # Applies a KHR_texture_transform (scale → rotate → translate, per spec) to a UV.
+    def self.apply_uv_transform(u : Float32, v : Float32,
+                                tt : Tuple(Float32, Float32, Float32, Float32, Float32)) : Tuple(Float32, Float32)
+      ox, oy, sx, sy, rot = tt
+      su = u * sx
+      sv = v * sy
+      c = Math.cos(rot); s = Math.sin(rot)
+      {(c * su + s * sv).to_f32 + ox, (-s * su + c * sv).to_f32 + oy}
+    end
+
+    # KHR_materials_emissive_strength multiplier (default 1.0 when absent).
+    def self.read_emissive_strength(m : JSON::Any) : Float32
+      m.dig?("extensions", "KHR_materials_emissive_strength", "emissiveStrength").try(&.as_f.to_f32) || 1.0f32
+    end
+
+    # The base-color texture's KHR_texture_transform for a primitive's material, or nil.
+    private def self.gltf_texture_transform(doc : JSON::Any, prim : JSON::Any) : Tuple(Float32, Float32, Float32, Float32, Float32)?
+      return nil unless (mi = prim["material"]?) && (mats = doc["materials"]?)
+      return nil unless mat = mats.as_a[mi.as_i]?
+      return nil unless ref = mat.dig?("pbrMetallicRoughness", "baseColorTexture")
+      return nil unless tt = ref.dig?("extensions", "KHR_texture_transform")
+      read_texture_transform(tt)
     end
 
     # Returns {json, glb_binary_chunk?}. For .glb, splits the container; for .gltf,
