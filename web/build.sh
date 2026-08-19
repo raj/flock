@@ -6,6 +6,14 @@
 #
 # Requires wasm-ld + wasm-opt (+ uglifyjs for --release); the WASI sysroot is fetched by
 # crystal-js on first run. The wesh checkout is found via $WESH or a few common paths.
+#
+# SIZE NOTE (known, accepted): a --release build is ~350 KiB / ~190 KiB gzip, dominated by
+# the static data segment (RTTI + string literals), NOT code. `main.cr` does `require
+# "../src/flock"`, which pulls the WHOLE engine (glTF/mesh loader, pack, diagnostics, the
+# scene JSON codegen) even though the web target uses a fraction of it. `-Dwithout_backtrace`
+# is a no-op here (wasm32-wasi has no libunwind, so backtraces are already excluded). The only
+# real lever left is a web-specific partial require of the engine — deferred, as it touches the
+# engine's module layout and risks the native builds.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
