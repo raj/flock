@@ -41,6 +41,14 @@ module Flock
     property parallel_scope : Bool = false
     @entity_lock = Mutex.new
 
+    # Runs `block` under the same lock that serializes entity allocation and event `send`.
+    # Events(T) uses it to snapshot its buffers before iterating, so a concurrent writer's
+    # append (also under this lock) can't reallocate the array mid-read. Held only for the
+    # snapshot, never across a user handler — so it can't deadlock a resending handler.
+    def event_lock_synchronize(&)
+      @entity_lock.synchronize { yield }
+    end
+
     # Called by App before each system runs: bumps the change-tick and records the tick the
     # about-to-run system last executed at (so changed?/added? are relative to it).
     def begin_system(last_run : UInt32) : Nil

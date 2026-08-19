@@ -129,6 +129,61 @@ describe "Events" do
   end
 end
 
+# With a parallel wave active, the reader iterates a snapshot taken under the shared lock
+# (guarding against a concurrent writer's array reallocation). These pin that the snapshot
+# path delivers exactly the same semantics as the sequential path — exactly-once, ordering,
+# and resend-during-read deferral — so correctness never depends on the scheduling mode.
+describe "Events (parallel_scope snapshot path)" do
+  it "each_event under parallel_scope delivers this frame's events in order" do
+    w = Flock::World.new
+    w.parallel_scope = true
+    w.send_event(PingEvent.new(1))
+    w.send_event(PingEvent.new(2))
+    seen = [] of Int32
+    w.each_event(PingEvent) { |e| seen << e.n }
+    seen.should eq([1, 2])
+  end
+
+  it "EventReader under parallel_scope yields each event exactly once, in order" do
+    w = Flock::World.new
+    w.parallel_scope = true
+    reader = Flock::EventReader(PingEvent).new
+    seen = [] of Int32
+    w.send_event(PingEvent.new(1))
+    w.send_event(PingEvent.new(2))
+    reader.read(w.events(PingEvent)) { |e| seen << e.n }
+    reader.read(w.events(PingEvent)) { |e| seen << e.n } # cursor already caught up
+    seen.should eq([1, 2])
+  end
+
+  it "EventReader under parallel_scope defers a resend-during-read to the next read" do
+    w = Flock::World.new
+    w.parallel_scope = true
+    reader = Flock::EventReader(PingEvent).new
+    w.send_event(PingEvent.new(1))
+    seen = [] of Int32
+    reader.read(w.events(PingEvent)) do |e|
+      seen << e.n
+      w.send_event(PingEvent.new(2)) if e.n == 1 # resend from inside the handler (lock released)
+    end
+    seen.should eq([1]) # snapshot was taken before the resend
+    reader.read(w.events(PingEvent)) { |e| seen << e.n }
+    seen.should eq([1, 2]) # delivered exactly once on the next read
+  end
+
+  it "each() under parallel_scope does not loop forever on a same-type resend" do
+    w = Flock::World.new
+    w.parallel_scope = true
+    w.send_event(PingEvent.new(1))
+    seen = [] of Int32
+    w.each_event(PingEvent) do |e|
+      seen << e.n
+      w.send_event(PingEvent.new(e.n + 1)) if e.n < 3
+    end
+    seen.should eq([1]) # only the snapshotted event is iterated this pass
+  end
+end
+
 describe "State" do
   it "runs in-state systems only in the matching state; transitions are deferred" do
     app = Flock::App.new

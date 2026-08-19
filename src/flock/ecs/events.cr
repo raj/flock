@@ -16,6 +16,15 @@ module Flock
     @start_b : Int32 = 0
     @a_newer : Bool = true # which buffer holds the current frame's events
     @count : Int32 = 0     # total events ever sent (= next global index)
+    # The owning World, wired on creation. Used ONLY to reach the shared entity lock and the
+    # `parallel_scope` flag: while a parallel wave is active the reader snapshots its buffers
+    # under that lock (a concurrent `send` appends under the same lock, so the array can't be
+    # reallocated mid-iteration). nil / non-parallel = zero-cost, iterate the live buffer.
+    @world : World? = nil
+
+    def attach(world : World) : Nil
+      @world = world
+    end
 
     private def newer : Array(T)
       @a_newer ? @buf_a : @buf_b
@@ -31,13 +40,25 @@ module Flock
     # re-sent events are NOT seen by `each` (this or next frame) — only an `EventReader`
     # picks them up. If a handler resends its own event type, use an EventReader.
     def each(& : T ->) : Nil
-      b = newer
+      # Under a parallel wave, iterate a snapshot taken under the shared lock: a concurrent
+      # `send` (same lock) can't reallocate the buffer while we read it. The lock is released
+      # before the first yield, so a handler that resends is never blocked. Sequential path
+      # aliases the live buffer (no copy, no lock) — identical to before.
+      b = snapshot(newer)
       n = b.size
       i = 0
       while i < n
         yield b[i]
         i += 1
       end
+    end
+
+    # Returns `buf` itself on the sequential path; a copy taken under the shared lock while a
+    # parallel wave is active (so a concurrent append can't reallocate it mid-read).
+    private def snapshot(buf : Array(T)) : Array(T)
+      w = @world
+      return buf unless w && w.parallel_scope
+      w.event_lock_synchronize { buf.dup }
     end
 
     def size : Int32
@@ -71,17 +92,27 @@ module Flock
     # Yields events with global index >= `from` (oldest buffer first); returns the
     # new cursor (total count). Used by EventReader.
     def read_from(from : Int32, & : T ->) : Int32
-      # Snapshot the target up front: only events that existed at entry (global index
-      # < target) are delivered now, and the cursor advances to exactly `target`. An event
-      # SENT by a handler during this read (index >= target) is deferred to the next read —
-      # delivered once, never skipped (returning the live @count would skip it).
-      target = @count
-      if @a_newer
-        emit(@buf_b, @start_b, from, target) { |e| yield e }
-        emit(@buf_a, @start_a, from, target) { |e| yield e }
+      # Snapshot the target count up front: only events that existed at entry (global index
+      # < target) are delivered now, and the cursor advances to exactly `target`. An event SENT
+      # by a handler during this read (index >= target) is deferred to the next read — delivered
+      # once, never skipped (returning the live @count would skip it). While a parallel wave is
+      # active the buffers, their index bases, and `target` are all snapshotted together under
+      # the shared lock, so a concurrent `send` can't reallocate a buffer or leave `target`
+      # inconsistent with them; the lock is released before any yield.
+      w = @world
+      if w && w.parallel_scope
+        a, b, sa, sb, an, target = w.event_lock_synchronize do
+          {@buf_a.dup, @buf_b.dup, @start_a, @start_b, @a_newer, @count}
+        end
       else
-        emit(@buf_a, @start_a, from, target) { |e| yield e }
-        emit(@buf_b, @start_b, from, target) { |e| yield e }
+        a, b, sa, sb, an, target = @buf_a, @buf_b, @start_a, @start_b, @a_newer, @count
+      end
+      if an
+        emit(b, sb, from, target) { |e| yield e }
+        emit(a, sa, from, target) { |e| yield e }
+      else
+        emit(a, sa, from, target) { |e| yield e }
+        emit(b, sb, from, target) { |e| yield e }
       end
       target
     end
@@ -131,6 +162,7 @@ module Flock
         existing.as(Events(T))
       else
         ev = Events(T).new
+        ev.attach(self) # wire the shared lock so parallel reads can snapshot safely
         @resources[key] = ev
         ev
       end
