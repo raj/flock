@@ -4,8 +4,8 @@
 #
 #   crystal run examples/smoke_window.cr
 #   WGPU_FRAMES=3 crystal run examples/smoke_window.cr
-require "../../wgpu-cr/src/wgpu"
-require "../../sdl3-cr/src/sdl3"
+require "wgpu"
+require "sdl3"
 
 WIDTH  = 800
 HEIGHT = 600

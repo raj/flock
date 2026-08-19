@@ -14,14 +14,17 @@ license: MIT
 
 dependencies:
   wgpu:
-    path: ../wgpu-cr
+    github: raj/wgpu-cr
+    version: ~> 0.1.0
   sdl3:
-    path: ../sdl3-cr
+    github: raj/sdl3-cr
+    version: ~> 0.1.0
 
 # The ECS + math core depends on no native lib (`require "flock"`, headless).
-# The platform/rendering layer (`require "flock/gpu"`) uses the sibling shards
-# wgpu-cr (wgpu-native) and sdl3-cr (SDL3, linked via pkg-config), resolved as
-# path dependencies so `shards install` works in this monorepo layout.
+# The platform/rendering layer (`require "flock/gpu"`) uses the shards wgpu-cr
+# (wgpu-native, shard name `wgpu`) and sdl3-cr (SDL3 via pkg-config, shard name
+# `sdl3`). Run `shards install` to fetch them into lib/ (wgpu-cr's postinstall
+# downloads the wgpu-native binary).
 
 targets:
   space_invaders:
