@@ -124,9 +124,9 @@ module Flock
     # Notifies (once per char) that `c` has no atlas entry — the char will be silently
     # skipped at render time. Loud feedback instead of invisible text truncation.
     private def warn_missing(c : Char) : Nil
-      @warned ||= Set(Char).new
-      return if @warned.includes?(c)
-      @warned << c
+      warned = (@warned ||= Set(Char).new)
+      return if warned.includes?(c)
+      warned << c
       STDERR.puts "[flock] GlyphAtlas: no glyph for #{c.inspect} (0x#{c.ord.to_s(16)}) — char skipped in measure/render"
     end
 

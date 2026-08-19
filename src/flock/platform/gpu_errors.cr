@@ -10,13 +10,13 @@ module Flock
 
   # Uncaptured error callback.
   UNCAPTURED_ERROR_CALLBACK = ->(_device : Pointer(LibWGPU::Device), type : LibWGPU::ErrorType, message : LibWGPU::StringView, _u1 : Void*, _u2 : Void*) do
-    STDERR.puts "[wgpu][#{type}] #{WGPU.to_s(message)}"
+    STDERR.puts "[wgpu][#{type}] #{WGPU.view_to_s(message)}"
     nil
   end
 
   # Device lost callback.
   DEVICE_LOST_CALLBACK = ->(_device : Pointer(LibWGPU::Device), reason : LibWGPU::DeviceLostReason, message : LibWGPU::StringView, _u1 : Void*, _u2 : Void*) do
-    STDERR.puts "[wgpu][device lost: #{reason}] #{WGPU.to_s(message)}"
+    STDERR.puts "[wgpu][device lost: #{reason}] #{WGPU.view_to_s(message)}"
     nil
   end
 
