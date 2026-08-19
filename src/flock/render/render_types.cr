@@ -25,10 +25,10 @@ module Flock
     property kind : LightKind
     property color : Color
     property intensity : Float32
-    property direction : Vec3    # directional/spot aim (world space)
-    property range : Float32     # point/spot falloff radius
-    property inner : Float32     # spot inner cone half-angle (radians)
-    property outer : Float32     # spot outer cone half-angle (radians)
+    property direction : Vec3     # directional/spot aim (world space)
+    property range : Float32      # point/spot falloff radius
+    property inner : Float32      # spot inner cone half-angle (radians)
+    property outer : Float32      # spot outer cone half-angle (radians)
     property casts_shadows : Bool # only the first directional shadow-caster is honored
 
     def initialize(@kind : LightKind = LightKind::Directional, @color : Color = Color::WHITE,
@@ -38,7 +38,7 @@ module Flock
     end
 
     def self.directional(direction : Vec3, color : Color = Color::WHITE, intensity : Number = 1.0,
-                          casts_shadows : Bool = false) : Light
+                         casts_shadows : Bool = false) : Light
       new(LightKind::Directional, color, intensity.to_f32, direction, casts_shadows: casts_shadows)
     end
 
@@ -89,7 +89,7 @@ module Flock
     getter joint_count : Int32
     getter joint_nodes : Array(Int32)
     getter inverse_binds : Array(Mat4)
-    getter mesh_node : Int32 # the skinned mesh node (its world transform is removed per spec)
+    getter mesh_node : Int32                          # the skinned mesh node (its world transform is removed per spec)
     getter bounds : SkinnedBounds = SkinnedBounds.new # shared, updated by GpuSkinnedModel
 
     def initialize(@mesh, @skin_buf, @skin_bytes, @joint_buf, @joint_group, @joint_count, @joint_nodes, @inverse_binds, @mesh_node = 0)

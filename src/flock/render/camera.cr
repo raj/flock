@@ -8,6 +8,18 @@ module Flock
 
     def initialize(@x : Float32, @y : Float32, @width : Float32, @height : Float32)
     end
+
+    # Intersection with a framebuffer of `fw`×`fh` pixels. wgpu rejects viewport/scissor
+    # rects that extend past the target (validation error → dropped frame), so renderers
+    # clamp before setting them. Returns nil when nothing remains (fully off-screen).
+    def clamp(fw : UInt32, fh : UInt32) : Viewport?
+      x0 = Math.max(@x, 0.0f32)
+      y0 = Math.max(@y, 0.0f32)
+      x1 = Math.min(@x + @width, fw.to_f32)
+      y1 = Math.min(@y + @height, fh.to_f32)
+      return nil if x1 <= x0 || y1 <= y0
+      Viewport.new(x0, y0, x1 - x0, y1 - y0)
+    end
   end
 
   # Orthographic 2D camera. `position` is the world point at the center of the view,

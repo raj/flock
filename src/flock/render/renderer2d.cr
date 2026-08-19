@@ -24,8 +24,8 @@ module Flock
   # instance storage buffer + the view-projection uniform. One draw calls
   # `draw(6, count, 0, first_instance)` per texture batch.
   class Renderer2D < Resource
-    FLOATS_PER_INSTANCE =  24 # mat4(16) + color(4) + uv(4)
-    BYTES_PER_INSTANCE  =  96
+    FLOATS_PER_INSTANCE = 24 # mat4(16) + color(4) + uv(4)
+    BYTES_PER_INSTANCE  = 96
 
     WGSL = <<-SHADER
     struct Instance {
@@ -586,7 +586,7 @@ module Flock
       world.query(Transform2D, Sprite) do |_e, tf, sp|
         texture = sp.value.texture || @white
         mat = sp.value.material
-        mat_id = mat ? mat.id : 0                 # 0 = default material
+        mat_id = mat ? mat.id : 0 # 0 = default material
         pipeline = mat ? mat.pipeline : @pipeline
         # The shader quad is unit [-0.5, 0.5]: apply the sprite's size.
         model = tf.value.matrix * Mat4.scale(Vec3.new(sp.value.size.x, sp.value.size.y, 1.0f32))
@@ -684,7 +684,7 @@ module Flock
         encoder = LibWGPU.device_create_command_encoder(@gpu.device, pointerof(enc_desc))
         pass = LibWGPU.command_encoder_begin_render_pass(encoder, pointerof(pass_desc))
 
-        if vp_rect = cam.viewport
+        if vp_rect = cam.viewport.try &.clamp(width, height)
           LibWGPU.render_pass_encoder_set_viewport(pass, vp_rect.x, vp_rect.y, vp_rect.width, vp_rect.height, 0.0f32, 1.0f32)
           LibWGPU.render_pass_encoder_set_scissor_rect(pass, vp_rect.x.to_u32, vp_rect.y.to_u32, vp_rect.width.to_u32, vp_rect.height.to_u32)
         end
@@ -720,7 +720,7 @@ module Flock
                 next
               end
               LibWGPU.render_pass_encoder_set_scissor_rect(pass, sc[0], sc[1], sc[2], sc[3])
-            elsif fr = full
+            elsif fr = full.try &.clamp(width, height)
               LibWGPU.render_pass_encoder_set_scissor_rect(pass, fr.x.to_u32, fr.y.to_u32, fr.width.to_u32, fr.height.to_u32)
             else
               LibWGPU.render_pass_encoder_set_scissor_rect(pass, 0_u32, 0_u32, width, height)

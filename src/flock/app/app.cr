@@ -77,8 +77,10 @@ module Flock
       @wave_cache.delete(schedule)
     end
 
-    # Fixed timestep (seconds) of the FixedUpdate systems.
+    # Fixed timestep (seconds) of the FixedUpdate systems. Non-positive values are
+    # rejected (a zero step would silently disable FixedUpdate and NaN the accumulator).
     def fixed_dt=(seconds : Float64) : Nil
+      raise "fixed_dt must be > 0 (got #{seconds}); use fixed_hz(hz) to set it by frequency" if seconds <= 0 || seconds.nan?
       @fixed_dt = seconds
       time.fixed_delta = seconds
     end
@@ -327,6 +329,7 @@ module Flock
     # (bounded by MAX_FIXED_STEPS). Returns the number of steps run. Testable in
     # isolation with a deterministic `dt`.
     def advance_fixed(dt : Float64) : Int32
+      return 0 if @fixed_dt <= 0 # defensive: fixed_dt= raises, but never NaN the accumulator
       @accumulator += dt
       steps = 0
       while @accumulator >= @fixed_dt

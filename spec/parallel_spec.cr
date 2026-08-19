@@ -13,10 +13,10 @@ describe "Parallel scheduler" do
       writer = Flock::Access.new(Set(String).new, Set{"C:Position"}, false)
       other = Flock::Access.new(Set(String).new, Set{"C:Velocity"}, false)
 
-      reader.conflicts?(reader2).should be_false     # two readers of the same type
-      reader.conflicts?(writer).should be_true       # reader vs writer
-      writer.conflicts?(writer).should be_true       # two writers
-      writer.conflicts?(other).should be_false       # disjoint writes
+      reader.conflicts?(reader2).should be_false # two readers of the same type
+      reader.conflicts?(writer).should be_true   # reader vs writer
+      writer.conflicts?(writer).should be_true   # two writers
+      writer.conflicts?(other).should be_false   # disjoint writes
       Flock::Access.barrier.conflicts?(other).should be_true
       other.conflicts?(Flock::Access.barrier).should be_true
     end

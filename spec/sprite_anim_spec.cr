@@ -22,7 +22,7 @@ describe Flock::SpriteAnimation do
     a.current.should eq(0) # not enough time yet
     a.step(0.06f32)        # total 0.11 → one step
     a.current.should eq(1)
-    a.step(0.30f32)        # +3 frames → wraps (loop) 1→2→3→0
+    a.step(0.30f32) # +3 frames → wraps (loop) 1→2→3→0
     a.current.should eq(0)
   end
 

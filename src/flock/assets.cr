@@ -52,6 +52,9 @@ module Flock
     @decoded = [] of Tuple(UInt32, Bytes)
     @async_lock = Mutex.new
     @pack : Pack?
+    # Serializes Pack#read across fibers/threads (the pack's File is a shared seekable
+    # handle; async worker reads must not interleave with main-thread reads).
+    @pack_lock = Mutex.new
 
     def initialize(@gpu : GpuContext)
     end
@@ -66,7 +69,7 @@ module Flock
     # Raw bytes for a key: from the mounted pack if present, else the loose file.
     def bytes(key : String) : Bytes
       if (pk = @pack) && pk.has?(key)
-        pk.read(key)
+        @pack_lock.synchronize { pk.read(key) }
       else
         File.open(key, "rb", &.getb_to_end)
       end
@@ -75,7 +78,7 @@ module Flock
     # Builds a Texture for `path`, decoding packed bytes when mounted, else loading the file.
     private def build_texture(path : String) : Texture
       if (pk = @pack) && pk.has?(path)
-        Texture.from_encoded(@gpu, pk.read(path))
+        Texture.from_encoded(@gpu, @pack_lock.synchronize { pk.read(path) })
       else
         Texture.load(@gpu, path)
       end
@@ -139,14 +142,20 @@ module Flock
         e.texture = Texture.from_encoded(@gpu, bytes)
         old.try &.release
         e.version += 1
-      rescue
-        # decode failed → leave the placeholder in place
+      rescue ex
+        # Decode failed → keep the placeholder, but say so (a silent white texture is
+        # much harder to debug than a one-line error).
+        STDERR.puts "[flock] Assets: failed to decode '#{e.path}' (#{ex.class}: #{ex.message})"
       end
     end
 
     private def read_bytes(path : String) : Bytes?
       return nil if path.empty?
-      File.open(path, "rb", &.getb_to_end)
+      if (pk = @pack) && pk.has?(path)
+        @pack_lock.synchronize { pk.read(path) }
+      else
+        File.open(path, "rb", &.getb_to_end)
+      end
     rescue
       nil
     end
@@ -217,7 +226,9 @@ module Flock
     end
 
     # Reloads any tracked asset whose file changed on disk (in place: the handle stays valid,
-    # its version bumps). Call from a system (see AssetHotReloadPlugin). Returns the count.
+    # its version bumps). Packed assets have no loose file (mtime 0) and never reload; loose
+    # assets reload through the same pack-aware path as the initial load. Call from a system
+    # (see AssetHotReloadPlugin). Returns the count.
     def poll_hot_reload : Int32
       n = 0
       @entries.each_value do |e|
@@ -226,7 +237,7 @@ module Flock
         e.mtime = m
         if e.texture
           old = e.texture
-          e.texture = Texture.load(@gpu, e.path)
+          e.texture = build_texture(e.path)
           old.try &.release
           e.version += 1; n += 1
         elsif e.sound
@@ -285,6 +296,7 @@ module Flock
         e.texture.try &.release
       end
       @placeholder.try &.release
+      @pack.try &.close
       @textures.clear
       @fonts.clear
       @sounds.clear

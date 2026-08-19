@@ -111,9 +111,9 @@ describe "Events" do
       seen << e.n
       w.send_event(PingEvent.new(2)) if e.n == 1
     end
-    seen.should eq([1])           # the re-sent event is deferred, not seen this pass
+    seen.should eq([1]) # the re-sent event is deferred, not seen this pass
     reader.read(w.events(PingEvent)) { |e| seen << e.n }
-    seen.should eq([1, 2])        # ...and delivered exactly once on the next read
+    seen.should eq([1, 2]) # ...and delivered exactly once on the next read
   end
 
   it "each() does not loop forever when a handler sends the same event type" do

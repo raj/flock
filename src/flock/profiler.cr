@@ -7,8 +7,8 @@ module Flock
     # Per-system average CPU time (ms) over the last rolled window, by system name.
     getter avg_ms : Hash(String, Float64) = {} of String => Float64
 
-    @acc = {} of String => Float64  # accumulated seconds this window
-    @calls = {} of String => Int32  # invocations this window
+    @acc = {} of String => Float64 # accumulated seconds this window
+    @calls = {} of String => Int32 # invocations this window
 
     # Records one system invocation's wall time (seconds). Called by the scheduler.
     def record(name : String, seconds : Float64) : Nil

@@ -82,6 +82,10 @@ module Flock
 
   # Opens a `.flkpack` for reading; serves blobs by logical key (`read`), inflating on demand.
   class Pack
+    # Upper bound for one decompressed asset (1 GiB): packs are game assets, and this
+    # guards `read?` against a hostile header claiming a huge `raw` size.
+    MAX_ENTRY_BYTES = 1_u64 << 30
+
     record Entry, flags : UInt8, offset : UInt64, stored : UInt64, raw : UInt64
 
     @entries : Hash(String, Entry)
@@ -119,9 +123,18 @@ module Flock
     end
 
     # Returns the (decompressed) bytes stored under `key`, or nil if absent.
+    # Sizes read from the pack header are validated against the real file size so a
+    # corrupt or hostile pack cannot request an arbitrary allocation (zip-bomb guard).
     def read?(key : String) : Bytes?
       e = @entries[key]?
       return nil unless e
+      file_size = @io.size
+      if e.offset < 0 || e.stored < 0 || e.raw < 0 || e.stored > file_size || e.raw > MAX_ENTRY_BYTES
+        raise "pack entry '#{key}' has out-of-range sizes (stored=#{e.stored}, raw=#{e.raw}, file=#{file_size})"
+      end
+      if e.offset > file_size - e.stored
+        raise "pack entry '#{key}' overruns the pack file"
+      end
       @io.seek(@base + e.offset.to_i64)
       blob = Bytes.new(e.stored.to_i32)
       @io.read_fully(blob)

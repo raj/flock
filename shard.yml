@@ -12,10 +12,16 @@ crystal: ">= 1.16.0"
 
 license: MIT
 
+dependencies:
+  wgpu:
+    path: ../wgpu-cr
+  sdl3:
+    path: ../sdl3-cr
+
 # The ECS + math core depends on no native lib (`require "flock"`, headless).
-# The platform/rendering layer (`require "flock/gpu"`) uses the neighboring shards
-# via relative path: ../wgpu-cr (wgpu-native) and ../sdl3-cr (SDL3, linked via
-# pkg-config). No `shards install` needed for the examples. See README.md.
+# The platform/rendering layer (`require "flock/gpu"`) uses the sibling shards
+# wgpu-cr (wgpu-native) and sdl3-cr (SDL3, linked via pkg-config), resolved as
+# path dependencies so `shards install` works in this monorepo layout.
 
 targets:
   space_invaders:

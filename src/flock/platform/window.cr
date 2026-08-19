@@ -120,8 +120,15 @@ module Flock
       queue = LibWGPU.device_get_queue(device)
 
       caps = LibWGPU::SurfaceCapabilities.new
-      LibWGPU.surface_get_capabilities(surface, adapter, pointerof(caps))
-      format = caps.formats[0]
+      st = LibWGPU.surface_get_capabilities(surface, adapter, pointerof(caps))
+      raise "surface_get_capabilities failed (status #{st}): #{String.new(LibSDL.get_error)}" if st != LibWGPU::Status::Success || caps.format_count == 0
+      # Prefer a known sRGB-unaware format (the renderer's tonemap owns the transfer
+      # function); fall back to whatever the surface offers.
+      preferred = [
+        LibWGPU::TextureFormat::BGRA8Unorm, LibWGPU::TextureFormat::RGBA8Unorm,
+        LibWGPU::TextureFormat::BGRA8UnormSrgb, LibWGPU::TextureFormat::RGBA8UnormSrgb,
+      ]
+      format = preferred.find { |f| (0...caps.format_count).any? { |i| caps.formats[i] == f } } || caps.formats[0]
       LibWGPU.surface_capabilities_free_members(caps)
 
       LibSDL.get_window_size_in_pixels(window, out fb_w, out fb_h)

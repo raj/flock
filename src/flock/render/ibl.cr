@@ -8,11 +8,11 @@ module Flock
   # CPU precompute keeps the engine simple (no render-to-cubemap passes); the maps are
   # small (env 32², irradiance 8², prefiltered 32² with 5 mips, LUT 64²).
   class IblEnvironment < Resource
-    ENV_SIZE   =  32
-    IRR_SIZE   =   8
-    PREF_SIZE  =  32
-    PREF_MIPS  =   5
-    LUT_SIZE   =  64
+    ENV_SIZE  = 32
+    IRR_SIZE  =  8
+    PREF_SIZE = 32
+    PREF_MIPS =  5
+    LUT_SIZE  = 64
 
     getter irradiance : LibWGPU::Texture
     getter irradiance_view : LibWGPU::TextureView
@@ -43,12 +43,12 @@ module Flock
       tc = 2.0 * (py + 0.5) / size - 1.0
       x, y, z =
         case f
-        when 0 then {1.0, -tc, -sc}   # +X
-        when 1 then {-1.0, -tc, sc}   # -X
-        when 2 then {sc, 1.0, tc}     # +Y
-        when 3 then {sc, -1.0, -tc}   # -Y
-        when 4 then {sc, -tc, 1.0}    # +Z
-        else        {-sc, -tc, -1.0}  # -Z
+        when 0 then {1.0, -tc, -sc}  # +X
+        when 1 then {-1.0, -tc, sc}  # -X
+        when 2 then {sc, 1.0, tc}    # +Y
+        when 3 then {sc, -1.0, -tc}  # -Y
+        when 4 then {sc, -tc, 1.0}   # +Z
+        else        {-sc, -tc, -1.0} # -Z
         end
       l = Math.sqrt(x * x + y * y + z * z)
       {x / l, y / l, z / l}

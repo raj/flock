@@ -56,14 +56,14 @@ module Flock
     WGSL
 
     # Effect cores (embedded at compile time from render/shaders/*).
-    GLOW_WGSL     = {{ read_file("#{__DIR__}/shaders/glow.wgsl") }}
-    GLOW_GLSL     = {{ read_file("#{__DIR__}/shaders/glow.glsl") }}
-    RING_WGSL     = {{ read_file("#{__DIR__}/shaders/ring.wgsl") }}
-    RING_GLSL     = {{ read_file("#{__DIR__}/shaders/ring.glsl") }}
-    DISC_WGSL     = {{ read_file("#{__DIR__}/shaders/disc.wgsl") }}
-    DISC_GLSL     = {{ read_file("#{__DIR__}/shaders/disc.glsl") }}
-    VIGNETTE_WGSL = {{ read_file("#{__DIR__}/shaders/vignette.wgsl") }}
-    VIGNETTE_GLSL = {{ read_file("#{__DIR__}/shaders/vignette.glsl") }}
+    GLOW_WGSL      = {{ read_file("#{__DIR__}/shaders/glow.wgsl") }}
+    GLOW_GLSL      = {{ read_file("#{__DIR__}/shaders/glow.glsl") }}
+    RING_WGSL      = {{ read_file("#{__DIR__}/shaders/ring.wgsl") }}
+    RING_GLSL      = {{ read_file("#{__DIR__}/shaders/ring.glsl") }}
+    DISC_WGSL      = {{ read_file("#{__DIR__}/shaders/disc.wgsl") }}
+    DISC_GLSL      = {{ read_file("#{__DIR__}/shaders/disc.glsl") }}
+    VIGNETTE_WGSL  = {{ read_file("#{__DIR__}/shaders/vignette.wgsl") }}
+    VIGNETTE_GLSL  = {{ read_file("#{__DIR__}/shaders/vignette.glsl") }}
     INVADER_A_WGSL = {{ read_file("#{__DIR__}/shaders/invader_a.wgsl") }}
     INVADER_A_GLSL = {{ read_file("#{__DIR__}/shaders/invader_a.glsl") }}
     INVADER_B_WGSL = {{ read_file("#{__DIR__}/shaders/invader_b.wgsl") }}

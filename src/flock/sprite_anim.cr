@@ -6,6 +6,7 @@ module Flock
     property rows : Int32
 
     def initialize(@cols : Int32, @rows : Int32 = 1)
+      raise "SpriteSheet needs cols > 0 and rows > 0 (got #{@cols}x#{@rows})" if @cols <= 0 || @rows <= 0
     end
 
     def count : Int32

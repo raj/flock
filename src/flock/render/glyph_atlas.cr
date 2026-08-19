@@ -1,7 +1,9 @@
 module Flock
-  # A glyph atlas: every printable ASCII glyph is rasterized ONCE (via SDL3_ttf) into a
-  # single texture, with per-glyph UV + metrics. Text is then drawn as batched quads that
-  # sample the atlas (one texture, arbitrary/changing strings — no per-string GPU texture).
+  # A glyph atlas: printable ASCII + Latin-1 supplement glyphs are rasterized ONCE (via
+  # SDL3_ttf) into a single texture, with per-glyph UV + metrics. Text is then drawn as
+  # batched quads that sample the atlas (one texture, arbitrary/changing strings — no
+  # per-string GPU texture). Chars outside the pre-rasterized set are skipped with a
+  # one-time warning (see `warn_missing`).
   #
   #   atlas = world.resource(Assets).glyph_atlas(gpu, "/…/Arial.ttf", 32)
   #   size  = atlas.measure("Score: 42")        # {w, h} in pixels
@@ -16,7 +18,7 @@ module Flock
       property v : Float32 = 0.0f32
       property uw : Float32 = 0.0f32
       property uh : Float32 = 0.0f32
-      property w : Float32 = 0.0f32       # ink size (px)
+      property w : Float32 = 0.0f32 # ink size (px)
       property h : Float32 = 0.0f32
       property advance : Float32 = 0.0f32 # pen advance (px)
       property minx : Float32 = 0.0f32    # left bearing
@@ -42,11 +44,13 @@ module Flock
       raise "TTF_OpenFont #{path}: #{String.new(LibSDL.get_error)}" if font.null?
       white = LibSDL::Color.new(r: 255_u8, g: 255_u8, b: 255_u8, a: 255_u8)
 
-      # Pass 1: metrics + ink bitmap for each printable char.
+      # Pass 1: metrics + ink bitmap for each supported char: printable ASCII plus the
+      # Latin-1 supplement (accented Latin letters, «», °, µ, €…). C0 controls (127-159)
+      # are skipped; anything beyond renders as blank and falls to the missing-glyph path.
       records = [] of {Char, Int32, Int32, Int32, Int32, Int32, Bytes?} # c, minx, maxy, advance, w, h, pixels
       ascent = 0
       descent = 0
-      (32..126).each do |code|
+      ((32..126).each.to_a + (160..255).each.to_a).each do |code|
         c = code.chr
         LibSDL.ttf_get_glyph_metrics(font, code.to_u32, out minx, out _maxx, out miny, out maxy, out adv)
         ascent = maxy if maxy > ascent
@@ -117,6 +121,15 @@ module Flock
       @glyphs[c]?
     end
 
+    # Notifies (once per char) that `c` has no atlas entry — the char will be silently
+    # skipped at render time. Loud feedback instead of invisible text truncation.
+    private def warn_missing(c : Char) : Nil
+      @warned ||= Set(Char).new
+      return if @warned.includes?(c)
+      @warned << c
+      STDERR.puts "[flock] GlyphAtlas: no glyph for #{c.inspect} (0x#{c.ord.to_s(16)}) — char skipped in measure/render"
+    end
+
     # Pixel size of `text` (handles `\n`).
     def measure(text : String) : Tuple(Float32, Float32)
       w = 0.0f32
@@ -127,6 +140,8 @@ module Flock
           maxw = Math.max(maxw, w); w = 0.0f32; lines += 1
         elsif g = @glyphs[c]?
           w += g.advance
+        else
+          warn_missing(c)
         end
       end
       {Math.max(maxw, w), @line_height * lines}
@@ -141,7 +156,10 @@ module Flock
           pen = ox; line += 1; next
         end
         g = @glyphs[c]?
-        next unless g
+        if g.nil?
+          warn_missing(c)
+          next
+        end
         if g.w > 0
           yield pen + g.minx, oy + line * @line_height + g.top, g.w, g.h, g.u, g.v, g.uw, g.uh
         end

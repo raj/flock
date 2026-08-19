@@ -18,7 +18,7 @@ describe Flock::SystemProfiler do
     prof.avg_ms.has_key?("heavy").should be_true
     prof.avg_ms.has_key?("light").should be_true
     prof.avg_ms.keys.any?(&.starts_with?("Update#")).should be_true # unlabeled fallback name
-    prof.avg_ms["heavy"].should be >= prof.avg_ms["light"]           # heavier system costs more
+    prof.avg_ms["heavy"].should be >= prof.avg_ms["light"]          # heavier system costs more
     prof.total_ms.should be > 0.0
     prof.report.should contain("heavy")
   end

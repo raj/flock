@@ -36,7 +36,7 @@ module Flock
         case st.status
         when .success_optimal?, .success_suboptimal?
           view = LibWGPU.texture_create_view(st.texture, Pointer(LibWGPU::TextureViewDescriptor).null)
-          r3.render_into(world, view)                                            # 3D scene (clears)
+          r3.render_into(world, view)                                             # 3D scene (clears)
           r2.render_into(view, gpu.width, gpu.height, world, load_previous: true) # 2D overlay on top
           LibWGPU.surface_present(gpu.surface)
           WGPU.release_surface(view, st.texture)

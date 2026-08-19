@@ -1,14 +1,14 @@
 # "Full" entry point of Flock: ECS core + platform layer (SDL3) + rendering (wgpu).
 # Pulls in the native dependencies (SDL3 + wgpu-native). Headless tests require
 # `flock` (core) and not this file.
-require "../flock"                    # core (math, ecs, app, time)
-require "../../../wgpu-cr/src/wgpu"   # wgpu binding (neighboring shard, relative path)
-require "../../../sdl3-cr/src/sdl3"   # SDL3 binding (neighboring shard, relative path)
+require "../flock"                  # core (math, ecs, app, time)
+require "../../../wgpu-cr/src/wgpu" # wgpu binding (neighboring shard, relative path)
+require "../../../sdl3-cr/src/sdl3" # SDL3 binding (neighboring shard, relative path)
 
 require "./platform/gpu_errors"
 require "./platform/gpu_context"
 require "./platform/window"
-require "./platform/windows"    # Flock::Window / Windows / MultiWindowPlugin (multi-window)
+require "./platform/windows" # Flock::Window / Windows / MultiWindowPlugin (multi-window)
 require "./platform/input"
 require "./platform/audio"
 require "./platform/music"
@@ -34,7 +34,7 @@ require "./render/renderer3d_shadow_post_ibl"
 require "./render/renderer3d_skin_morph"
 require "./render/render_plugin"
 
-require "./pack"                 # Flock::Pack / PackWriter — .flkpack asset archives (native)
+require "./pack" # Flock::Pack / PackWriter — .flkpack asset archives (native)
 require "./assets"
 require "./render/text_provider" # Flock::Text facade (needs GpuContext/Renderer2D/Assets)
 require "./render/materials"     # Flock::Materials registry (needs Renderer2D)

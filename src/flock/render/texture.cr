@@ -8,7 +8,7 @@ module Flock
   end
 
   enum SamplerWrap
-    Clamp  # ClampToEdge
+    Clamp # ClampToEdge
     Repeat
   end
 

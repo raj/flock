@@ -18,8 +18,8 @@ require "./flock/render/sprite_shaders" # built-in Sprite2D material shaders (pu
 require "./flock/ecs/bundle"
 require "./flock/ecs/sparse_set"
 require "./flock/ecs/world"
-require "./flock/input_map"             # Flock::InputMap(A): logical actions ← keys (portable)
-require "./flock/profiler"              # Flock::SystemProfiler: opt-in per-system CPU timing
+require "./flock/input_map" # Flock::InputMap(A): logical actions ← keys (portable)
+require "./flock/profiler"  # Flock::SystemProfiler: opt-in per-system CPU timing
 require "./flock/ecs/commands"
 require "./flock/ecs/events"
 require "./flock/ecs/state"
@@ -31,10 +31,10 @@ require "./flock/app/schedule"
 require "./flock/app/plugin"
 require "./flock/time"
 require "./flock/app/app"
-require "./flock/app/parallel"    # opt-in parallel scheduler (Access + wave batching + executor)
-require "./flock/sprite_anim"     # Flock::SpriteSheet + SpriteAnimation (needs Sprite2D/Plugin/Time)
-require "./flock/gizmos"          # Flock::Gizmos: immediate-mode debug lines/shapes
-require "./flock/hierarchy"        # Parent component + HierarchyPlugin (needs Component, Plugin, Schedule)
+require "./flock/app/parallel"      # opt-in parallel scheduler (Access + wave batching + executor)
+require "./flock/sprite_anim"       # Flock::SpriteSheet + SpriteAnimation (needs Sprite2D/Plugin/Time)
+require "./flock/gizmos"            # Flock::Gizmos: immediate-mode debug lines/shapes
+require "./flock/hierarchy"         # Parent component + HierarchyPlugin (needs Component, Plugin, Schedule)
 require "./flock/scene/save_plugin" # periodic autosave (needs Scene, Plugin, Time)
 
 module Flock

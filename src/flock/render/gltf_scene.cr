@@ -68,8 +68,8 @@ module Flock
     # Cubic Hermite spline between keyframes i and i+1 (glTF CUBICSPLINE).
     private def cubic(i : Int32, ft : Float32, td : Float32, s : Int32) : Array(Float32)
       v0 = @values[i * 3 * s + s, s]
-      b0 = @values[i * 3 * s + 2 * s, s]      # out-tangent of keyframe i
-      a1 = @values[(i + 1) * 3 * s, s]        # in-tangent of keyframe i+1
+      b0 = @values[i * 3 * s + 2 * s, s] # out-tangent of keyframe i
+      a1 = @values[(i + 1) * 3 * s, s]   # in-tangent of keyframe i+1
       v1 = @values[(i + 1) * 3 * s + s, s]
       t2 = ft * ft; t3 = t2 * ft
       h00 = 2*t3 - 3*t2 + 1; h10 = t3 - 2*t2 + ft
@@ -119,7 +119,7 @@ module Flock
   class SkinnedPart
     getter mesh : Mesh
     getter bind_verts : Array(Float32)
-    getter joints : Array(Int32)   # 4 per vertex
+    getter joints : Array(Int32)    # 4 per vertex
     getter weights : Array(Float32) # 4 per vertex
     getter joint_nodes : Array(Int32)
     getter inverse_binds : Array(Mat4)
@@ -135,8 +135,8 @@ module Flock
   # `base + Σ weight[i] * target[i]` and rewrites the target Mesh's vertex buffer.
   class MorphPart
     getter mesh : Mesh
-    getter base_verts : Array(Float32)      # Mesh::FLOATS per vertex
-    getter targets : Array(Array(Float32))  # 6 floats (dpos3 + dnrm3) per vertex
+    getter base_verts : Array(Float32)     # Mesh::FLOATS per vertex
+    getter targets : Array(Array(Float32)) # 6 floats (dpos3 + dnrm3) per vertex
     getter node : Int32
     getter default_weights : Array(Float32)
 
@@ -374,7 +374,7 @@ module Flock
           next if wt == 0.0f32
           vcount.times do |v|
             vo = v * f; to = v * 6
-            verts[vo]     += wt * tgt[to]
+            verts[vo] += wt * tgt[to]
             verts[vo + 1] += wt * tgt[to + 1]
             verts[vo + 2] += wt * tgt[to + 2]
             verts[vo + 3] += wt * tgt[to + 3]

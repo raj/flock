@@ -30,8 +30,10 @@ module Flock
       raise "SDL_CreateWindow (secondary): #{String.new(LibSDL.get_error)}" if sdl.null?
       surface, view = Flock.make_window_surface(gpu.instance, sdl)
       caps = LibWGPU::SurfaceCapabilities.new
-      LibWGPU.surface_get_capabilities(surface, gpu.adapter, pointerof(caps))
-      format = caps.formats[0]
+      st = LibWGPU.surface_get_capabilities(surface, gpu.adapter, pointerof(caps))
+      raise "surface_get_capabilities failed (status #{st})" if st != LibWGPU::Status::Success || caps.format_count == 0
+      # Match the primary window's format when offered (shared pipelines), else take the first.
+      format = (0...caps.format_count).any? { |i| caps.formats[i] == gpu.format } ? gpu.format : caps.formats[0]
       LibWGPU.surface_capabilities_free_members(caps)
       LibSDL.get_window_size_in_pixels(sdl, out fw, out fh)
       win = new(gpu, sdl, LibSDL.get_window_id(sdl), surface, view, format, fw.to_u32, fh.to_u32, slot)

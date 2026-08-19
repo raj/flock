@@ -9,15 +9,13 @@ module Flock
   # only use their arguments + module methods/constants.
 
   # Uncaptured error callback.
-  UNCAPTURED_ERROR_CALLBACK = ->(_device : Pointer(LibWGPU::Device), type : LibWGPU::ErrorType,
-                                 message : LibWGPU::StringView, _u1 : Void*, _u2 : Void*) do
+  UNCAPTURED_ERROR_CALLBACK = ->(_device : Pointer(LibWGPU::Device), type : LibWGPU::ErrorType, message : LibWGPU::StringView, _u1 : Void*, _u2 : Void*) do
     STDERR.puts "[wgpu][#{type}] #{WGPU.to_s(message)}"
     nil
   end
 
   # Device lost callback.
-  DEVICE_LOST_CALLBACK = ->(_device : Pointer(LibWGPU::Device), reason : LibWGPU::DeviceLostReason,
-                            message : LibWGPU::StringView, _u1 : Void*, _u2 : Void*) do
+  DEVICE_LOST_CALLBACK = ->(_device : Pointer(LibWGPU::Device), reason : LibWGPU::DeviceLostReason, message : LibWGPU::StringView, _u1 : Void*, _u2 : Void*) do
     STDERR.puts "[wgpu][device lost: #{reason}] #{WGPU.to_s(message)}"
     nil
   end
@@ -74,8 +72,7 @@ module Flock
     dl.callback = DEVICE_LOST_CALLBACK
     desc.device_lost_callback_info = dl
 
-    cb = ->(status : LibWGPU::RequestDeviceStatus, device : LibWGPU::Device,
-            _message : LibWGPU::StringView, u1 : Void*, _u2 : Void*) do
+    cb = ->(status : LibWGPU::RequestDeviceStatus, device : LibWGPU::Device, _message : LibWGPU::StringView, u1 : Void*, _u2 : Void*) do
       r = u1.as(Pointer(DeviceRequestResult))
       r.value.handle = device
       r.value.status = status

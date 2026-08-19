@@ -7,8 +7,8 @@ module Flock
   # / 52 bytes per vertex) + a UInt32 index buffer. Consumed by Renderer3D through a
   # `MeshRenderer` component.
   class Mesh
-    STRIDE  = 52_u64 # 13 f32 (pos3 + normal3 + color3 + uv2 + uv1_2)
-    FLOATS  =    13  # floats per vertex (two UV sets; uv1 defaults to uv0)
+    STRIDE = 52_u64 # 13 f32 (pos3 + normal3 + color3 + uv2 + uv1_2)
+    FLOATS =     13 # floats per vertex (two UV sets; uv1 defaults to uv0)
 
     getter vertex_buf : LibWGPU::Buffer
     getter index_buf : LibWGPU::Buffer
@@ -421,7 +421,7 @@ module Flock
         base_verts, indices, targets = md
         defaults =
           (n["weights"]?.try(&.as_a) ||
-           gltf_meshes[mi]["weights"]?.try(&.as_a) || [] of JSON::Any).map(&.as_f.to_f32)
+            gltf_meshes[mi]["weights"]?.try(&.as_a) || [] of JSON::Any).map(&.as_f.to_f32)
         defaults = Array(Float32).new(targets.size, 0.0f32) if defaults.size < targets.size
         morphs << MorphPart.new(build(gpu, base_verts, indices), base_verts, targets, ni, defaults)
       end
@@ -615,7 +615,7 @@ module Flock
           Texture.from_encoded(gpu, Base64.decode(uri.split(",", 2)[1]), srgb: srgb)
         else
           # Non-data URIs are percent-encoded per the glTF spec (e.g. "my%20model.png").
-          Texture.load(gpu, File.join(dir, URI.decode(uri)), SamplerFilter::Linear, SamplerWrap::Repeat, srgb: srgb)
+          Texture.load(gpu, gltf_resolve_uri(dir, uri), SamplerFilter::Linear, SamplerWrap::Repeat, srgb: srgb)
         end
       else
         bv = doc["bufferViews"].as_a[img["bufferView"].as_i]
@@ -820,6 +820,18 @@ module Flock
       read_texture_transform(tt)
     end
 
+    # Resolves a glTF external URI to a local path, confining it to the model's directory:
+    # absolute paths and any `..` segment are rejected (a hostile .gltf/.glb must not be
+    # able to read files outside the folder it lives in).
+    private def self.gltf_resolve_uri(dir : String, uri : String) : String
+      decoded = URI.decode(uri)
+      raise "glTF URI is absolute: #{uri.inspect}" if decoded.starts_with?('/')
+      if decoded.split('/').includes?("..")
+        raise "glTF URI escapes the model directory: #{uri.inspect}"
+      end
+      File.join(dir, decoded)
+    end
+
     # Returns {json, glb_binary_chunk?}. For .glb, splits the container; for .gltf,
     # reads the text and there is no embedded binary chunk (nil).
     private def self.read_gltf_container(path : String) : {String, Bytes?}
@@ -833,6 +845,8 @@ module Flock
           len = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
           kind = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
           start = io.pos
+          # Chunk length must fit in the file (a corrupt/hostile GLB must not slice past it).
+          raise "GLB chunk (#{kind}) overruns file: len=#{len}, available=#{data.size - start}" if start + len > data.size
           chunk = data[start, len.to_i]
           io.pos = start + len
           if kind == 0x4E4F534A # "JSON"
@@ -855,7 +869,7 @@ module Flock
           if uri.starts_with?("data:")
             Base64.decode(uri.split(",", 2)[1])
           else
-            File.read(File.join(dir, URI.decode(uri))).to_slice
+            File.read(gltf_resolve_uri(dir, uri)).to_slice
           end
         else
           glb_bin || raise("glTF buffer has no uri and no GLB binary chunk")
@@ -912,7 +926,13 @@ module Flock
       csize = gltf_component_size(ct)
       base = (bv["byteOffset"]?.try(&.as_i) || 0) + (acc["byteOffset"]?.try(&.as_i) || 0)
       stride = bv["byteStride"]?.try(&.as_i) || (ncomp * csize)
-      io = IO::Memory.new(buffers[bv["buffer"].as_i])
+      buf = buffers[bv["buffer"].as_i]
+      io = IO::Memory.new(buf)
+      # The accessor must fit inside its buffer: a hostile file declaring a huge `count`
+      # would otherwise allocate an arbitrary amount before failing on the first read.
+      if count < 0 || base < 0 || base + (count - 1) * stride + ncomp * csize > buf.size
+        raise "glTF accessor #{ai} overruns its buffer (count=#{count}, stride=#{stride}, base=#{base}, buffer=#{buf.size}B)"
+      end
       out = Array(Float32).new(count * ncomp)
       count.times do |e|
         ncomp.times do |c|

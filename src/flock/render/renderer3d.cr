@@ -979,7 +979,7 @@ module Flock
         enc_desc.label = WGPU.empty_string_view
         encoder = LibWGPU.device_create_command_encoder(@gpu.device, pointerof(enc_desc))
         pass = LibWGPU.command_encoder_begin_render_pass(encoder, pointerof(pass_desc))
-        if r = acam.viewport
+        if r = acam.viewport.try &.clamp(width, height)
           LibWGPU.render_pass_encoder_set_viewport(pass, r.x, r.y, r.width, r.height, 0.0f32, 1.0f32)
           LibWGPU.render_pass_encoder_set_scissor_rect(pass, r.x.to_u32, r.y.to_u32, r.width.to_u32, r.height.to_u32)
         end
