@@ -32,7 +32,7 @@ per platform (Metal on macOS, X11/Wayland on Linux, HWND on Windows). **macOS** 
 ## Testing (ECS core + math, headless)
 
 ```sh
-crystal spec        # 34 examples, no SDL or GPU
+crystal spec        # 125 examples, no SDL or GPU
 ```
 
 ## Running the examples
@@ -188,4 +188,4 @@ spec/                     # headless core tests
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
