@@ -11,6 +11,9 @@ module Flock
     abstract class ComponentSerializer
       # Yields (entity, component-as-JSON) for every instance in the world.
       abstract def each(world : World, &block : Entity, JSON::Any ->) : Nil
+      # Yields just the entities that own this component — no JSON serialization (cheap;
+      # for callers that only need the ids, e.g. Scene.restore's despawn pass).
+      abstract def each_entity(world : World, &block : Entity ->) : Nil
       # Deserializes `json` and adds it to `entity`, remapping any entity-reference fields
       # through `map` (old entity id -> freshly spawned Entity).
       abstract def spawn(world : World, entity : Entity, json : JSON::Any, map : Hash(UInt32, Entity)) : Nil
@@ -27,6 +30,10 @@ module Flock
     class ComponentSerializerFor(T) < ComponentSerializer
       def each(world : World, &block : Entity, JSON::Any ->) : Nil
         world.storage(T).each_pair { |e, c| block.call(e, JSON.parse(c.to_json)) }
+      end
+
+      def each_entity(world : World, &block : Entity ->) : Nil
+        world.storage(T).each_pair { |e, _c| block.call(e) }
       end
 
       def spawn(world : World, entity : Entity, json : JSON::Any, map : Hash(UInt32, Entity)) : Nil

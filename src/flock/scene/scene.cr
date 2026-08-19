@@ -141,7 +141,7 @@ module Flock
       seen = Set(UInt32).new
       to_despawn = [] of Flock::Entity
       COMPONENTS.each_value do |ser|
-        ser.each(world) { |entity, _json| to_despawn << entity if seen.add?(entity.id) }
+        ser.each_entity(world) { |entity| to_despawn << entity if seen.add?(entity.id) }
       end
       to_despawn.each { |e| world.despawn(e) }
       spawn(world, doc)
