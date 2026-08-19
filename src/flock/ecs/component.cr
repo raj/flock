@@ -4,11 +4,17 @@ module Flock
   # rather than in a Hash keyed by class name.
   module ComponentRegistry
     @@count = 0
+    # `next_id` may be reached concurrently the first time a component type is used
+    # inside a parallel wave; the increment must be atomic or two types could share
+    # an id (aliasing their storages). Serialize it.
+    @@lock = Mutex.new
 
     def self.next_id : Int32
-      id = @@count
-      @@count += 1
-      id
+      @@lock.synchronize do
+        id = @@count
+        @@count += 1
+        id
+      end
     end
 
     def self.count : Int32

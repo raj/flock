@@ -116,7 +116,16 @@ module Flock
 
   class World
     # Returns the Events(T) resource, creating it lazily on first use.
+    #
+    # First-use creation mutates the shared `@resources` Hash (a rehash can corrupt it),
+    # so while a parallel wave is active the lookup/insert is serialized under the same
+    # lock as entity allocation. The sequential path takes no lock (see `@parallel_scope`).
     def events(type : T.class) : Events(T) forall T
+      return @entity_lock.synchronize { get_or_create_events(T) } if @parallel_scope
+      get_or_create_events(T)
+    end
+
+    private def get_or_create_events(type : T.class) : Events(T) forall T
       key = Events(T).name
       if existing = @resources[key]?
         existing.as(Events(T))
@@ -127,8 +136,13 @@ module Flock
       end
     end
 
+    # Sends an event. Under a parallel wave, both the lazy queue creation AND the append
+    # (`@newer << event; @count += 1`, not otherwise thread-safe) happen under the lock, so
+    # two systems sending the same event type in one wave don't race. Note: not called
+    # nested with `events`, so the (non-reentrant) mutex never re-locks.
     def send_event(event : T) : Nil forall T
-      events(T).send(event)
+      return @entity_lock.synchronize { get_or_create_events(T).send(event) } if @parallel_scope
+      get_or_create_events(T).send(event)
     end
 
     def each_event(type : T.class, & : T ->) forall T

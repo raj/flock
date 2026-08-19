@@ -193,6 +193,10 @@ module Flock
       wave_tick = @world.change_tick
 
       active.each { |e| e.prewarm.try &.call(@world) } # create declared storages up front
+      # Grow @storages to cover every registered component id BEFORE the wave, so an
+      # in-wave `storage(T)` for an undeclared component (touched via a query filter or
+      # world.get/has?) never resizes the shared array concurrently.
+      @world.reserve_storages
 
       cmds = Array(Commands).new(active.size) { Commands.new(@world) }
       @world.parallel_scope = true

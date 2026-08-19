@@ -84,6 +84,17 @@ module Flock
 
     # --- Components --------------------------------------------------------
 
+    # Pre-reserves a (nil) storage slot for every registered component id, so that a
+    # concurrent `storage(T)` inside a parallel wave never has to grow/reallocate the
+    # shared `@storages` array (which would race and can corrupt/segfault). Called on the
+    # main thread before a wave runs. Existing slots are left untouched.
+    def reserve_storages : Nil
+      target = ComponentRegistry.count
+      while @storages.size < target
+        @storages << nil
+      end
+    end
+
     def storage(type : T.class) : SparseSet(T) forall T
       # Compile-time validation: a component must `include Flock::Component`
       # (provides `component_id`). Clear message rather than an obscure "undefined method".
