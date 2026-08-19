@@ -8,8 +8,9 @@ module Flock
     // a.x=time, a.y=ibl flag, a.z=light count. b.xyz=camera pos. c/d=ambient sky/ground.
     // mr.x=metallic, mr.y=roughness, mr.z=alpha cutoff (>0 = MASK), mr.w=UV-set bitmask
     // (bit i set -> texture i samples TEXCOORD_1; 0=base,1=mr,2=normal,3=emissive,4=occlusion).
-    // emissive.rgb=emissive factor.
-    struct Inst { tint : vec4<f32>, mr : vec4<f32>, emissive : vec4<f32> };
+    // emissive.rgb=emissive factor, emissive.w=ior (KHR_materials_ior). ext.x=specular factor
+    // (KHR_materials_specular).
+    struct Inst { tint : vec4<f32>, mr : vec4<f32>, emissive : vec4<f32>, ext : vec4<f32> };
     // GPU light: v0=(pos.xyz, kind), v1=(dir.xyz, range), v2=(color.rgb, intensity),
     // v3=(cos(inner), cos(outer), _, _). kind: 0=directional, 1=point, 2=spot.
     struct Light { v0 : vec4<f32>, v1 : vec4<f32>, v2 : vec4<f32>, v3 : vec4<f32> };
@@ -47,6 +48,8 @@ module Flock
       @location(7) cutoff : f32,
       @location(8) uv1 : vec2<f32>,
       @location(9) uvbits : f32,
+      @location(10) ior : f32,
+      @location(11) spec : f32,
     };
 
     @vertex
@@ -68,6 +71,8 @@ module Flock
       out.emissive = params[ii].emissive.rgb;
       out.cutoff = params[ii].mr.z;
       out.uvbits = params[ii].mr.w;
+      out.ior = params[ii].emissive.w;
+      out.spec = params[ii].ext.x;
       return out;
     }
 
@@ -111,7 +116,7 @@ module Flock
 
     // GGX / Cook-Torrance BRDF for one light direction L, returns (diffuse + spec) * NdotL.
     fn shade(N : vec3<f32>, V : vec3<f32>, L : vec3<f32>, base : vec3<f32>,
-             metal : f32, rough : f32) -> vec3<f32> {
+             metal : f32, rough : f32, f0d : vec3<f32>) -> vec3<f32> {
       let H = normalize(L + V);
       let NdotL = max(dot(N, L), 0.0);
       let NdotV = max(dot(N, V), 1e-3);
@@ -123,7 +128,7 @@ module Flock
       let D = a2 / (3.14159265 * dn * dn + 1e-5);
       let k = (rough + 1.0) * (rough + 1.0) / 8.0;
       let G = (NdotV / (NdotV * (1.0 - k) + k)) * (NdotL / (NdotL * (1.0 - k) + k));
-      let F0 = mix(vec3<f32>(0.04, 0.04, 0.04), base, metal);
+      let F0 = mix(f0d, base, metal);
       let F = F0 + (vec3<f32>(1.0, 1.0, 1.0) - F0) * pow(1.0 - VdotH, 5.0);
       let spec = (D * G) * F / (4.0 * NdotV * NdotL + 1e-4);
       let diffuse = base * (1.0 - metal);
@@ -150,6 +155,10 @@ module Flock
       let mrs = textureSample(mr_tex, samp, uv_mr);
       let metal = clamp(mrs.b * in.mr.x, 0.0, 1.0);
       let rough = clamp(mrs.g * in.mr.y, 0.045, 1.0);
+      // Dielectric F0 from index of refraction (KHR_materials_ior) × specular factor
+      // (KHR_materials_specular). Defaults ior 1.5 / spec 1.0 → 0.04 (unchanged).
+      let f0scalar = pow((in.ior - 1.0) / (in.ior + 1.0), 2.0) * in.spec;
+      let f0d = vec3<f32>(f0scalar, f0scalar, f0scalar);
 
       let N = perturb_normal(normalize(in.normal), in.world, uv_nrm);
       let V = normalize(globals.b.xyz - in.world);
@@ -160,7 +169,7 @@ module Flock
       let count = u32(globals.a.z + 0.5);
       var lit = vec3<f32>(0.0);
       if (count == 0u) {
-        lit = shade(N, V, normalize(vec3<f32>(0.4, 0.8, 0.6)), base, metal, rough);
+        lit = shade(N, V, normalize(vec3<f32>(0.4, 0.8, 0.6)), base, metal, rough, f0d);
       } else {
         for (var i = 0u; i < count; i = i + 1u) {
           let lg = lights[i];
@@ -190,14 +199,14 @@ module Flock
           if (i32(globals.a.w + 0.5) == i32(i) + 1) {
             sh = sample_shadow(in.world);
           }
-          lit = lit + shade(N, V, L, base, metal, rough) * lg.v2.rgb * lg.v2.w * atten * sh;
+          lit = lit + shade(N, V, L, base, metal, rough, f0d) * lg.v2.rgb * lg.v2.w * atten * sh;
         }
       }
 
       var ambient : vec3<f32>;
       if (globals.a.y > 0.5) {
         // Prefiltered image-based lighting (split-sum).
-        let F0 = mix(vec3<f32>(0.04, 0.04, 0.04), base, metal);
+        let F0 = mix(f0d, base, metal);
         let fr = F0 + (max(vec3<f32>(1.0 - rough), F0) - F0) * pow(1.0 - NdotV, 5.0);
         let kd = (vec3<f32>(1.0) - fr) * (1.0 - metal);
         let irr = textureSampleLevel(irr_cube, ibl_samp, N, 0.0).rgb;

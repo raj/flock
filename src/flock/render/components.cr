@@ -45,6 +45,11 @@ module Flock
     property cull : Bool
     # KHR_materials_unlit: render the base color directly (no lighting/PBR) — flat/stylized.
     property unlit : Bool
+    # Index of refraction (KHR_materials_ior; default 1.5 → dielectric F0 0.04) and the
+    # KHR_materials_specular factor (scales the dielectric specular reflection). Together they
+    # set the non-metal reflectance: F0 = ((ior-1)/(ior+1))² × specular.
+    property ior : Float32
+    property specular : Float32
 
     def initialize(@mesh : Mesh, @material : Material3D? = nil, @texture : Texture? = nil,
                    @tint : Color = Color::WHITE, @metallic_roughness : Texture? = nil,
@@ -52,7 +57,7 @@ module Flock
                    @transparent : Bool = false, @emissive : Texture? = nil,
                    @emissive_factor : Color = Color::BLACK, @occlusion : Texture? = nil,
                    @alpha_cutoff : Float32 = 0.0f32, @tex_coords : UInt32 = 0_u32, @cull : Bool = true,
-                   @unlit : Bool = false)
+                   @unlit : Bool = false, @ior : Float32 = 1.5f32, @specular : Float32 = 1.0f32)
     end
   end
 

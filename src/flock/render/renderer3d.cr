@@ -1,5 +1,4 @@
 module Flock
-
   # 3D mesh renderer consuming Camera3D. Draws entities with (Transform3D, MeshRenderer)
   # using per-mesh vertex/index buffers, a shared view-projection uniform + a storage
   # buffer of model matrices (indexed by @builtin(instance_index)), a depth buffer for
@@ -11,13 +10,12 @@ module Flock
   # Wire it with `Render3DPlugin` (inserts the renderer + a Schedule::Render system).
   # Not to be combined with the 2D RenderPlugin (each owns the whole frame).
   class Renderer3D < Resource
-    MODEL_BYTES   = 64 # mat4 (16 f32)
-    GLOBALS_BYTES = 64 # time / camera position / ambient sky / ambient ground (4 vec4)
-    PARAM_BYTES   = 48 # per-instance: tint vec4 + {metallic, roughness, cutoff, _} + emissive vec4
-    MAX_LIGHTS    = 16   # storage-buffer capacity; extra lights are dropped
-    LIGHT_BYTES   = 64   # per light: 4 vec4 (pos+kind / dir+range / color+intensity / cones)
+    MODEL_BYTES   =   64 # mat4 (16 f32)
+    GLOBALS_BYTES =   64 # time / camera position / ambient sky / ambient ground (4 vec4)
+    PARAM_BYTES   =   64 # tint vec4 + {metal,rough,cutoff,uvbits} + {emissive.rgb, ior} + {specular,_,_,_}
+    MAX_LIGHTS    =   16 # storage-buffer capacity; extra lights are dropped
+    LIGHT_BYTES   =   64 # per light: 4 vec4 (pos+kind / dir+range / color+intensity / cones)
     SHADOW_SIZE   = 2048 # shadow map resolution (Depth32Float), single directional caster
-
 
     @model_capacity : Int32 = 64
     @scratch : Array(Float32) = [] of Float32
@@ -63,19 +61,19 @@ module Flock
     @group0 : LibWGPU::BindGroup
     # Shadow mapping (single directional caster): a depth-only pass into @shadow_tex,
     # sampled by the main PBR shader (group3) with a comparison sampler.
-    @shadow_layout : LibWGPU::BindGroupLayout       # group3 for the main pass
-    @shadow_pass_layout : LibWGPU::BindGroupLayout   # group0 for the depth pass
+    @shadow_layout : LibWGPU::BindGroupLayout      # group3 for the main pass
+    @shadow_pass_layout : LibWGPU::BindGroupLayout # group0 for the depth pass
     @shadow_pipeline_layout : LibWGPU::PipelineLayout
     @shadow_shader : LibWGPU::ShaderModule
     @shadow_pipeline : LibWGPU::RenderPipeline
-    @shadow_skinned_shader : LibWGPU::ShaderModule   # skinned depth pass (GPU-skinned casters)
+    @shadow_skinned_shader : LibWGPU::ShaderModule # skinned depth pass (GPU-skinned casters)
     @shadow_skinned_pipeline : LibWGPU::RenderPipeline
-    @shadow_vp_buf : LibWGPU::Buffer                 # light view-projection (mat4)
-    @shadow_sampler : LibWGPU::Sampler               # comparison sampler
+    @shadow_vp_buf : LibWGPU::Buffer   # light view-projection (mat4)
+    @shadow_sampler : LibWGPU::Sampler # comparison sampler
     @shadow_tex : LibWGPU::Texture
     @shadow_view : LibWGPU::TextureView
-    @shadow_group3 : LibWGPU::BindGroup              # main-pass: light_vp + map + sampler
-    @shadow_pass_group : LibWGPU::BindGroup          # depth-pass: light_vp + models
+    @shadow_group3 : LibWGPU::BindGroup     # main-pass: light_vp + map + sampler
+    @shadow_pass_group : LibWGPU::BindGroup # depth-pass: light_vp + models
     @materials : Array(Material3D) = [] of Material3D
     @depth_tex : LibWGPU::Texture
     @depth_view : LibWGPU::TextureView
@@ -350,7 +348,6 @@ module Flock
       LibWGPU.device_create_pipeline_layout(@gpu.device, pointerof(d))
     end
 
-
     private def sampler_for(filter : SamplerFilter, wrap : SamplerWrap) : LibWGPU::Sampler
       @samplers[{filter, wrap}] ||= build_sampler(filter, wrap)
     end
@@ -495,7 +492,6 @@ module Flock
       desc.fragment = pointerof(fragment)
       LibWGPU.device_create_render_pipeline(@gpu.device, pointerof(desc))
     end
-
 
     private def build_group0 : LibWGPU::BindGroup
       e0 = LibWGPU::BindGroupEntry.new
@@ -769,7 +765,7 @@ module Flock
       indexed.sort_by! { |(c, idx)| {c.order, idx} }
       cameras = indexed.map { |(c, _idx)| c }
       cameras << Camera3D.new if cameras.empty?
-      cam = cameras.first          # primary: drives culling + transparent sort
+      cam = cameras.first # primary: drives culling + transparent sort
       single = cameras.size == 1
       vp = cam.view_projection(camera_aspect(cam, width, height))
 
@@ -797,12 +793,12 @@ module Flock
       # since the buffers are shared across cameras and a second view may see the culled ones.
       frustum = Frustum.from(vp)
       # inst = {model, tint, metallic, roughness, emissive factor, alpha cutoff, uv-set bits}
-      groups = [] of {Mesh, Material3D?, Texture, Texture, Texture, Texture, Texture, Array({Mat4, Color, Float32, Float32, Color, Float32, Float32})}
+      groups = [] of {Mesh, Material3D?, Texture, Texture, Texture, Texture, Texture, Array({Mat4, Color, Float32, Float32, Color, Float32, Float32, Float32, Float32})}
       slot = {} of Tuple(UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64) => Int32
       # Transparent instances are NOT batched: they draw one at a time, back to front.
       # {mesh, base, mr, nrm, emissive tex, occlusion tex, model, tint, metallic, roughness,
       #  emissive factor, alpha cutoff, uv-set bits, camera distance}.
-      transparent = [] of {Mesh, Texture, Texture, Texture, Texture, Texture, Mat4, Color, Float32, Float32, Color, Float32, Float32, Float32}
+      transparent = [] of {Mesh, Texture, Texture, Texture, Texture, Texture, Mat4, Color, Float32, Float32, Color, Float32, Float32, Float32, Float32, Float32}
       total = 0
       culled = 0
       cpos = cam.position
@@ -824,8 +820,8 @@ module Flock
         base = m.texture || @white
         mr_tex = m.metallic_roughness || @white
         nrm_tex = m.normal_map || @flat_normal
-        em_tex = m.emissive || @white     # x emissive factor (default black -> no emission)
-        occ_tex = m.occlusion || @white   # R channel (default white -> no occlusion)
+        em_tex = m.emissive || @white   # x emissive factor (default black -> no emission)
+        occ_tex = m.occlusion || @white # R channel (default white -> no occlusion)
 
         uvbits = m.tex_coords.to_f32
         uvbits += 256.0f32 if m.unlit # KHR_materials_unlit flag (bit 8), read by the PBR shader
@@ -834,12 +830,12 @@ module Flock
           c = model.transform_point(mesh.bounds_center)
           d = (c.x - cpos.x)**2 + (c.y - cpos.y)**2 + (c.z - cpos.z)**2
           transparent << {mesh, base, mr_tex, nrm_tex, em_tex, occ_tex, model, m.tint,
-                          m.metallic, m.roughness, m.emissive_factor, m.alpha_cutoff, uvbits, d}
+                          m.metallic, m.roughness, m.emissive_factor, m.alpha_cutoff, uvbits, m.ior, m.specular, d}
           next
         end
 
         material = m.material
-        inst = {model, m.tint, m.metallic, m.roughness, m.emissive_factor, m.alpha_cutoff, uvbits}
+        inst = {model, m.tint, m.metallic, m.roughness, m.emissive_factor, m.alpha_cutoff, uvbits, m.ior, m.specular}
         key = {mesh.object_id, material ? material.object_id : 0_u64,
                base.object_id, mr_tex.object_id, nrm_tex.object_id, em_tex.object_id, occ_tex.object_id}
         if gi = slot[key]?
@@ -851,7 +847,8 @@ module Flock
         total += 1
       end
       # Farthest first, so nearer translucent surfaces blend over the ones behind them.
-      transparent.sort! { |a, b| b[13] <=> a[13] }
+      # Back-to-front by camera distance (last tuple element).
+      transparent.sort! { |a, b| b[15] <=> a[15] }
       @last_drawn = total + transparent.size
       @last_culled = culled
 
@@ -870,15 +867,15 @@ module Flock
         @scratch.clear
         @scratch_n.clear
         @scratch_p.clear
-        pack = ->(model : Mat4, tint : Color, metallic : Float32, roughness : Float32, emissive : Color, cutoff : Float32, uvbits : Float32) do
+        pack = ->(model : Mat4, tint : Color, metallic : Float32, roughness : Float32, emissive : Color, cutoff : Float32, uvbits : Float32, ior : Float32, specular : Float32) do
           @scratch.concat(model.m)
           @scratch_n.concat(model.normal_matrix.m)
           @scratch_p.push(tint.r, tint.g, tint.b, tint.a, metallic, roughness, cutoff, uvbits,
-            emissive.r, emissive.g, emissive.b, 0.0f32)
+            emissive.r, emissive.g, emissive.b, ior, specular, 0.0f32, 0.0f32, 0.0f32)
         end
         groups.each do |(mesh, _mat, _b, _mrt, _nt, _et, _ot, insts)|
-          insts.each do |(model, tint, metallic, roughness, emissive, cutoff, uvbits)|
-            pack.call(model, tint, metallic, roughness, emissive, cutoff, uvbits)
+          insts.each do |(model, tint, metallic, roughness, emissive, cutoff, uvbits, ior, specular)|
+            pack.call(model, tint, metallic, roughness, emissive, cutoff, uvbits, ior, specular)
             if shadow_index >= 0
               c = model.transform_point(mesh.bounds_center)
               s = model.scale_factors
@@ -889,8 +886,8 @@ module Flock
             end
           end
         end
-        transparent.each do |(_mesh, _b, _mrt, _nt, _et, _ot, model, tint, metallic, roughness, emissive, cutoff, uvbits, _d)|
-          pack.call(model, tint, metallic, roughness, emissive, cutoff, uvbits)
+        transparent.each do |(_mesh, _b, _mrt, _nt, _et, _ot, model, tint, metallic, roughness, emissive, cutoff, uvbits, ior, specular, _d)|
+          pack.call(model, tint, metallic, roughness, emissive, cutoff, uvbits, ior, specular)
         end
         LibWGPU.queue_write_buffer(@gpu.queue, @model_buf, 0_u64,
           @scratch.to_unsafe.as(Void*), (@scratch.size * 4).to_u64)
@@ -1046,7 +1043,7 @@ module Flock
           LibWGPU.render_pass_encoder_set_bind_group(pass, 2_u32, ibl_group, 0_u64, Pointer(UInt32).null)
           LibWGPU.render_pass_encoder_set_bind_group(pass, 3_u32, @shadow_group3, 0_u64, Pointer(UInt32).null)
           tslot = total.to_u32
-          transparent.each do |(mesh, base_tex, mr_tex, nrm_tex, em_tex, occ_tex, _model, _tint, _m, _r, _ef, _c, _uv, _d)|
+          transparent.each do |(mesh, base_tex, mr_tex, nrm_tex, em_tex, occ_tex, _model, _tint, _m, _r, _ef, _c, _uv, _ior, _spec, _d)|
             LibWGPU.render_pass_encoder_set_bind_group(pass, 1_u32, tex_group(base_tex, mr_tex, nrm_tex, em_tex, occ_tex), 0_u64, Pointer(UInt32).null)
             LibWGPU.render_pass_encoder_set_vertex_buffer(pass, 0_u32, mesh.vertex_buf, 0_u64, mesh.vertex_bytes)
             LibWGPU.render_pass_encoder_set_index_buffer(pass, mesh.index_buf, LibWGPU::IndexFormat::Uint32, 0_u64, mesh.index_bytes)
