@@ -331,6 +331,8 @@ module Flock
   # Convention: the product `a * b` applies `b` first, then `a` (like matrices),
   # and `rotate` assumes a unit quaternion.
   struct Quaternion
+    include JSON::Serializable
+
     property x : Float32
     property y : Float32
     property z : Float32

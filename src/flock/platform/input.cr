@@ -248,6 +248,13 @@ module Flock
       @gamepads = @open.map { |id, handle| Gamepad.new(handle, id) }
     end
 
+    # Closes every open gamepad handle on shutdown (they leak otherwise). Called by
+    # World#shutdown via the Resource#release hook.
+    def release : Nil
+      @open.each_value { |h| LibSDL.close_gamepad(h) }
+      @open.clear
+    end
+
     # Set by InputPlugin: allows converting window points to framebuffer pixels
     # (HiDPI).
     def attach_window(window : LibSDL::Window) : Nil

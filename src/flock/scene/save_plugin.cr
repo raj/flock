@@ -16,7 +16,7 @@ module Flock
       app.add_system(Schedule::Last) do |world, _cmd|
         @elapsed += world.resource(Time).delta
         if @elapsed >= @interval
-          @elapsed = 0.0
+          @elapsed -= @interval # keep the sub-interval remainder so the cadence doesn't drift
           target = @slots > 1 ? "#{@path}.#{@slot}" : @path
           begin
             # Atomic-ish: write to a temp file first, then rename over the slot, so a

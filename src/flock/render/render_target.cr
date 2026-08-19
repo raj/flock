@@ -35,6 +35,7 @@ module Flock
     getter width : UInt32
     getter height : UInt32
     getter format : LibWGPU::TextureFormat
+    @released = false
 
     def initialize(@gpu : GpuContext, width : Int, height : Int,
                    @format : LibWGPU::TextureFormat = LibWGPU::TextureFormat::RGBA8Unorm)
@@ -115,6 +116,8 @@ module Flock
     end
 
     def release
+      return if @released # idempotent: double release would free the handles twice
+      @released = true
       LibWGPU.texture_view_release(@view)
       LibWGPU.texture_release(@texture)
     end
