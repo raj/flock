@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+      # The ECS + math core is native-free, so the spec suite runs headless — no
+      # SDL3/wgpu, no `shards install` (the specs require the core by relative path).
+      - name: Run specs
+        run: crystal spec

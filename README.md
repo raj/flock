@@ -1,5 +1,11 @@
 # Flock
 
+[![build](https://img.shields.io/github/actions/workflow/status/raj/flock/ci.yml?branch=main&label=build)](https://github.com/raj/flock/actions/workflows/ci.yml)
+[![tests](https://img.shields.io/github/actions/workflow/status/raj/flock/ci.yml?branch=main&label=tests)](https://github.com/raj/flock/actions/workflows/ci.yml)
+[![coverage](https://coveralls.io/repos/github/raj/flock/badge.svg?branch=main)](https://coveralls.io/github/raj/flock?branch=main)
+[![version](https://img.shields.io/github/v/tag/raj/flock?label=version&color=blue)](https://github.com/raj/flock/tags)
+[![license](https://img.shields.io/github/license/raj/flock?color=blue)](LICENSE)
+
 A **data-oriented (ECS)** game engine in Crystal, inspired by Bevy, built on top of
 [`wgpu-cr`](../wgpu-cr) (WebGPU rendering) and **SDL3** (window, input, gamepads, audio).
 
