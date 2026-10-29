@@ -1,3 +1,13 @@
+{% unless ::Time.has_constant?(:Instant) %}
+  struct Time
+    alias Instant = Time::Span
+
+    def self.instant : Instant
+      monotonic
+    end
+  end
+{% end %}
+
 module Flock
   # Game loop clock (resource). `delta` = duration of the previous frame,
   # `elapsed` = time since startup, in seconds. Used for framerate-independent
