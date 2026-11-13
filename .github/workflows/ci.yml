@@ -17,3 +17,18 @@ jobs:
       # SDL3/wgpu, no `shards install` (the specs require the core by relative path).
       - name: Run specs
         run: crystal spec
+
+  spec-audio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+      # Audio-only specs (vorbis decode + SDL3 streams) — gated behind
+      # FLOCK_AUDIO_IT; the dummy driver needs no real audio device.
+      - run: sudo apt-get update && sudo apt-get install -y libsdl3-dev libvorbis-dev
+      - name: Resolve sdl3-cr without full shards install
+        run: git clone https://github.com/raj/sdl3-cr lib/sdl3
+      - name: Run audio specs (dummy audio device)
+        run: SDL_AUDIO_DRIVER=dummy FLOCK_AUDIO_IT=1 crystal spec spec/platform/
